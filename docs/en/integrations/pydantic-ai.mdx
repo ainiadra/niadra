@@ -1,0 +1,69 @@
+---
+title: "Pydantic AI"
+description: "The customer's memory as one Pydantic AI agent capability: dynamic instructions, turns and the history toolset."
+---
+
+`NiadraCapability` is a Pydantic AI capability: its instructions are the pack, rendered on every model request, and its toolset is the history kit. Python only.
+
+## Install
+
+```sh
+pip install 'niadra[pydantic-ai]'   # pydantic-ai-slim 2.49 or newer, below 3
+```
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | The capability's instructions are the pack and then the `turn_block`, rendered for every model request after the agent's own instructions; instructions are not stored in the message history, so nothing piles up |
+| Turns | The run's prompt is recorded as the customer's turn when the run starts (keyed by the run id) and each model answer with its usage (input tokens, cache reads and writes) and model name when the request returns |
+| Tools | The capability's toolset holds the history tools, built from the kit's schemas with `Tool.from_schema`, bound to the customer |
+| Verification | `conversation.verify()` before the run |
+| Handoff | `transferred_to_agent()` and `transferred_to_human()` record the transfer, for agent delegation or a hand-off to a person |
+
+## Minimal example
+
+```python
+"""A Pydantic AI agent with the customer's memory as a capability."""
+
+import asyncio
+
+from pydantic_ai import Agent
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.pydantic_ai import NiadraCapability
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    capability = NiadraCapability(niadra.conversation("thread-81", subject=phone("+5511912345678")))
+    agent = Agent("openai:gpt-4.1", instructions="You are Acme's agent.", capabilities=[capability])
+    print((await agent.run("Where is my replacement lid?")).output)
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+
+The same code is in `examples/pydantic_ai_agent.py`.
+
+## Agent memory
+
+`NiadraCapability(conversation, agent_memory=True)` puts the agent's own notes before the customer's context and adds the two tools to the toolset. See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- Nothing here fails the run: without a pack, the capability's instructions are empty.
+- Tested against `pydantic-ai-slim` 2.49 with the model replaced by a fake and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="History navigation" href="/en/concepts/history">
+    the three tools the agent receives.
+  </Card>
+  <Card title="Agent memory" href="/en/concepts/agent-memory">
+    the agent's own working notes.
+  </Card>
+</CardGroup>

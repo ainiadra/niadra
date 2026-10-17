@@ -1,0 +1,96 @@
+---
+title: "Anthropic"
+description: "The wrap() of the Anthropic client: the pack in system, the turn_block on the last user message and the usage with cache reads and writes."
+---
+
+`wrap()` (Python) and `wrapAnthropic()` (TypeScript) wrap the Anthropic client, including the Bedrock and Vertex clients of the same SDK in Python, so `messages.create` and `messages.stream` get the context and record the answer.
+
+## Install
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[anthropic]'   # anthropic 1.8 or newer, below 2
+```
+```sh TypeScript
+npm install @niadra/sdk @anthropic-ai/sdk   # @niadra/sdk/anthropic
+```
+</CodeGroup>
+
+The TypeScript integration is in `@niadra/sdk` on npm.
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | The pack (after the agent's notes, with `agent_memory=`) goes in `system`, as a text block after your own system text; it carries `cache_control` only when your system blocks already do, so it joins a prefix you chose to cache. The `turn_block` goes as a text block at the end of the last user message, tagged as data, or as a user message of its own when the last one is not the customer's |
+| Turns | The answer (its text blocks) is recorded as the agent's turn with Anthropic's usage: `input_tokens`, `cache_read_input_tokens` and `cache_creation_input_tokens`. In TypeScript, the newest user message is also recorded as the customer's turn |
+| Tools | `kit.anthropic_definitions()` (Python) gives the kit in the `name`, `description`, `input_schema` shape; the wrapper does not touch the tools |
+| Verification | `conversation.verify()` before the call |
+| Handoff | `conversation.handoff()` where your flow transfers |
+
+## Minimal example
+
+<CodeGroup>
+```python Python
+"""Anthropic's Messages API with the customer's context in the system prompt."""
+
+from anthropic import Anthropic
+
+from niadra import Niadra, phone
+from niadra.integrations.anthropic import wrap
+
+niadra = Niadra(channel="chat")
+claude = wrap(Anthropic())
+
+with niadra.conversation("thread-81", subject=phone("+5511912345678")) as conversation:
+    conversation.customer("Where is my replacement lid?")
+    message = claude.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=512,
+        system=[{"type": "text", "text": "You are Acme's agent.", "cache_control": {"type": "ephemeral"}}],
+        messages=[{"role": "user", "content": "Where is my replacement lid?"}],
+    )
+    print(message.content[0].text)
+```
+```typescript TypeScript
+import Anthropic from "@anthropic-ai/sdk";
+import { Niadra, handles } from "@niadra/sdk";
+import { wrapAnthropic } from "@niadra/sdk/anthropic";
+
+const niadra = new Niadra();
+const anthropic = new Anthropic();
+
+/** One customer message in; `userId` comes from your session, never from the model. */
+export async function reply(userId: string, chatId: string, text: string): Promise<string> {
+  const convo = niadra.conversation({ subject: handles.appUserId(userId), channel: "web_chat", conversation_id: chatId });
+  const claude = wrapAnthropic(anthropic, convo, { verify: { method: "login", level: "V2" } });
+  const message = await claude.messages.create({
+    model: "claude-sonnet-4-5",
+    max_tokens: 1024,
+    system: "You are Acme's support agent. Be brief.",
+    messages: [{ role: "user", content: text }],
+  });
+  return message.content.map((block) => (block.type === "text" ? block.text : "")).join("");
+}
+```
+</CodeGroup>
+
+The same code is in `examples/anthropic_messages.py` and `examples/anthropic.ts`.
+
+## Limits
+
+- Outside a conversation or task block, calls pass through untouched, and nothing the wrapper does can fail the call.
+- In TypeScript, for `messages.stream()` prepare the body with `anthropicParams()` and record the final message with `recordAnthropic()`.
+- The wrapper adds no `cache_control` where you use no prompt caching: it never changes your caching strategy.
+- Tested against `anthropic` 1.8 and `@anthropic-ai/sdk` 0.128 with the transport replaced and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Amazon Bedrock" href="/en/integrations/bedrock">
+    the same for the Converse API.
+  </Card>
+  <Card title="Context and views" href="/en/concepts/context">
+    the target model and the cache floors.
+  </Card>
+</CardGroup>

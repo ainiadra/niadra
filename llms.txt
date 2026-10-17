@@ -1,0 +1,37 @@
+# Niadra
+
+> Niadra is an open-source (Apache 2.0), self-hostable memory layer for AI agents that talk to customers. It takes the events from every channel, platform and system (WhatsApp, voice, chat, e-mail, CRM, ERP, help desk), resolves which customer each event belongs to across phone numbers, e-mails and system ids, turns conversations into facts, open items and promises with the turns that prove them, and gives any agent, from any vendor or framework, a short context before its model call, plus the full history as function-calling tools and an MCP server. It is an open-source alternative to Mem0, Zep and other agent memory layers, built for many agents and channels sharing one customer.
+
+Key facts:
+
+- Context read in about 11 ms at p50, about 90 tokens per turn at the median.
+- Public benchmark (run 2026-09-30-5ea7a2, same 165 valid cases, same agent and judge for every system): Niadra 98.7% cross-channel accuracy, Hindsight 86.7%, Amazon Bedrock AgentCore Memory 80%, Mem0 open source 77.6%, Supermemory 71.6%, Graphiti 52.8%. With a different user id on each channel, Mem0 drops to 28.5% and AgentCore Memory to 27.9%. Model spend per 1,000 conversations: Niadra US$ 0.36, Mem0 US$ 1.88.
+- SDKs: Python (`pip install niadra`) and TypeScript (`npm install @niadra/sdk`), with integrations for LiveKit, Pipecat, ElevenLabs, Vapi, Retell, Twilio, WhatsApp, OpenAI Agents SDK, LangChain, LangGraph, LlamaIndex, CrewAI, Google ADK, Strands, Pydantic AI, Agno, Microsoft Agent Framework, Semantic Kernel, Haystack, DSPy, AG2, Vercel AI SDK, Mastra, Genkit, VoltAgent, Cloudflare Agents, LiteLLM, n8n, Flowise, Langflow and Dify.
+- Runs on PostgreSQL (one database per customer space), RabbitMQ, a Redis-compatible cache and S3-compatible storage. Deployed with a Helm chart on Kubernetes.
+
+## Start here
+
+- [README](https://github.com/ainiadra/niadra/blob/main/README.md): what Niadra is, benchmark, quickstart, self-hosting
+- [Documentation](https://docs.niadra.com/en): guides, concepts and the API reference
+- [Documentation for AI agents](https://docs.niadra.com/llms.txt): every documentation page as a list
+- [Python SDK](https://github.com/ainiadra/niadra-sdk-python): client, integrations, local emulator (`niadra-mock`)
+- [TypeScript SDK](https://github.com/ainiadra/niadra-sdk-ts): client and integrations for Node.js, Deno, Bun and edge runtimes
+
+## Repository
+
+- [server/](https://github.com/ainiadra/niadra/tree/main/server): the Niadra server in Python (ingest, read, admin, workers, loops, insights, control) and the in-cell models server
+- [web/](https://github.com/ainiadra/niadra/tree/main/web): the website, the Console and the site API
+- [deploy/](https://github.com/ainiadra/niadra/tree/main/deploy): Helm chart, CloudFormation stack, operator scripts, local cell
+- [spec/](https://github.com/ainiadra/niadra/tree/main/spec): open specifications (Event Envelope, Context Pack, Verification Assertion, Object Type, Turn Record and more) as JSON Schema with test vectors
+- [docs/](https://github.com/ainiadra/niadra/tree/main/docs): source of docs.niadra.com, in English and Portuguese
+
+## Benchmark
+
+- [Benchmark page](https://niadra.com/en/benchmark): every metric, including where Niadra does not lead
+- [Harness, dataset and result files](https://github.com/ainiadra/niadra-sdk-python/tree/main/benchmarks)
+
+## Optional
+
+- [Website](https://niadra.com/en)
+- [Security policy](https://github.com/ainiadra/niadra/blob/main/SECURITY.md)
+- [Contributing](https://github.com/ainiadra/niadra/blob/main/CONTRIBUTING.md)

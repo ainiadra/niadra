@@ -1,0 +1,151 @@
+---
+title: "Referência dos tipos de objeto"
+description: "Como cada tipo de campo viaja, o que um campo declara, o que o servidor recusa num tipo e a linguagem de expressões niadra-expr."
+---
+
+Esta página é a referência do formato de um [tipo de objeto](/concepts/object-types): como cada tipo de campo vai no fio, os membros que um campo declara, as conferências que um tipo precisa passar e a **niadra-expr**, a linguagem das chaves, dos valores, dos temporizadores, das leituras e dos campos derivados. Os vetores de conformidade que fixam o comportamento da linguagem vêm nos repositórios dos dois SDKs, em `spec/vectors/niadra-expr.v0.json`: o servidor e os dois SDKs rodam o mesmo arquivo.
+
+## Tipos de campo e como os valores viajam
+
+Os `fields` de um evento e um push de objeto levam cada valor em JSON, na forma que o tipo declarado espera:
+
+| Tipo | No fio | Exemplo |
+|---|---|---|
+| `string`, `text` | Uma string JSON. `text` é texto livre longo. | `"2a Vara Cível"` |
+| `enum` | Uma string JSON, um dos valores que o campo declara. | `"protocolled"` |
+| `number` | Um número JSON. | `15` |
+| `money` | Um número JSON na unidade maior da moeda: nunca em centavos, nunca um objeto. A moeda é o campo `currency` do próprio objeto. | `38000` ou `38000.5` |
+| `percent` | Um número JSON. | `12.5` |
+| `date` | Uma string JSON, `AAAA-MM-DD`. | `"2026-10-09"` |
+| `datetime` | Uma string JSON, ISO 8601 com o fuso. | `"2026-10-09T14:00:00-03:00"` |
+| `duration` | Um número JSON inteiro de milissegundos. | `5400000` |
+| `bool` | `true` ou `false`. | `true` |
+| `list` | Um array JSON. | `["a", "b"]` |
+| `ref` | Uma string JSON: o id do objeto relacionado, como o `via` de uma relação o lê. | `"case-1"` |
+
+Um valor de outro tipo fica guardado como veio, mas uma expressão sobre o campo não consegue lê-lo como o tipo dele: um valor em dinheiro enviado como a string `"38000.00"` não é número para uma leitura, um campo derivado ou um temporizador. Um campo que o tipo não declara fica como campo simples e abre uma [problema de dados](/concepts/object-types#problemas-de-dados) de `drift`, nunca uma recusa. O que um evento diz de si mesmo (`operation`, `version`, `last_event_type`, `source_version`, `record_ref`, `input_refs`) é escrituração: nunca é drift e só é servido quando o tipo o declara como campo. Cada chave dos `fields` de um evento vale para todos os objetos dos `object_refs` dele, então mande um objeto por evento.
+
+## O que um campo declara
+
+| Membro | Significado |
+|---|---|
+| `type` | Um dos tipos acima. Obrigatório. |
+| `logic` | `plain` (o padrão) ou `tri`: o campo leva os quatro valores lógicos abaixo e os observadores dele. |
+| `observers` | Num campo `tri`: quem pode observá-lo (`machine`, `human` ou `source:<nome>`), sob qual regra, por quanto tempo uma observação vale (uma duração ou `never`) e quais outros observadores ela supera. |
+| `unobserved_blocks` | Num campo `tri`: o que um valor que ninguém observou bloqueia: `model_read`, `derive`, `claim`, ou uma tarefa da empresa, como `decide:close`. |
+| `label` | O nome do campo no idioma do espaço, como um texto para um modelo o diz; no máximo 60 caracteres. |
+| `role` | O papel do número que o campo guarda, como `price_full`, para as afirmações. |
+| `claim` | Se o campo pode ser afirmado (`allowed`), a `class` dele (`money`, `percent`, `date`, `quantity`, `count`, `duration`, `dosage`, `text`), obrigatória quando pode, e a `nature` do número (`computed`, `quoted`, `observed`). |
+| `attribute` | A `family` e o `vocabulary` a que os valores pertencem, para uma preferência ou uma recusa os nomear. |
+| `freshness` | `class` (`volatile`, `price`, `semi`, `stable`, `none`), `max_age` e `claim_max_age`. Sem `max_age`, `volatile` vence em 30 s, `price` em 60 s, `semi` em 1 h e `stable` em 7 dias; `none` nunca vence. `claim_max_age` é `max_age` por padrão e nunca passa dele. |
+| `completeness` | `levels` (pelo menos dois, do menos ao mais completo) ou `total_field`, o campo que guarda o total esperado. |
+| `sensitivity` | `none`, ou uma das categorias sensíveis que o produto fixa (`health`, `religion`, `philosophical_belief`, `political_opinion`, `union_membership`, `sexual_life`, `sexual_orientation`, `racial_or_ethnic_origin`, `genetic`, `biometric`, `criminal_record`). |
+| `access` | Regras de `readers` (fontes, agentes ou `public`), `purposes` e `effect` (`allow`, `mask`, `deny`), lidas em ordem; veja o [acesso por campo](/concepts/object-types#acesso-por-campo). |
+| `pii` | Se o campo guarda dado pessoal. |
+| `track_changes` | Se o valor anterior fica guardado, para `was()` e para o que mudou desde a última vez que um sujeito viu o objeto. |
+
+Um campo `plain` não declara `observers` nem `unobserved_blocks`. Mudar a `sensitivity`, o `access` ou o `pii` de um campo, a licença de uma fonte ou as finalidades do tipo é uma decisão de privacidade: pede também o papel que responde pela segurança.
+
+## O que o servidor recusa num tipo
+
+Além da forma do documento, um tipo é recusado, com o caminho de cada entrada que quebra uma regra (por exemplo `timers.launch_at.on_fire: transition(scheduled->actve) is not a transition of the lifecycle`), quando:
+
+1. Um campo, um valor, um eixo de tempo ou um campo derivado usa um nome que outro já tem, ou um nome que a linguagem reserva (abaixo).
+2. Um estado que o ciclo de vida, um temporizador ou um vocabulário nomeia não está declarado; um `timers_on` nomeia um eixo não declarado; um campo de conteúdo, `completeness.total_field`, um defeito conhecido, uma chave de `union` ou uma ação de `refresh` nomeia um campo ou valor não declarado; `prefer_source`, `use_source`, `quote()` ou um vocabulário nomeia uma fonte não declarada; um campo derivado nomeia uma relação não declarada, ou uma cujo tipo o registro não declara, ou um `min` ou `max` sobre um campo que esse tipo não tem.
+3. Um eixo derivado não nomeia a regra dele, ou uma regra está num eixo que não é derivado; um tipo derivado por introspecção perdeu a impressão digital.
+4. Um membro quebra a própria regra: um campo `plain` com observadores, um `claim_max_age` acima de `max_age`, e as regras de fontes, ciclo de vida, temporizadores, releitura e finalidades que [Tipos de objeto e estado](/concepts/object-types) descreve.
+5. Uma expressão não se lê ou não se resolve contra o tipo: as condições (`when`, `active_when`, `where`) dão verdadeiro ou falso, e o `due` de um temporizador dá uma data ou um instante.
+
+## niadra-expr
+
+A linguagem é pequena, determinística e total: sem laços, sem recursão, sem E/S e sem relógio além do que recebe, com texto e aninhamento limitados, e um resultado ou um de três erros para toda entrada. O mesmo texto dá o mesmo resultado no servidor, em cada SDK e no seu worker de resolução.
+
+### Tokens
+
+- Espaços, tabulações e quebras de linha separam tokens.
+- Um **nome** é `[a-z_][a-z0-9_]*`, no máximo 64 caracteres, ASCII minúsculo.
+- Um **número** são dígitos com um `.` opcional e pelo menos um dígito depois dele; não há sinal, um número negativo vem de uma subtração.
+- Uma **duração** é um inteiro de no máximo seis dígitos seguido de `ms`, `s`, `min`, `h` ou `d` (`m` não é unidade, e `1.5h` se escreve `90min`).
+- Uma **string** vai entre aspas simples, numa linha só, com `\'` e `\\` como únicos escapes, no máximo 256 caracteres.
+- Os operadores são `==`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `(`, `)`, `[`, `]`, `,` e `.`; as palavras-chave são `and`, `or`, `not`, `in`, `true`, `false`, `none`, `yes`, `no`, `unobserved` e `known_defect`.
+
+### Gramática
+
+```
+expression  = or ;
+or          = and { "or" and } ;
+and         = not { "and" not } ;
+not         = "not" not | comparison ;
+comparison  = sum [ ( "==" | "!=" | "<" | "<=" | ">" | ">=" | "in" ) sum ] ;
+sum         = postfix { ( "+" | "-" ) postfix } ;
+postfix     = primary { "." name } ;
+primary     = number | duration | string | "true" | "false" | "none" | logical
+            | name | call | "(" or ")" | "[" [ or { "," or } ] "]" ;
+logical     = "yes" | "no" | "unobserved" | "known_defect" ;
+call        = function "(" arguments ")" ;
+```
+
+`or` liga mais frouxo, depois `and`, `not`, uma comparação, `+` e `-` (da esquerda para a direita) e `.`. Comparações não se encadeiam: `a < b < c` é erro. Um nome com pontos como `lead.city` é um nome só, com partes; depois de um grupo ou de uma chamada, `.` lê um campo de uma cotação. As palavras lógicas só aparecem de um lado de `==` ou `!=`.
+
+### Valores e os quatro valores lógicos
+
+| Valor lógico | Significado |
+|---|---|
+| `yes` | Presente: uma fonte ou um observador o afirmou (num booleano, verdadeiro). |
+| `no` | Conhecido e negativo: falso num booleano; em qualquer outro, ausente (a fonte afirmou que não há), às vezes com o nome da ausência. |
+| `unobserved` | Ninguém observou, ou a observação válida acabou. |
+| `known_defect` | A fonte respondeu, e o tipo declara errado esse campo dessa fonte. |
+
+`unobserved` e `known_defect` são **desconhecidos**. Um valor presente é um booleano, um número, uma string, uma duração (milissegundos inteiros), uma data, um instante (ao milissegundo) ou uma lista. Não observado nunca é falso: uma comparação com um valor desconhecido é desconhecida, e a negação dela também.
+
+### Nomes
+
+Um nome de uma parte é, nesta ordem: um nome de contexto (`state`, o estado do ciclo de vida; `derived_status`; `watch_count`, 0 por padrão; `purpose`, a finalidade da leitura, `display` por padrão); um campo, um valor calculado ou um eixo de tempo do objeto; um nome de ausência declarado; senão, um campo que ninguém observou, `unobserved`. Um nome com pontos é uma entrada declarada desse caminho (`lead.city`), `config.<chave>` (o valor de configuração da empresa, ausente quando não definido) ou `<campo>.completeness`. As palavras-chave e `state`, `derived_status`, `watch_count`, `purpose` e `config` são reservados. Um estado é uma string: `state == 'open'`, nunca `state == open`.
+
+### Operadores
+
+- `x == yes` é verdadeiro exatamente quando `x` leva `yes`, e o mesmo para as outras palavras lógicas; o resultado é sempre verdadeiro ou falso: `available == unobserved` pergunta se um valor foi observado.
+- Fora isso, quando um dos lados de uma comparação, de `+` ou de `-` é desconhecido, o resultado é desconhecido (`known_defect` quando um deles o leva).
+- Igualdade: duas ausências são iguais quando uma não tem nome ou as duas têm o mesmo (`none` é qualquer ausência); uma ausência nunca é igual a um valor presente; números pelo valor, strings pelos caracteres, durações pelo tamanho, datas e instantes como instantes (uma data é o início do dia), listas item a item; qualquer outro par é `expr_type`.
+- Ordem (`<`, `<=`, `>`, `>=`) é falsa quando um dos lados é ausente; números, strings (por ponto de código), durações, datas e instantes se comparam; qualquer outro tipo é `expr_type`.
+- `in` recebe uma lista à direita: verdadeiro quando a esquerda é igual a um item, desconhecido quando um item desconhecido poderia decidir, falso nos outros casos.
+- `and`, `or` e `not` recebem verdadeiro, falso ou desconhecido, com lógica de três valores, da esquerda para a direita, e o primeiro operando que decide para a avaliação: `false and x` nunca avalia `x`.
+- `+` e `-`: número com número; duração com duração; uma data ou um instante mais ou menos uma duração dá um instante; uma data mais ou menos dias úteis dá uma data; duas datas ou instantes subtraídos dão uma duração. Um operando ausente dá uma ausência.
+
+### Funções
+
+| Função | Resultado |
+|---|---|
+| `now()` | O instante da avaliação. |
+| `age(n)` | O tempo desde que o encaixe ou a entrada `n` foi observado na fonte, nunca negativo; `unobserved` quando não se sabe. |
+| `observer(n)` | Quem observou o valor do encaixe (`machine`, `human`, `source:<nome>`), ou ausente. |
+| `changed(n)` | Verdadeiro quando o encaixe tem um valor anterior diferente do atual. |
+| `was(e)` | `e` sobre os valores anteriores dos encaixes e das entradas. |
+| `count(e)` | O número de itens de uma lista; 0 para uma ausência. |
+| `business_days(e, c)` | `e` dias úteis no calendário `c`, para somar ou subtrair de uma data: um inteiro de 0 a 1.000. Um calendário é uma lista de feriados e os dias da semana que nunca são úteis (sábado e domingo, salvo se ele disser outra coisa). |
+| `quote(s)` | A cotação do leitor vinda da fonte `s`; `.<campo>` lê os campos dela. |
+| `presented_in_top(n)` | Verdadeiro quando o objeto foi apresentado numa posição até `n` na conversa atual. |
+| `sha256(e, ...)` | `sha256:` e o SHA-256 em hexadecimal minúsculo do texto de um a oito argumentos, unidos por U+001F. |
+
+Os prazos de um tribunal, de um contrato ou de um produto são regras da sua empresa, como valores declarados: a linguagem só conta dias úteis simples.
+
+### Erros e limites
+
+| Código | Quando |
+|---|---|
+| `expr_invalid` | O texto não é uma expressão desta gramática, quebra uma regra acima ou (contra um tipo) nomeia o que o tipo não tem. |
+| `expr_type` | Um valor do tipo errado, ou fora do domínio, encontrado na avaliação. |
+| `expr_limit` | Um limite foi ultrapassado. |
+
+Uma expressão tem no máximo 1.024 caracteres, 256 tokens e 16 grupos aninhados; uma lista literal no máximo 64 itens, uma string no máximo 256 caracteres, um nome no máximo 64 e uma duração no máximo seis dígitos. Uma lista lida de um encaixe tem no máximo 1.000 itens, e uma contagem de dias úteis no máximo 1.000.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Tipos de objeto e estado" href="/concepts/object-types">
+    Para que serve um tipo, frescor, a finalidade da leitura e objetos compartilhados.
+  </Card>
+  <Card title="Leituras tipadas" href="/api/state-read">
+    `POST /v1/state/read`: campos, valores, leituras e temporizadores.
+  </Card>
+</CardGroup>

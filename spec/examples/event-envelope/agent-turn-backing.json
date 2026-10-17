@@ -1,0 +1,17 @@
+{
+  "kind": "message",
+  "idempotency_key": "wa-7781/turn-6",
+  "channel": "whatsapp",
+  "conversation_id": "wa-7781",
+  "handles": [{"type": "phone_e164", "value": "+5511987654321"}],
+  "speaker": {"role": "ai_agent", "id": "whatsapp-agent"},
+  "direction": "outbound",
+  "content": {"type": "text", "text": "Your visit is on 09/24 and the installment is 259.90 BRL."},
+  "occurred_at": "2026-09-22T16:42:03-03:00",
+  "context_stamp": {"etag": "\"b3f1c2a9d8e7\"", "injected_at": "2026-09-22T16:41:58-03:00"},
+  "backing": {
+    "checked": 2,
+    "unbacked_values": [{"kind": "amount"}],
+    "guard_violations": ["4c9e2a71"]
+  }
+}

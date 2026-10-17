@@ -1,0 +1,192 @@
+{
+  "scenario_ids": [
+    "0192f5c5-0000-7c00-8a00-000000005ce1"
+  ],
+  "build": {
+    "pins": {
+      "prompts": {
+        "core": "v17",
+        "rules": "v17"
+      },
+      "corpus_digest": "sha256:d5e4ce66468167f7bc993f495a3db17c5f788c88977d9c2a4419bdb97ea00ab4",
+      "model": "provider/model-2026-08",
+      "assembler": "3.2.0",
+      "tool_schemas": {
+        "quote": "sha256:6213299056e8c500b806edd0bd8c58bda33c540fc9a4d05f5091e2623b9c2bd6"
+      },
+      "niadra": {
+        "compiler": "compiler-1.15",
+        "pack_hash": "pk_7f3a91c2"
+      }
+    },
+    "sdk": "niadra-python/0.7.0",
+    "adapter": "openai_agents/1"
+  },
+  "mode": "hermetic_turn",
+  "runs": 5,
+  "vary": [
+    "prompts"
+  ],
+  "results": [
+    {
+      "scenario_id": "0192f5c5-0000-7c00-8a00-000000005ce1",
+      "turn_id": "0192f5b1-7c2e-7a10-8e21-4c3d2b1a0f01",
+      "case_id": "0192f5c5-0000-7c00-8a00-00000000c001",
+      "run": 1,
+      "status": "timeout",
+      "paraphrase": false,
+      "assertions": [
+        {
+          "id": "t1.tool_called.quote",
+          "kind": "tool_called",
+          "outcome": "pass"
+        },
+        {
+          "id": "t1.claims_traced",
+          "kind": "claims_traced",
+          "outcome": "pass"
+        },
+        {
+          "id": "t1.claims_match_state",
+          "kind": "claims_match_state",
+          "outcome": "pass"
+        },
+        {
+          "id": "t1.budget",
+          "kind": "budget",
+          "outcome": "pass"
+        },
+        {
+          "id": "network-refused",
+          "kind": "lexicon",
+          "outcome": "pass"
+        }
+      ],
+      "divergent_calls": 0,
+      "latency_ms": 2137
+    },
+    {
+      "scenario_id": "0192f5c5-0000-7c00-8a00-000000005ce1",
+      "turn_id": "0192f5b1-7c2e-7a10-8e21-4c3d2b1a0f01",
+      "case_id": "0192f5c5-0000-7c00-8a00-00000000c001",
+      "run": 2,
+      "status": "completed",
+      "paraphrase": false,
+      "assertions": [
+        {
+          "id": "t1.tool_called.quote",
+          "kind": "tool_called",
+          "outcome": "pass"
+        },
+        {
+          "id": "t1.claims_traced",
+          "kind": "claims_traced",
+          "outcome": "pass"
+        },
+        {
+          "id": "t1.claims_match_state",
+          "kind": "claims_match_state",
+          "outcome": "pass"
+        },
+        {
+          "id": "t1.budget",
+          "kind": "budget",
+          "outcome": "pass"
+        },
+        {
+          "id": "network-refused",
+          "kind": "lexicon",
+          "outcome": "pass"
+        }
+      ],
+      "divergent_calls": 0,
+      "latency_ms": 2174
+    },
+    {
+      "scenario_id": "0192f5c5-0000-7c00-8a00-000000005ce1",
+      "turn_id": "0192f5b1-7c2e-7a10-8e21-4c3d2b1a0f01",
+      "case_id": "0192f5c5-0000-7c00-8a00-00000000c001",
+      "run": 3,
+      "status": "completed",
+      "paraphrase": false,
+      "assertions": [
+        {
+          "id": "t1.tool_called.quote",
+          "kind": "tool_called",
+          "outcome": "pass"
+        },
+        {
+          "id": "t1.claims_traced",
+          "kind": "claims_traced",
+          "outcome": "pass"
+        },
+        {
+          "id": "t1.claims_match_state",
+          "kind": "claims_match_state",
+          "outcome": "fail"
+        },
+        {
+          "id": "t1.budget",
+          "kind": "budget",
+          "outcome": "pass"
+        },
+        {
+          "id": "network-refused",
+          "kind": "lexicon",
+          "outcome": "pass"
+        }
+      ],
+      "divergent_calls": 0,
+      "latency_ms": 2211
+    },
+    {
+      "scenario_id": "0192f5c5-0000-7c00-8a00-000000005ce1",
+      "turn_id": "0192f5b1-7c2e-7a10-8e21-4c3d2b1a0f01",
+      "case_id": "0192f5c5-0000-7c00-8a00-00000000c001",
+      "run": 4,
+      "status": "infrastructure_error",
+      "paraphrase": false,
+      "assertions": [],
+      "divergent_calls": 0,
+      "latency_ms": 2248,
+      "error": "the model provider timed out"
+    },
+    {
+      "scenario_id": "0192f5c5-0000-7c00-8a00-000000005ce1",
+      "turn_id": "0192f5b1-7c2e-7a10-8e21-4c3d2b1a0f01",
+      "case_id": "0192f5c5-0000-7c00-8a00-00000000c001",
+      "run": 5,
+      "status": "completed",
+      "paraphrase": true,
+      "assertions": [
+        {
+          "id": "t1.tool_called.quote",
+          "kind": "tool_called",
+          "outcome": "pass"
+        },
+        {
+          "id": "t1.claims_traced",
+          "kind": "claims_traced",
+          "outcome": "pass"
+        },
+        {
+          "id": "t1.claims_match_state",
+          "kind": "claims_match_state",
+          "outcome": "pass"
+        },
+        {
+          "id": "t1.budget",
+          "kind": "budget",
+          "outcome": "pass"
+        },
+        {
+          "id": "network-refused",
+          "kind": "lexicon",
+          "outcome": "pass"
+        }
+      ],
+      "divergent_calls": 0,
+      "latency_ms": 2285
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+---
+title: "Vercel AI SDK"
+description: "A middleware for wrapLanguageModel, which works with every provider, and the history kit as AI SDK tools."
+---
+
+`niadraMiddleware(session)` is a language model middleware for `wrapLanguageModel({ model, middleware })`: the AI SDK's idiomatic path, which works with every provider without a separate provider package. `niadraTools(session)` returns the history kit as AI SDK tools. TypeScript only.
+
+## Install
+
+```sh
+npm install @niadra/sdk ai   # ai 5, 6 or 7, as an optional peer dependency
+```
+
+The integration is in `@niadra/sdk` on npm.
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | `transformParams` puts the pack as a system message right after your system messages and the suffix (deltas and other channels' turns) as a text part at the end of the last user message, where every provider accepts it |
+| Turns | `transformParams` records the customer's newest message; `wrapGenerate` and `wrapStream` record the model's text as the agent's turn, with the usage the provider reported (prompt tokens, cache reads and writes). Tool-only steps record nothing |
+| Tools | `niadraTools(session)`: the kit as AI SDK tools, bound to the customer; spread them next to your own |
+| Verification | `niadraMiddleware(session, { verify: { method, level } })` records what your app proved before the first read |
+| Handoff | `conv.handoff()` where your route transfers |
+
+## Minimal example
+
+```typescript
+// A chat route with the Vercel AI SDK (Next.js App Router or any fetch handler): the model gets
+// the customer's context through a middleware, and the history tools next to your own.
+import { openai } from "@ai-sdk/openai";
+import {
+  type UIMessage,
+  convertToModelMessages,
+  createUIMessageStreamResponse,
+  isStepCount,
+  streamText,
+  toUIMessageStream,
+  wrapLanguageModel,
+} from "ai";
+import { Niadra, handles } from "@niadra/sdk";
+import { niadraMiddleware, niadraTools } from "@niadra/sdk/ai-sdk";
+
+const niadra = new Niadra();
+
+/** `userId` comes from your session: the customer is never something the model or the browser picks. */
+export async function POST(request: Request, userId: string): Promise<Response> {
+  const { id, messages } = (await request.json()) as { id: string; messages: UIMessage[] };
+  const convo = niadra.conversation({ subject: handles.appUserId(userId), channel: "web_chat", conversation_id: id });
+
+  const tools = niadraTools(convo);
+  const result = streamText({
+    model: wrapLanguageModel({
+      model: openai("gpt-4.1"),
+      // The user signed in, which proves V2 in this space's policy.
+      middleware: niadraMiddleware(convo, { verify: { method: "login", level: "V2" } }),
+    }),
+    system: "You are Acme's support agent. Be brief.",
+    messages: await convertToModelMessages(messages),
+    tools,
+    stopWhen: isStepCount(4),
+  });
+  return createUIMessageStreamResponse({ stream: toUIMessageStream({ stream: result.stream, tools }) });
+}
+```
+
+The same code is in `examples/ai-sdk.ts`.
+
+## Agent memory
+
+`niadraMiddleware(convo, { agentMemory: true })` puts the agent's own notes before the customer's context, and `niadraTools(convo, { agentMemory: { write: true } })` adds the two tools. See [Agent memory](/en/concepts/agent-memory).
+
+## Turn records
+
+With the `turns` feature on in the space (it ships on), `niadraMiddleware` records each model call in the [turn](/en/concepts/turn-records) in progress, `recordTools(tools)` records each tool call with the provider's call id, and `niadraTurn(convo)` keeps a `streamText` turn open until the stream finishes. A run inside a turn in progress records into it. A turn never waits for Niadra and never repeats the conversation's text.
+
+## Limits
+
+- Nothing here fails the model call: a context that does not arrive is left out, and a failure to record is logged without content.
+- The middleware does not wrap the provider: any AI SDK `LanguageModel`, from any provider, works.
+- Tested against `ai` 7 (with the types of versions 5 and 6) and a fake model, with Niadra on the emulator, on Node, Deno, Bun, workerd and the Edge Runtime.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Mastra" href="/en/integrations/mastra">
+    the same design, as an agent processor.
+  </Card>
+  <Card title="TypeScript SDK" href="/en/sdk/typescript">
+    the conversation, the `suffix` and `markInjected()`.
+  </Card>
+</CardGroup>

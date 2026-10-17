@@ -1,0 +1,1 @@
+{"type": "verify", "idempotency_key": "k10", "method": "otp_sms", "level": "V5", "handle": {"type": "phone_e164", "value": "+5511987654321"}, "occurred_at": "2026-09-22T14:03:20Z"}

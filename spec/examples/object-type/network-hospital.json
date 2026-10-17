@@ -1,0 +1,94 @@
+{
+  "type": "network_hospital",
+  "ownership": "shared",
+  "mirror_of": {
+    "system": "api_da_operadora",
+    "derived_by": "declaration",
+    "drift": "alert"
+  },
+  "key": {
+    "natural": [
+      "hospital_id"
+    ]
+  },
+  "working_set": {
+    "enter_on": [
+      "presented",
+      "related",
+      "committed"
+    ],
+    "leave_after": "90d"
+  },
+  "fields": {
+    "name": {
+      "type": "string",
+      "freshness": {
+        "class": "stable"
+      }
+    },
+    "city": {
+      "type": "string",
+      "freshness": {
+        "class": "stable"
+      },
+      "attribute": {
+        "family": "city"
+      }
+    },
+    "in_network": {
+      "type": "bool",
+      "logic": "tri",
+      "observers": [
+        {
+          "who": "source:network_route",
+          "validity": "24h"
+        },
+        {
+          "who": "human",
+          "validity": "never",
+          "overrides": [
+            "source:network_route"
+          ]
+        }
+      ],
+      "unobserved_blocks": [
+        "claim"
+      ],
+      "freshness": {
+        "class": "semi",
+        "max_age": "24h"
+      },
+      "claim": {
+        "allowed": true,
+        "class": "text",
+        "nature": "observed"
+      }
+    }
+  },
+  "sources": {
+    "network_route": {
+      "kind": "pull",
+      "precedence": 1,
+      "authoritative_for": [
+        "in_network"
+      ],
+      "sanity": {
+        "min_items": 50
+      }
+    },
+    "network_snapshot": {
+      "kind": "batch",
+      "precedence": 2
+    },
+    "sales_material": {
+      "kind": "batch",
+      "precedence": 3
+    }
+  },
+  "union": {
+    "in_network": "union"
+  },
+  "retention": {
+    "projection": "while_in_working_set"
+  }
+}

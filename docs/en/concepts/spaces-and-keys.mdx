@@ -1,0 +1,173 @@
+---
+title: "Spaces and keys"
+description: "Project, environment, source and key: who talks to Niadra and what each key may do."
+---
+
+Everything that talks to Niadra talks through a key, and every key belongs to a source inside a space. Those three names decide where data lives, who is reading and what each agent may do with the memory. Knowing them before you integrate settles most permission questions up front.
+
+## Project, environment and space
+
+A **project** is the memory of one company, or of a business line that has to stay separate. Every project has two **environments**: `sandbox`, for building and testing, and `production`, for real traffic.
+
+A **space** is the pair of project and environment. It is Niadra's unit of isolation: the space is the first column of every database key, cache key and encryption context, so a sandbox event never shows up in a production read, and one company's data never decrypts under another company's key.
+
+Each space also has a database of its own: the sandbox and the production of a project never share one. A space created a moment ago is ready once Niadra has created and prepared its database; until then, calls answer 503 with `Retry-After`: the events the SDK queues wait and are sent again on their own, and a context or history read comes back empty, as on any failure. Deleting a space (a person with the admin role, through the control API) drops its database and destroys its data keys, which makes any copy that still exists unreadable, and returns a [deletion receipt](/en/api/control/space-deletion-receipt).
+
+Each space lives in one region, its project’s, and has a stable address:
+
+```text
+https://<space>.<region>.api.niadra.com
+```
+
+The SDK builds that address from the key. You configure no URL at all, except to point at the local emulator.
+
+## Dedicated environment (Regulado plan)
+
+On the Regulado plan, "servers, database and keys exclusive to your company" is a dedicated cell: a second stack with the same template as the shared cell, in the same region (`us-east-2`), with its own machine, its own database instance, its own buckets, its own log group and its own alerts topic, and a master key of its own in KMS, which encrypts the database's disk and the machine's and wraps the data keys of your spaces. Only that cell's machine reads its secrets. The cell runs only the cell: the control plane, the site and the Console stay with Niadra, and it pulls its own configuration with a credential of its own, which the control plane knows only by its SHA-256 and which acts for no other cell; the credential the shared cells hold does not open it.
+
+Every new space of your tenant in the region lands on that cell, the ones created from the Console too, as `t2` spaces; the cell creates each space's database on its own instance. The address does not change: the SDKs keep talking to `<space>.us-east-2.api.niadra.com`, through a record per space that points at your cell. One limit: a space that already holds data on the shared cell is not moved onto the dedicated one; a Regulado customer starts on its cell.
+
+## Encryption of each space
+
+The content of each space is encrypted with AES-256-GCM under data keys of its own, and every encrypted value carries its place (table, row and column) as authenticated data, so it does not open if copied to another row. A data key is never stored in the clear: it is kept wrapped by the cell's encryption master key, which lives in AWS KMS, in HSMs validated to FIPS 140-3 level 3, and never leaves it. KMS generates every new data key and unwraps it only with the encryption context `niadra:space` set to the space id, so a wrapped key copied to another space does not open, and every unwrap is recorded in CloudTrail. Each process asks KMS for each data key once and keeps it only in memory, so reads do not wait on KMS after the first. The keyed hashes the memory uses to find values without opening them also use a key derived for each space, whose root is wrapped the same way.
+
+Keys rotate at two levels. KMS replaces the master key material every year and keeps the previous material, so what it wrapped before still opens. Each space can also get a new version of its data key: what is written afterwards uses the new version, and what was already written keeps opening with its own. Under contract, the key that wraps a space's data keys can be the customer's, in the KMS of their own account: Niadra's operations name it with [`PUT /v1/spaces/{space_id}/kms-key`](/en/api/control/space-kms-key), the snapshot carries the `kms_key_arn` to the cell, the space's next data key is generated under it, and a disabled or ungranted key makes the space stop writing (503) instead of falling back to the cell's key. Whoever uses the master key does not administer it: the key policy lets only the cell machine's role encrypt and decrypt, the account only administers it, and every policy change and every use of the key are recorded in CloudTrail.
+
+## Sources
+
+A **source** is anything that talks to the memory: one vendor's voice agent, another vendor's WhatsApp agent, your internal billing agent, the CRM that sends events by webhook, the human attendant who gets context inside the tool your company already uses. Every source has:
+
+| Attribute | What it is for |
+|---|---|
+| `purposes` | What it reads and why, such as `customer_service` or `billing`. The policy grants each category of memory by purpose. A source that declares purposes reads for exactly those, with none added; only a source that declares none reads for `service` and `support`. |
+| `audience` | `customer_agent`, `internal_agent`, `human`, `reviewer`, `analyst`, `trigger_target` or `export`. It decides what the source may read, sets the default scopes of its keys and appears on every receipt. In a conversation, an internal source stays internal only when the person speaking is staff, named by `staff()`; with anyone else, the conversation reads as customer-facing. |
+| `vendor` and `channel` | Who built the agent and where it works. Measurement groups by them. |
+| `verification_ceiling` | The highest level the source may declare, V2 by default. Automated agents: V2. Sources that run OTP: V3. When the source is created, the control API refuses a ceiling above what its audience allows: V4 only for `human` or `internal_agent` (human desks and systems of record), `no_customer` only for `internal_agent`, and the other audiences up to V3. |
+| `confirms_before_acting` | Marks agents whose prompt makes them confirm values, so measurement does not count those confirmations as repetition. |
+| `navigation_enabled` | Whether the source may use the history tools. On by default. |
+| `trusted_action_ops` | With `act`, the closed list of operations the source may record, such as `credit`. Empty means any operation. |
+| `critical` | Keeps the source out of experiment control groups: its customers always get the memory. |
+
+You create and configure sources in the Console or through the [control API](/en/api/control/sources-create). Access to memory is denied by default and granted by purpose: broad access to the ERP does not give an internal agent broad access to the memory. Before you grant access, [`POST /v1/policy/simulate`](/en/api/policy-simulate) shows what a source, audience or purpose would see of a profile, item by item, with what would be withheld and why, and also the recent lines of other conversations that the `live` block of the same read would carry or withhold, through the same policy: a withheld line shows only its channel, time and reason, never its text.
+
+## Keys
+
+Each source has one or more keys. The format carries everything the SDK needs to find the address:
+
+```text
+nia_sk_<live|test>_<region>_<space>_<key_id>_<secret>
+```
+
+- `live` reaches production spaces; `test` reaches sandbox spaces.
+- `region` and `space` become the address `https://<space>.<region>.api.niadra.com`.
+- `key_id` is public and shows up in logs; on its own it never authenticates.
+- The secret is shown once, when the key is created. Store it in your secret manager.
+
+The key goes in the `Authorization: Bearer` header. The SDKs read the `NIADRA_API_KEY` environment variable when you do not pass a key to the constructor.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra
+
+niadra = Niadra()  # reads NIADRA_API_KEY
+print(niadra.base_url)  # https://acme-prod.us-east-2.api.niadra.com
+```
+```typescript TypeScript
+import { Niadra } from "@niadra/sdk";
+
+const niadra = new Niadra(); // reads NIADRA_API_KEY
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/context" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"subject": {"type": "phone_e164", "value": "+14155550123"}, "view": "chat", "verification": "V1", "conversation_id": "wa-8812"}'
+```
+</CodeGroup>
+
+<Warning>
+A source key is a server secret. Never put a key in a browser, a mobile app or a model prompt. To bind a customer to an MCP connection, your backend mints a 15-minute [subject_token](/en/api/subject-tokens).
+</Warning>
+
+## Scopes
+
+Each key has scopes. The route checks the scope before anything else, and a missing scope comes back as 403 with the code `scope_missing`. In the batch, the scope is checked item by item: an item without the scope comes back refused with the same code, and the others go through.
+
+| Scope | What it allows |
+|---|---|
+| `track` | Send messages and system events in the batch, request media uploads, correct the memory |
+| `act` | Record agent actions, within the `trusted_action_ops` of the source when it has a list |
+| `context` | Read context and objects, mint `subject_token` |
+| `search` | Search history, read the timeline, open items |
+| `identify` | Send `identify` items in the batch; the `resolve_identity` MCP tool |
+| `admin` | Every governance route: identity, erasure, export, receipts, lineage, policy simulation, measurement, triggers, deliveries. The same routes also accept Console people with the right role |
+| `analytics` | [Base-wide analysis](/en/api/insights-aggregate), pseudonymous by default, and the [measurement reports](/en/concepts/context-use#read-the-numbers) summed over every source. Only sources with the `analyst` audience get it |
+| `agent_memory` | Read the [agent's own memory](/en/concepts/agent-memory): the block, the search and the tools. Every key with `context` reads it too |
+| `agent_memory:write` | Save, edit and retire the agent's own notes and ask for a distillation; the `remember` tool |
+| `replay` | Read [turn records](/en/concepts/turn-records), create scenarios and report replay and counterfactual runs; the same routes take people with the `integration` or `security` role (`analysis` for the counterfactual) |
+| `coordinate` | Ask before acting, declare what happened, claim a customer or a task, create and accept handoffs, read the [suppression list](/en/concepts/coordination#the-suppression-list) |
+| `state:push` | Push a system of record's state to the [declared types](/en/concepts/object-types), reconcile from a snapshot and take the [resolver worker](/en/guides/resolver-worker)'s refresh requests |
+| `agent_state` | Read and write the agent's own [working memory](/en/concepts/agent-state) |
+| `identity:link` | Link a person to the account or partner they act for, and end the link, as a system of record that knows who works for whom; nothing else of identity governance. Never granted to a customer-facing source, and a link with `can_see_contacts` still needs `admin` |
+
+The last four scopes only apply in a space that turned the matching feature on (below); a key may hold them before that, and the routes answer 404 until the feature is on. The `track` scope also sends turn records, and `context` reads typed state and the constraints block.
+
+The `act` scope deserves care. `track` alone does not record actions: an action can close a promise made to a customer, so only a source holding `act` may record it, and a source that declares `trusted_action_ops` (for example only `credit`) records nothing else. It is the first barrier against an action forged through prompt injection. An operation outside the list comes back as an item error with the code `operation_not_allowed`.
+
+When you create a key without naming scopes, it gets the defaults of the source audience: `customer_agent` gets `track`, `context`, `search` and `identify`; `internal_agent` also gets `act`; `human` gets `context` and `search`; `analyst` gets only `analytics`.
+
+A common split:
+
+| Source | Scopes |
+|---|---|
+| Voice or WhatsApp agent | `context`, `search`, `track`, `identify` |
+| Internal billing agent | `context`, `search`, `track`, `act`, with `trusted_action_ops: ["credit"]` on the source |
+| CRM or ERP by webhook | the authentication declared in the source mapping |
+| Your team's governance service | `admin` |
+| Your BI or analysis LLM | `analytics`, on a source with the `analyst` audience |
+| An agent that records turns, coordinates and keeps working state | `context`, `search`, `track`, `identify`, `coordinate`, `agent_state` |
+| Your CI, for replay | `replay`, on a source of its own |
+| The resolver worker and the system of record that pushes state | `state:push` |
+
+People from your team use the Console with their own token and roles (`admin`, `security`, `integration`, `review`, `analysis`, `vendor`), never a source key. See [Limits and conventions](/en/conventions#authentication).
+
+## Space features
+
+Every feature starts **on**: a space nobody configured already uses them all, and the memory works with no change. The `features` configuration document lists what stays on; a space turns a feature off through an approved diff in the Console or the [control API](/en/api/control/config-diffs), by the `security` role, and the change holds per space, so a project's sandbox and production each decide their own.
+
+| Feature | What it turns on | Rules document |
+|---|---|---|
+| `turns` | [Turn records](/en/concepts/turn-records), replay and scenarios, the change log, data issues | `recording` (`integration`) |
+| `state` | [Object types and typed state](/en/concepts/object-types): push, snapshot, reads, re-reading, coverage, the drift check, third-party content | `object-types` (`integration`) |
+| `agent_state` | The agents' [working memory](/en/concepts/agent-state) | `object-types`, a type with `ownership: agent` |
+| `signals` | [Interactions, the constraints block, inferences](/en/concepts/signals) and review requests | `tool-bindings` (`integration`) |
+| `claims` | The [claim contract](/en/concepts/claims) in the SDK profile and the claim rates in the measurement | `claim-contract` (`integration` and `security`) |
+| `coordination` | [Coordination](/en/concepts/coordination): checks, declarations, ownership, effects, handoffs, the suppression list, the contact token | `coordination` (`integration`) |
+| `measurement` | [Outcomes, attribution, experiments and the counterfactual](/en/concepts/outcomes) | `measurement` (`analysis`) |
+| `notifications` | The [notifications feed](/en/concepts/triggers-and-webhooks#the-notifications-feed), to pull instead of receiving webhooks | |
+| `legal_holds` | [Legal holds](/en/concepts/privacy#legal-holds) | |
+
+A route of a feature that is off answers 404, as if it did not exist, and a context read that asks for a block of a feature that is off gets the context without the block. [`GET /v1/sdk/profile`](/en/api/sdk-profile) tells the SDK what is on, with the claim contract, the summarized type registry and the turn recording mode; the SDK reads it at start and revalidates it by ETag, and an adapter with capture on records only when the profile lists `turns`.
+
+## Rotate and revoke
+
+[Rotate](/en/api/control/keys-rotate) a key to get a new one with the same scopes; `grace_seconds` (up to 7 days) keeps the old one valid while you roll the new one out through your secret manager. To cut access, [revoke the key](/en/api/control/keys-revoke) or [the whole source](/en/api/control/source-revoke), with a reason, in the Console or through the control API. The revocation reaches every instance of the cell in seconds. The cell also takes a direct cut, [`POST /v1/sources/{source_id}/revoke`](/en/api/source-revoke), for the `security` role: every key of the source stops authenticating there at once.
+
+When a key gets a 401 or 403, the SDK drops the context it held for that key and returns an empty context. That way, cutting a vendor's access also covers what was already in that vendor's cache.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Events and the batch" href="/en/concepts/events">
+    what each source sends and how the batch answers.
+  </Card>
+  <Card title="Identity and verification" href="/en/concepts/identity">
+    handles, profiles and levels V0 to V4.
+  </Card>
+  <Card title="Limits and conventions" href="/en/conventions">
+    versioning, idempotency, rate limits and ETag.
+  </Card>
+  <Card title="Errors" href="/en/errors">
+    the code catalog, including `scope_missing`.
+  </Card>
+</CardGroup>

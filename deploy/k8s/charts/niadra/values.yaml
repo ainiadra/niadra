@@ -1,0 +1,310 @@
+# Defaults for one Niadra cell. The deploy script sets everything marked "set at deploy".
+# Sized for one machine of 2 vCPU and 8 GiB (the small profile, aws/cluster.yaml): one replica of
+# each API and of the broker, and the pools that wait well scale to zero while their queue is empty
+# (measure does not: see workers.pools).
+# With more machines, raise `replicas`, the `maxReplicas` of the APIs and the pools' `max`, and
+# `rabbitmq.replicas` (3); the autoscalers do the rest.
+
+# The chart is installed twice: `base` (configuration, secrets, broker, cache) first, then `app`
+# (database setup, the deployables, ingress), so the setup job finds everything it reads.
+part: app
+
+image:
+  registry: ""        # set at deploy: <account>.dkr.ecr.<region>.amazonaws.com
+  tags: {}            # set at deploy: server, models, site and site-api, each from what it is built of
+release: ""           # set at deploy: the release version (read by on-ops.sh, by no template)
+
+region: us-east-2
+cellId: sandbox-1
+logLevel: INFO
+llm: {zeroRetention: true, includeUsage: true}
+
+# Where the cell's control plane runs. Empty: in this cell, with the site and the Console (the default
+# cell). A dedicated cell (scripts/cell.sh) sets the default cell's control address,
+# https://control.api.<domain>, and runs only the cell: no control plane, site, Console or sandbox
+# tenant; `hosts.site` then only names the Console's origins, which call this cell from the browser.
+controlPlane:
+  url: ""
+
+# Public hosts. Before the domain is delegated, the deploy uses <ip>.sslip.io names.
+# `api`: the cell's own address first, then the addresses the SDKs derive from a key,
+# `<space>.<region>.api.<domain>`, as one wildcard.
+hosts:
+  site: [niadra.com, www.niadra.com]
+  api: [api.niadra.com, "*.us-east-2.api.niadra.com"]
+  control: control.api.niadra.com
+  grafana: grafana.niadra.com
+  # The site's admin panel (web/src/admin): contact requests and access
+  # counts. Empty: admin.<first site host>. Not the cell's `admin` deployment, which is the data API.
+  siteAdmin: ""
+tls:
+  issuer: letsencrypt
+  # The Route 53 zone id, once the domain points at it: certificates are then proven over DNS
+  # (DNS-01), the only way to get the wildcard. Empty: proven over HTTP, one name at a time.
+  route53Zone: ""
+  # The oldest TLS the edge accepts on every host (site, API, spaces, control, Grafana). The database
+  # connection is separate: RDS takes `ssl_min_protocol_version` from its parameter group.
+  minVersion: VersionTLS13
+
+database:
+  host: ""            # set at deploy: the database endpoint (RDS)
+  sslmode: require
+  masterSecret: ""    # set at deploy: the Secrets Manager id of the database master user
+
+# The connection pooler between the cell and the database: the cell database, the control database
+# and one database per space share one small instance, whose connection limit (79 on the db.t4g.micro,
+# 74 once the reserved ones are left out) is the first thing to run out. Transaction mode. A pool is per
+# (database, role) and no database gets more than `maxDbConnections`: two per space database let about 25
+# spaces be active at once in the connections a quarter of the micro's memory can back, and dozens of
+# writes a second fit in two when an acknowledgement is one statement and the workers store in groups. A server connection nobody used for `serverIdleTimeout` seconds closes, and a
+# quiet space's relay passes less often than that, so an idle space holds none. Migrations, provisioning
+# and the backups connect to the database directly.
+# Larger pools were measured and rejected on 28/09/2026 (a local cell capped like the micro,
+# 2 batches and 2 reads a second per space): with 2/2, 25 busy spaces run without an error and 30 without an
+# error but with seconds-long tails; a third connection for the system role (maxDbConnections 3) had the
+# server refuse connections at 25 spaces, and 3/3 fails at 25 (20 hold). The fix for a hot space was to take
+# the reads and the loops off the pool, not to widen it. `reserve_pool_size` 1 adds nothing
+# while `maxDbConnections` equals `defaultPoolSize`.
+# The workers and the loops log in as niadra_worker, whose pool gets `workerDbConnections` of a database's
+# two: on 30/09/2026 a temporary cell like production showed the acknowledgement of a batch (one statement)
+# waiting in PgBouncer while the realtime worker's store and another worker held both connections idle in
+# their transactions: 19% of samples had a client waiting, up to 248 ms. With the workers capped at one,
+# the statement's p95 went from 10 to 78 ms to 5 to 10 ms, with no store backlog.
+pgbouncer:
+  image: ghcr.io/cloudnative-pg/pgbouncer:1.25.2
+  port: 6432
+  replicas: 1
+  maxClientConn: 1000
+  defaultPoolSize: 2
+  maxDbConnections: 2
+  workerDbConnections: 1
+  serverIdleTimeout: 10
+  # The cell's and the control plane's own databases, which every process shares.
+  cellDbConnections: 4
+  # PgBouncer keeps a few MiB plus two small buffers per client connection; the node holds 6 GiB for
+  # every pod, so the request stays small and the limit leaves room for a burst of connections.
+  resources: {cpu: 20m, memory: 32Mi, memoryLimit: 128Mi}
+
+objectStorage:
+  bucket: ""          # set at deploy
+
+# The master key in KMS that wraps each space's data key (aws/cluster.yaml, CellKey), set at deploy.
+keys:
+  kmsKeyId: ""        # set at deploy
+# The bucket with Object Lock for the daily audit roots (AuditBucket), set at deploy.
+audit:
+  bucket: ""          # set at deploy
+
+secretStore:
+  app: niadra/app                         # generated once by scripts/bootstrap-secrets.sh
+  llm: niadra/platform/llm
+  siteAdmin: niadra/admin/site
+  # Replaced niadra/sandbox/bootstrap on 23/09/2026, when the tenant got the company's name.
+  sandboxTenant: niadra/tenant/bootstrap
+
+# Paths of the api host and the deployable that serves them; the rest goes to admin. The longest
+# prefix wins, and Traefik compares prefixes as strings (`/v1/context` takes `/v1/context-use`), so a path
+# under another deployable's prefix is listed again under its own, like the admin ones below.
+# tests/test_routing.py checks every route of the server against these.
+routes:
+  ingest:
+    - /v1/batch
+    - /v1/ingest
+    - /v1/otel
+    - /v1/media
+    - /v1/feedback
+    - /v1/objects/push
+    - /v1/objects/snapshot
+    - /v1/types
+  read:
+    - /v1/context
+    - /v1/history
+    - /v1/objects
+    - /v1/subject-tokens
+    - /mcp
+    - /v1/state
+    - /v1/agent-state
+    - /v1/sdk
+    - /v1/constraints
+    - /v1/coordination
+    - /v1/handoffs
+    - /v1/suppressions
+    - /v1/notifications
+    - /.well-known/niadra-contact-keys.json
+  insights: [/v1/insights, /mcp/insights]
+  admin:
+    - /v1/context-use
+    - /v1/objects/coverage
+    - /v1/coordination/reports
+    - /v1/coordination/shadow
+    - /v1/coordination/overview
+# Whole paths (pathType Exact), for a group whose deeper paths another deployable serves: turns are
+# written on ingest, and read one by one (`/v1/turns/{turn_id}`) and searched on admin.
+exactRoutes:
+  ingest: [/v1/turns, /v1/turns/promote]
+
+# Memory requests are what each process holds, so the scheduler only places a pod where it fits:
+# a request below the real use lets a scale-up or a rollout take memory the machine does not have.
+# Working set on the m7i-flex.large on 25/09/2026, during the benchmark, and the peak since the pod
+# started (cgroup memory.peak): ingest 295 (296), read 341 (343), admin 175 (208), insights 163 (167),
+# control 157 (159) MiB. The agent core release adds, with every feature off, what a local cell measured
+# against the release before (29/09/2026): ingest +26, read +21, admin +27, insights +19, loops +23, a
+# worker +15 to +18, control -15 (it no longer imports the cell). The requests take those, rounded up;
+# ingest keeps 320 (2 MiB short, within the measurement's noise), control 160 (157 locally once the
+# sandbox space turns the agent features on). scripts/requests_budget.py (in scripts/check.sh) adds every
+# request up: 5048 of 5940 MiB at the minimum, 84.98%, so the next increase needs room made elsewhere.
+#
+# CPU requests are what the scheduler counts, and the autoscalers scale at 70% of them: at 50m a replica
+# was added at 35m, and each read replica then held about 340 MiB it never gave back. Since the warm read
+# answers from memory it is CPU bound, about 2.6 ms of CPU per read, so `read`
+# asks for 250m and `ingest` for 200m: under contention their share of the two cores comes before the
+# workers'. On one machine of two vCPUs, a second replica adds no core, only memory and contention; every
+# deployment at its maximum must fit the node's 2000m (scripts/requests_budget.py checks it). `read` stays
+# at one too: its autoscaler added the second replica in the middle of each burst of reads, and the new
+# pod's start took the cores from the warm one and from the models and PgBouncer pods it waits on. On the
+# benchmark cell of 10/10/2026 the history search at 25/s went to a p95 of 330 ms in the minute a second
+# replica started, and the warm replica's searches took up to 1.9 s; a local copy of the node (two cores,
+# the requests as weights, steady background work) gave a p95 of 22 to 24 ms with one replica and 27 to 57
+# ms when a second one started mid-load, while three times the background work alone cost 10 ms.
+# `ingest` stays at one (the acknowledgement is one statement since 28/09/2026), and the low-traffic APIs
+# at one. With more machines, raise `maxReplicas`.
+apis:
+  ingest:   {replicas: 1, maxReplicas: 1, cpu: 200m, memory: 320Mi, memoryLimit: 512Mi}
+  read:     {replicas: 1, maxReplicas: 1, cpu: 250m, memory: 368Mi, memoryLimit: 640Mi}
+  admin:    {replicas: 1, maxReplicas: 1, cpu: 30m, memory: 208Mi, memoryLimit: 512Mi}
+  insights: {replicas: 1, maxReplicas: 1, cpu: 30m, memory: 184Mi, memoryLimit: 448Mi}
+  control:  {replicas: 1, maxReplicas: 1, cpu: 30m, memory: 160Mi, memoryLimit: 448Mi}
+
+# Turn records and OTLP bodies over `bytes`, sent or decoded: each process holds at most `slots` of them at
+# once, and answers the next with 429 and Retry-After. A 16 MB decoded body costs 30 to 55 MiB while it is
+# parsed, and four at once took the single ingest pod past its limit (29/09/2026).
+largeBodies: {slots: 2, bytes: 1048576}
+
+# The read path (context()) is the latency the site promises: when several autoscalers want the same
+# free memory, a pending `read` replica is placed first. It never evicts anything to get there
+# (preemptionPolicy Never), and under memory pressure the kubelet evicts `read` last.
+readPriority: 1000
+
+# One consumer deployment per queue class, scaled by KEDA on the queue's depth.
+workers:
+  prefetch: 16
+  # One worker holds 168 to 185 MiB (peak 210) on 25/09/2026, under the benchmark, and 15 to 18 MiB more
+  # since the agent core release. The workers wait on the database and the models more than they compute,
+  # and yield the cores to `read` and `ingest`.
+  resources: {cpu: 30m, memory: 200Mi, memoryLimit: 640Mi}
+  # `alsoServes`: queues a pool's workers also consume, sharing their `prefetch` slots. `activation`:
+  # the depth of its own queue that wakes a pool at zero (default: any message).
+  pools:
+    realtime:   {min: 1, max: 2, perReplica: 20}
+    # Merges and erasures (IDENTITY_APPLY, ERASE): a few a day. The measure worker, always up, takes
+    # them the moment they arrive, so the union still runs right after the decision; this pool starts
+    # only when more than 20 wait, and one idle 170 MB process less stays on the machine.
+    identity:   {min: 0, max: 1, perReplica: 20, activation: 20}
+    extraction: {min: 1, max: 2, perReplica: 10}
+    # Always one: a session's measurement lands right after its memory (docs, concepts/context-use),
+    # and from zero it would first wait for KEDA's poll and a pod start. MeasurementReadyP95Above90s
+    # (files/alerts.yaml) watches the delay. One worker requests 200Mi and holds about 190 MB; with it
+    # and the models pod's OCR, the memory requests of every release at its minimum stay under the share
+    # of the node's allocatable memory that scripts/requests_budget.py allows.
+    # Webhooks and the notification feed (DELIVERY) too: from zero, an event waited for KEDA's 30 s poll and
+    # a pod start, twice on its path (the announcement, then the feed's copy), and a company that pulls saw
+    # `data_issue.opened` more than two minutes late (e2e 03/10/2026). The measure worker, always up, takes
+    # them at once; the delivery pool starts only when more than 20 wait.
+    measure:    {min: 1, max: 1, perReplica: 50, alsoServes: [identity, delivery]}
+    delivery:   {min: 0, max: 1, perReplica: 50, activation: 20}
+    background: {min: 0, max: 1, perReplica: 50}
+    volume:     {min: 0, max: 1, perReplica: 200}
+
+loops:
+  # Space databases the per-database loops (relay, scheduler, idle sweep) touch at the same time.
+  concurrency: 4
+  # 202 to 209 MiB idle and 210 to 214 after the end-to-end check in a local cell (29/09/2026). Also the
+  # pod of the setup hook, which imports only the migrations.
+  resources: {cpu: 50m, memory: 212Mi, memoryLimit: 512Mi}
+
+# The migration runner of `serve setup`: space databases migrated at the same time within a wave.
+setup:
+  concurrency: 2
+
+# Nightly pg_dump of the cell database and of every space database up to `maxDbGiB`, into the cell
+# bucket (backups/<database>/), expired after `retentionDays`; on Sundays the run also restores each
+# latest dump into a scratch database and counts rows. `instanceRetentionDays` is the RDS automated
+# backup retention (aws/cluster.yaml): a deletion receipt states when the last instance copy expires.
+# The cell's Prometheus and Alertmanager (kube-prometheus-stack, release `monitoring`). The admin process
+# reads the Prometheus for the Console's latency card by space (server, app/latency.py); a weekly job
+# adds a test alert to the Alertmanager, as every deploy does (scripts/on-ops.sh), so the path to the
+# alert e-mail stays exercised: a `ticket` that ends after 5 minutes.
+monitoring:
+  prometheusUrl: http://monitoring-kube-prometheus-prometheus.monitoring:9090
+  alertmanagerUrl: http://monitoring-kube-prometheus-alertmanager.monitoring:9093
+  canary:
+    schedule: "0 13 * * 1"
+    image: quay.io/prometheus/alertmanager:v0.34.1
+    resources: {cpu: 10m, memory: 16Mi, memoryLimit: 64Mi}
+
+backup:
+  schedule: "30 2 * * *"
+  maxDbGiB: 50
+  retentionDays: 35
+  instanceRetentionDays: 1
+  scratch: 10Gi
+  resources: {cpu: 50m, memory: 128Mi, memoryLimit: 512Mi}
+
+models:
+  # One copy: a second one on the same two-core machine adds no CPU, only 535 MiB of memory.
+  replicas: 1
+  maxReplicas: 1
+  # The embedding model scripts/on-ops.sh bakes into the image, pinned by revision and checksum in
+  # the server (server/models/src/niadra_models/onnx/pinned.py); the pod reads it from /models/<name>. Empty
+  # builds the image without ONNX Runtime and serves the hashing embedder.
+  embedModel: paraphrase-multilingual-minilm-l12-v2-r1
+  onnxThreads: 2
+  # Text in images (on-ops.sh builds the image with `--build-arg OCR=1`): RapidOCR reads each image in
+  # a child process of its own, one at a time, which the kernel kills first if the pod runs out of memory.
+  ocr: true
+  # Resident memory with that model, measured on linux/amd64: 535 MiB once loaded (the tokenizer of
+  # its 250k-token vocabulary is about 270 MiB of it) and 655 MiB after bursts of 256 texts. With OCR,
+  # measured under load (two bursts of 256 texts and four images up to 4000x3000 at once): 574 MiB, a
+  # peak of 1.1 to 1.5 GiB while an image is read, and about 600 MiB again once its child exits; 521 MiB
+  # (peak 538) in production on 25/09/2026. The request covers the pod between images (the 655 MiB after
+  # bursts); the limit, the 1.5 GiB peak with a sixth more. The burst above the request comes out of the
+  # share of allocatable memory scripts/requests_budget.py keeps free.
+  resources: {cpu: 50m, memory: 640Mi, memoryLimit: 1792Mi}
+
+# Static files and the contact form: 18 to 24 MiB each on 25/09/2026 (the form's peak, 68, at start).
+site:
+  replicas: 1
+  resources: {cpu: 20m, memory: 32Mi, memoryLimit: 128Mi}
+# The site API also counts the site's accesses (UDP from the site's Caddy, flushed once a minute) and
+# answers the admin panel; a sign-in runs one scrypt at a time, 16 MiB for about 50 ms.
+siteApi:
+  replicas: 1
+  accessLogPort: 8788
+  resources: {cpu: 20m, memory: 48Mi, memoryLimit: 192Mi}
+
+rabbitmq:
+  replicas: 1
+  storage: 5Gi
+  # Request = limit (the operator's rule), and the broker blocks publishers at 0.7 of the 80% of the
+  # limit the operator gives it: 251 MiB with 448Mi. On 25/09/2026, with 1,505 messages waiting during
+  # the benchmark, it held 160 MB by its own count (rss) and 136 to 144 MiB of working set, peak 253.
+  resources: {cpu: 100m, memory: 448Mi}
+
+# The cache (templates/data.yaml), under LRU eviction: full is its normal state, so the request
+# covers maxmemory plus the server's own (134.8 MiB rss at 128 MB used, 27/09/2026).
+valkey:
+  maxMemory: 128mb
+  resources: {cpu: 50m, memory: 160Mi, memoryLimit: 192Mi}
+
+# The state store, never evicting. On 27/09/2026 its contents measured about 2.5 MB (46 hot-layer
+# sets, 2.2 MB). The agent features keep their counters, coordination keys, agent state in transit and
+# erasure marks here too: 10 to 20 MB estimated for a space of about 50,000 turns a day, so 64 MB. With
+# `noeviction` the limit covers maxmemory, fragmentation and the server's own; with every feature off it
+# holds about 5 MiB, so the request stays until a space turns the features on (then 48Mi).
+valkeyState:
+  maxMemory: 64mb
+  resources: {cpu: 20m, memory: 24Mi, memoryLimit: 96Mi}
+
+# The synthetic tenant of a sandbox and the end-to-end check (`helm test`).
+sandbox:
+  enabled: true

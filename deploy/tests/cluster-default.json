@@ -1,0 +1,947 @@
+{
+ "Outputs": {
+  "AlertsTopicArn": {
+   "Ref": "AlertsTopic"
+  },
+  "AuditBucket": {
+   "Ref": "AuditBucket"
+  },
+  "CellBucket": {
+   "Ref": "CellBucket"
+  },
+  "CellKeyArn": {
+   "Fn::GetAtt": [
+    "CellKey",
+    "Arn"
+   ]
+  },
+  "DatabaseEndpoint": {
+   "Fn::GetAtt": [
+    "Database",
+    "Endpoint.Address"
+   ]
+  },
+  "DatabaseMasterSecretArn": {
+   "Fn::GetAtt": [
+    "Database",
+    "MasterUserSecret.SecretArn"
+   ]
+  },
+  "InstanceId": {
+   "Ref": "Server"
+  },
+  "LogGroup": {
+   "Ref": "ClusterLogs"
+  },
+  "NameServers": {
+   "Fn::Join": [
+    ",",
+    {
+     "Fn::GetAtt": [
+      "Zone",
+      "NameServers"
+     ]
+    }
+   ]
+  },
+  "PublicAddress": {
+   "Ref": "Address"
+  },
+  "Registry": "111122223333.dkr.ecr.us-east-2.amazonaws.com",
+  "ReleaseBucket": {
+   "Ref": "ReleaseBucket"
+  },
+  "ZoneId": {
+   "Ref": "Zone"
+  }
+ },
+ "Resources": {
+  "Address": {
+   "Properties": {
+    "Domain": "vpc",
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "niadra"
+     }
+    ]
+   },
+   "Type": "AWS::EC2::EIP"
+  },
+  "AddressAssociation": {
+   "Properties": {
+    "AllocationId": {
+     "Fn::GetAtt": [
+      "Address",
+      "AllocationId"
+     ]
+    },
+    "InstanceId": {
+     "Ref": "Server"
+    }
+   },
+   "Type": "AWS::EC2::EIPAssociation"
+  },
+  "AlertEmailSubscription": {
+   "Properties": {
+    "Endpoint": "alerts@example.com",
+    "Protocol": "email",
+    "TopicArn": {
+     "Ref": "AlertsTopic"
+    }
+   },
+   "Type": "AWS::SNS::Subscription"
+  },
+  "AlertsTopic": {
+   "Properties": {
+    "DisplayName": "Niadra alerts",
+    "TopicName": "niadra-alerts"
+   },
+   "Type": "AWS::SNS::Topic"
+  },
+  "AuditBucket": {
+   "DeletionPolicy": "Retain",
+   "Properties": {
+    "BucketEncryption": {
+     "ServerSideEncryptionConfiguration": [
+      {
+       "ServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+       }
+      }
+     ]
+    },
+    "BucketName": "niadra-audit-111122223333",
+    "ObjectLockConfiguration": {
+     "ObjectLockEnabled": "Enabled",
+     "Rule": {
+      "DefaultRetention": {
+       "Days": 1825,
+       "Mode": "COMPLIANCE"
+      }
+     }
+    },
+    "ObjectLockEnabled": true,
+    "PublicAccessBlockConfiguration": {
+     "BlockPublicAcls": true,
+     "BlockPublicPolicy": true,
+     "IgnorePublicAcls": true,
+     "RestrictPublicBuckets": true
+    },
+    "VersioningConfiguration": {
+     "Status": "Enabled"
+    }
+   },
+   "Type": "AWS::S3::Bucket",
+   "UpdateReplacePolicy": "Retain"
+  },
+  "AuditBucketPolicy": {
+   "Properties": {
+    "Bucket": {
+     "Ref": "AuditBucket"
+    },
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "s3:PutObject",
+       "Condition": {
+        "Null": {
+         "s3:if-none-match": "true"
+        }
+       },
+       "Effect": "Deny",
+       "Principal": "*",
+       "Resource": "${AuditBucket.Arn}/*",
+       "Sid": "DenyWriteWithoutIfNoneMatch"
+      },
+      {
+       "Action": "s3:*",
+       "Condition": {
+        "Bool": {
+         "aws:SecureTransport": "false"
+        }
+       },
+       "Effect": "Deny",
+       "Principal": "*",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "AuditBucket",
+          "Arn"
+         ]
+        },
+        "${AuditBucket.Arn}/*"
+       ],
+       "Sid": "DenyInsecureTransport"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Type": "AWS::S3::BucketPolicy"
+  },
+  "CellBucket": {
+   "DeletionPolicy": "Retain",
+   "Properties": {
+    "BucketEncryption": {
+     "ServerSideEncryptionConfiguration": [
+      {
+       "ServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+       }
+      }
+     ]
+    },
+    "BucketName": "niadra-cell-111122223333",
+    "CorsConfiguration": {
+     "CorsRules": [
+      {
+       "AllowedHeaders": [
+        "*"
+       ],
+       "AllowedMethods": [
+        "PUT",
+        "GET"
+       ],
+       "AllowedOrigins": [
+        "*"
+       ],
+       "MaxAge": 3000
+      }
+     ]
+    },
+    "PublicAccessBlockConfiguration": {
+     "BlockPublicAcls": true,
+     "BlockPublicPolicy": true,
+     "IgnorePublicAcls": true,
+     "RestrictPublicBuckets": true
+    }
+   },
+   "Type": "AWS::S3::Bucket",
+   "UpdateReplacePolicy": "Retain"
+  },
+  "CellKey": {
+   "DeletionPolicy": "Retain",
+   "Properties": {
+    "Description": "Niadra cell master key - wraps the data key of each space",
+    "EnableKeyRotation": true,
+    "KeyPolicy": {
+     "Statement": [
+      {
+       "Action": [
+        "kms:Create*",
+        "kms:Describe*",
+        "kms:Enable*",
+        "kms:List*",
+        "kms:Put*",
+        "kms:Update*",
+        "kms:Revoke*",
+        "kms:Disable*",
+        "kms:Get*",
+        "kms:Delete*",
+        "kms:TagResource",
+        "kms:UntagResource",
+        "kms:ScheduleKeyDeletion",
+        "kms:CancelKeyDeletion",
+        "kms:RotateKeyOnDemand"
+       ],
+       "Effect": "Allow",
+       "Principal": {
+        "AWS": "arn:aws:iam::111122223333:root"
+       },
+       "Resource": "*",
+       "Sid": "KeyAdministration"
+      },
+      {
+       "Action": [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:GenerateDataKey",
+        "kms:DescribeKey"
+       ],
+       "Effect": "Allow",
+       "Principal": {
+        "AWS": {
+         "Fn::GetAtt": [
+          "NodeRole",
+          "Arn"
+         ]
+        }
+       },
+       "Resource": "*",
+       "Sid": "KeyUse"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "KeySpec": "SYMMETRIC_DEFAULT",
+    "KeyUsage": "ENCRYPT_DECRYPT",
+    "PendingWindowInDays": 30,
+    "RotationPeriodInDays": 365
+   },
+   "Type": "AWS::KMS::Key",
+   "UpdateReplacePolicy": "Retain"
+  },
+  "CellKeyAlias": {
+   "Properties": {
+    "AliasName": "alias/niadra-cell",
+    "TargetKeyId": {
+     "Ref": "CellKey"
+    }
+   },
+   "Type": "AWS::KMS::Alias"
+  },
+  "ClusterLogs": {
+   "Properties": {
+    "LogGroupName": "/niadra/cluster",
+    "RetentionInDays": 30
+   },
+   "Type": "AWS::Logs::LogGroup"
+  },
+  "DataA": {
+   "Properties": {
+    "AvailabilityZone": {
+     "Fn::Select": [
+      0,
+      {
+       "Fn::GetAZs": ""
+      }
+     ]
+    },
+    "CidrBlock": "10.40.128.0/22",
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "niadra-data-a"
+     }
+    ],
+    "VpcId": {
+     "Ref": "Vpc"
+    }
+   },
+   "Type": "AWS::EC2::Subnet"
+  },
+  "DataB": {
+   "Properties": {
+    "AvailabilityZone": {
+     "Fn::Select": [
+      1,
+      {
+       "Fn::GetAZs": ""
+      }
+     ]
+    },
+    "CidrBlock": "10.40.132.0/22",
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "niadra-data-b"
+     }
+    ],
+    "VpcId": {
+     "Ref": "Vpc"
+    }
+   },
+   "Type": "AWS::EC2::Subnet"
+  },
+  "Database": {
+   "DeletionPolicy": "Snapshot",
+   "Properties": {
+    "AllocatedStorage": "20",
+    "AvailabilityZone": {
+     "Fn::Select": [
+      0,
+      {
+       "Fn::GetAZs": ""
+      }
+     ]
+    },
+    "BackupRetentionPeriod": 1,
+    "DBInstanceClass": "db.t4g.micro",
+    "DBInstanceIdentifier": "niadra",
+    "DBParameterGroupName": {
+     "Ref": "DatabaseParameters"
+    },
+    "DBSubnetGroupName": {
+     "Ref": "DatabaseSubnets"
+    },
+    "DeletionProtection": true,
+    "EnablePerformanceInsights": false,
+    "Engine": "postgres",
+    "EngineVersion": "17.11",
+    "ManageMasterUserPassword": true,
+    "MasterUsername": "niadra_admin",
+    "MultiAZ": false,
+    "PubliclyAccessible": false,
+    "StorageEncrypted": true,
+    "StorageType": "gp3",
+    "VPCSecurityGroups": [
+     {
+      "Ref": "DatabaseSecurityGroup"
+     }
+    ]
+   },
+   "Type": "AWS::RDS::DBInstance",
+   "UpdateReplacePolicy": "Snapshot"
+  },
+  "DatabaseParameters": {
+   "Properties": {
+    "Description": "Niadra niadra: autovacuum and memory for many small databases",
+    "Family": "postgres17",
+    "Parameters": {
+     "autovacuum_max_workers": "2",
+     "autovacuum_naptime": "300",
+     "autovacuum_work_mem": "16384",
+     "maintenance_work_mem": "32768",
+     "shared_buffers": "11295",
+     "ssl_min_protocol_version": "TLSv1.3",
+     "work_mem": "2048"
+    },
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "niadra"
+     }
+    ]
+   },
+   "Type": "AWS::RDS::DBParameterGroup"
+  },
+  "DatabaseSecurityGroup": {
+   "Properties": {
+    "GroupDescription": "PostgreSQL from the cluster only",
+    "SecurityGroupIngress": [
+     {
+      "FromPort": 5432,
+      "IpProtocol": "tcp",
+      "SourceSecurityGroupId": {
+       "Ref": "NodeSecurityGroup"
+      },
+      "ToPort": 5432
+     }
+    ],
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "niadra-database"
+     }
+    ],
+    "VpcId": {
+     "Ref": "Vpc"
+    }
+   },
+   "Type": "AWS::EC2::SecurityGroup"
+  },
+  "DatabaseSubnets": {
+   "Properties": {
+    "DBSubnetGroupDescription": "Niadra data subnets",
+    "SubnetIds": [
+     {
+      "Ref": "DataA"
+     },
+     {
+      "Ref": "DataB"
+     }
+    ]
+   },
+   "Type": "AWS::RDS::DBSubnetGroup"
+  },
+  "DefaultRoute": {
+   "DependsOn": "GatewayAttachment",
+   "Properties": {
+    "DestinationCidrBlock": "0.0.0.0/0",
+    "GatewayId": {
+     "Ref": "InternetGateway"
+    },
+    "RouteTableId": {
+     "Ref": "PublicRoutes"
+    }
+   },
+   "Type": "AWS::EC2::Route"
+  },
+  "GatewayAttachment": {
+   "Properties": {
+    "InternetGatewayId": {
+     "Ref": "InternetGateway"
+    },
+    "VpcId": {
+     "Ref": "Vpc"
+    }
+   },
+   "Type": "AWS::EC2::VPCGatewayAttachment"
+  },
+  "InternetGateway": {
+   "Type": "AWS::EC2::InternetGateway"
+  },
+  "ModelsRepository": {
+   "Properties": {
+    "EncryptionConfiguration": {
+     "EncryptionType": "AES256"
+    },
+    "ImageScanningConfiguration": {
+     "ScanOnPush": true
+    },
+    "LifecyclePolicy": {
+     "LifecyclePolicyText": "{\"rules\":[{\"rulePriority\":1,\"description\":\"keep the last 15 images\",\"selection\":{\"tagStatus\":\"any\",\"countType\":\"imageCountMoreThan\",\"countNumber\":15},\"action\":{\"type\":\"expire\"}}]}"
+    },
+    "RepositoryName": "niadra/models"
+   },
+   "Type": "AWS::ECR::Repository"
+  },
+  "NodeProfile": {
+   "Properties": {
+    "Roles": [
+     {
+      "Ref": "NodeRole"
+     }
+    ]
+   },
+   "Type": "AWS::IAM::InstanceProfile"
+  },
+  "NodeRole": {
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ec2.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "ManagedPolicyArns": [
+     "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+     "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
+    ],
+    "Policies": [
+     {
+      "PolicyDocument": {
+       "Statement": [
+        {
+         "Action": [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket",
+          "s3:GetBucketLocation",
+          "s3:PutLifecycleConfiguration",
+          "s3:GetLifecycleConfiguration"
+         ],
+         "Effect": "Allow",
+         "Resource": [
+          {
+           "Fn::GetAtt": [
+            "CellBucket",
+            "Arn"
+           ]
+          },
+          "${CellBucket.Arn}/*"
+         ]
+        },
+        {
+         "Action": [
+          "s3:GetObject",
+          "s3:ListBucket"
+         ],
+         "Effect": "Allow",
+         "Resource": [
+          {
+           "Fn::GetAtt": [
+            "ReleaseBucket",
+            "Arn"
+           ]
+          },
+          "${ReleaseBucket.Arn}/*"
+         ]
+        },
+        {
+         "Action": [
+          "s3:PutObject",
+          "s3:PutObjectRetention",
+          "s3:GetObject",
+          "s3:GetObjectRetention",
+          "s3:ListBucket"
+         ],
+         "Effect": "Allow",
+         "Resource": [
+          {
+           "Fn::GetAtt": [
+            "AuditBucket",
+            "Arn"
+           ]
+          },
+          "${AuditBucket.Arn}/*"
+         ]
+        },
+        {
+         "Action": [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+         ],
+         "Effect": "Allow",
+         "Resource": [
+          "arn:aws:secretsmanager:us-east-2:111122223333:secret:niadra/*",
+          "arn:aws:secretsmanager:us-east-2:111122223333:secret:rds!db-*"
+         ]
+        },
+        {
+         "Action": [
+          "secretsmanager:CreateSecret",
+          "secretsmanager:PutSecretValue"
+         ],
+         "Effect": "Allow",
+         "Resource": "arn:aws:secretsmanager:us-east-2:111122223333:secret:niadra/*"
+        },
+        {
+         "Action": "secretsmanager:DeleteSecret",
+         "Effect": "Allow",
+         "Resource": "arn:aws:secretsmanager:us-east-2:111122223333:secret:niadra/tenant/bootstrap-??????"
+        },
+        {
+         "Action": [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogStreams"
+         ],
+         "Effect": "Allow",
+         "Resource": "${ClusterLogs.Arn}:*"
+        },
+        {
+         "Action": [
+          "route53:ChangeResourceRecordSets",
+          "route53:ListResourceRecordSets"
+         ],
+         "Effect": "Allow",
+         "Resource": "arn:aws:route53:::hostedzone/${Zone}"
+        },
+        {
+         "Action": [
+          "route53:GetChange",
+          "route53:ListHostedZonesByName"
+         ],
+         "Effect": "Allow",
+         "Resource": "*"
+        },
+        {
+         "Action": [
+          "logs:DescribeLogGroups",
+          "logs:StartQuery",
+          "logs:StopQuery",
+          "logs:GetQueryResults",
+          "logs:GetLogEvents",
+          "logs:FilterLogEvents"
+         ],
+         "Effect": "Allow",
+         "Resource": "*"
+        },
+        {
+         "Action": "sns:Publish",
+         "Effect": "Allow",
+         "Resource": {
+          "Ref": "AlertsTopic"
+         }
+        }
+       ],
+       "Version": "2012-10-17"
+      },
+      "PolicyName": "niadra-node"
+     }
+    ]
+   },
+   "Type": "AWS::IAM::Role"
+  },
+  "NodeSecurityGroup": {
+   "Properties": {
+    "GroupDescription": "k3s machine - HTTP and HTTPS from anywhere, no SSH",
+    "SecurityGroupIngress": [
+     {
+      "CidrIp": "0.0.0.0/0",
+      "FromPort": 80,
+      "IpProtocol": "tcp",
+      "ToPort": 80
+     },
+     {
+      "CidrIp": "0.0.0.0/0",
+      "FromPort": 443,
+      "IpProtocol": "tcp",
+      "ToPort": 443
+     }
+    ],
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "niadra-nodes"
+     }
+    ],
+    "VpcId": {
+     "Ref": "Vpc"
+    }
+   },
+   "Type": "AWS::EC2::SecurityGroup"
+  },
+  "PublicA": {
+   "Properties": {
+    "AvailabilityZone": {
+     "Fn::Select": [
+      0,
+      {
+       "Fn::GetAZs": ""
+      }
+     ]
+    },
+    "CidrBlock": "10.40.0.0/20",
+    "MapPublicIpOnLaunch": false,
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "niadra-public-a"
+     }
+    ],
+    "VpcId": {
+     "Ref": "Vpc"
+    }
+   },
+   "Type": "AWS::EC2::Subnet"
+  },
+  "PublicARoutes": {
+   "Properties": {
+    "RouteTableId": {
+     "Ref": "PublicRoutes"
+    },
+    "SubnetId": {
+     "Ref": "PublicA"
+    }
+   },
+   "Type": "AWS::EC2::SubnetRouteTableAssociation"
+  },
+  "PublicRoutes": {
+   "Properties": {
+    "VpcId": {
+     "Ref": "Vpc"
+    }
+   },
+   "Type": "AWS::EC2::RouteTable"
+  },
+  "Records": {
+   "Properties": {
+    "HostedZoneId": {
+     "Ref": "Zone"
+    },
+    "RecordSets": [
+     {
+      "Name": "niadra.com",
+      "ResourceRecords": [
+       {
+        "Ref": "Address"
+       }
+      ],
+      "TTL": "300",
+      "Type": "A"
+     },
+     {
+      "Name": "www.niadra.com",
+      "ResourceRecords": [
+       {
+        "Ref": "Address"
+       }
+      ],
+      "TTL": "300",
+      "Type": "A"
+     },
+     {
+      "Name": "api.niadra.com",
+      "ResourceRecords": [
+       {
+        "Ref": "Address"
+       }
+      ],
+      "TTL": "300",
+      "Type": "A"
+     },
+     {
+      "Name": "*.us-east-2.api.niadra.com",
+      "ResourceRecords": [
+       {
+        "Ref": "Address"
+       }
+      ],
+      "TTL": "300",
+      "Type": "A"
+     },
+     {
+      "Name": "control.api.niadra.com",
+      "ResourceRecords": [
+       {
+        "Ref": "Address"
+       }
+      ],
+      "TTL": "300",
+      "Type": "A"
+     },
+     {
+      "Name": "grafana.niadra.com",
+      "ResourceRecords": [
+       {
+        "Ref": "Address"
+       }
+      ],
+      "TTL": "300",
+      "Type": "A"
+     },
+     {
+      "Name": "admin.niadra.com",
+      "ResourceRecords": [
+       {
+        "Ref": "Address"
+       }
+      ],
+      "TTL": "300",
+      "Type": "A"
+     }
+    ]
+   },
+   "Type": "AWS::Route53::RecordSetGroup"
+  },
+  "ReleaseBucket": {
+   "Properties": {
+    "BucketEncryption": {
+     "ServerSideEncryptionConfiguration": [
+      {
+       "ServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+       }
+      }
+     ]
+    },
+    "BucketName": "niadra-releases-111122223333",
+    "LifecycleConfiguration": {
+     "Rules": [
+      {
+       "ExpirationInDays": 30,
+       "Id": "expire-old-releases",
+       "Prefix": "releases/",
+       "Status": "Enabled"
+      }
+     ]
+    },
+    "PublicAccessBlockConfiguration": {
+     "BlockPublicAcls": true,
+     "BlockPublicPolicy": true,
+     "IgnorePublicAcls": true,
+     "RestrictPublicBuckets": true
+    }
+   },
+   "Type": "AWS::S3::Bucket"
+  },
+  "Server": {
+   "Properties": {
+    "BlockDeviceMappings": [
+     {
+      "DeviceName": "/dev/sda1",
+      "Ebs": {
+       "DeleteOnTermination": true,
+       "Encrypted": true,
+       "VolumeSize": "40",
+       "VolumeType": "gp3"
+      }
+     }
+    ],
+    "IamInstanceProfile": {
+     "Ref": "NodeProfile"
+    },
+    "ImageId": "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id",
+    "InstanceType": "m7i-flex.large",
+    "MetadataOptions": {
+     "HttpEndpoint": "enabled",
+     "HttpPutResponseHopLimit": 2,
+     "HttpTokens": "required"
+    },
+    "SecurityGroupIds": [
+     {
+      "Ref": "NodeSecurityGroup"
+     }
+    ],
+    "SubnetId": {
+     "Ref": "PublicA"
+    },
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "niadra-server"
+     }
+    ],
+    "UserData": {
+     "Fn::Base64": "#!/bin/bash\nset -euxo pipefail\nexport DEBIAN_FRONTEND=noninteractive\n# The subnet gives no automatic public address: the machine reaches the internet once the\n# fixed address is attached, a few seconds after launch.\nip() { curl -s -H \"X-aws-ec2-metadata-token: $(curl -s -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')\" http://169.254.169.254/latest/meta-data/public-ipv4; }\nuntil [ \"$(ip)\" = \"${Address}\" ]; do sleep 5; done\napt-get update -y && apt-get install -y jq curl unzip\nsnap install aws-cli --classic\n# --cluster-init starts embedded etcd, so more servers can join later without a rebuild.\ncurl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.33.13+k3s2' \\\n  sh -s - server --cluster-init --secrets-encryption --write-kubeconfig-mode 0600\n# The machine also builds the images and runs the deploy: Docker, Helm and helmfile.\napt-get install -y docker.io && systemctl enable --now docker\ncurl -fsSL https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz | tar -xz -C /usr/local/bin --strip-components=1 linux-amd64/helm\ncurl -fsSL https://github.com/helmfile/helmfile/releases/download/v1.8.0/helmfile_1.8.0_linux_amd64.tar.gz | tar -xz -C /usr/local/bin helmfile\nHOME=/root helm plugin install https://github.com/databus23/helm-diff --verify=false || true\n# The ingress controller k3s ships, with access logs as JSON (they go to CloudWatch). The\n# Local policy keeps the client's address on the way in (the contact form limits by it).\ncat > /var/lib/rancher/k3s/server/manifests/traefik-config.yaml <<'EOF'\napiVersion: helm.cattle.io/v1\nkind: HelmChartConfig\nmetadata: {name: traefik, namespace: kube-system}\nspec:\n  valuesContent: |-\n    service:\n      spec: {externalTrafficPolicy: Local}\n    logs:\n      access: {enabled: true, format: json}\nEOF\n# ECR tokens last 12 hours: every 6 hours the pods' default service account in the\n# niadra namespace gets a fresh pull secret, made with this machine's role.\ncat > /usr/local/bin/niadra-ecr-login <<'EOF'\n#!/bin/bash\nset -euo pipefail\nkubectl create namespace niadra --dry-run=client -o yaml | kubectl apply -f -\nkubectl -n niadra create secret docker-registry ecr \\\n  --docker-server=111122223333.dkr.ecr.us-east-2.amazonaws.com --docker-username=AWS \\\n  --docker-password=\"$(/snap/bin/aws ecr get-login-password --region us-east-2)\" \\\n  --dry-run=client -o yaml | kubectl apply -f -\nkubectl -n niadra patch serviceaccount default -p '{\"imagePullSecrets\":[{\"name\":\"ecr\"}]}'\nEOF\nchmod 755 /usr/local/bin/niadra-ecr-login\ncat > /etc/systemd/system/niadra-ecr-login.service <<'EOF'\n[Service]\nType=oneshot\nEnvironment=KUBECONFIG=/etc/rancher/k3s/k3s.yaml\nExecStart=/usr/local/bin/niadra-ecr-login\nEOF\ncat > /etc/systemd/system/niadra-ecr-login.timer <<'EOF'\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=6h\n[Install]\nWantedBy=timers.target\nEOF\nsystemctl daemon-reload && systemctl enable --now niadra-ecr-login.timer\n"
+    }
+   },
+   "Type": "AWS::EC2::Instance"
+  },
+  "ServerRepository": {
+   "Properties": {
+    "EncryptionConfiguration": {
+     "EncryptionType": "AES256"
+    },
+    "ImageScanningConfiguration": {
+     "ScanOnPush": true
+    },
+    "LifecyclePolicy": {
+     "LifecyclePolicyText": "{\"rules\":[{\"rulePriority\":1,\"description\":\"keep the last 15 images\",\"selection\":{\"tagStatus\":\"any\",\"countType\":\"imageCountMoreThan\",\"countNumber\":15},\"action\":{\"type\":\"expire\"}}]}"
+    },
+    "RepositoryName": "niadra/server"
+   },
+   "Type": "AWS::ECR::Repository"
+  },
+  "SiteApiRepository": {
+   "Properties": {
+    "EncryptionConfiguration": {
+     "EncryptionType": "AES256"
+    },
+    "ImageScanningConfiguration": {
+     "ScanOnPush": true
+    },
+    "LifecyclePolicy": {
+     "LifecyclePolicyText": "{\"rules\":[{\"rulePriority\":1,\"description\":\"keep the last 15 images\",\"selection\":{\"tagStatus\":\"any\",\"countType\":\"imageCountMoreThan\",\"countNumber\":15},\"action\":{\"type\":\"expire\"}}]}"
+    },
+    "RepositoryName": "niadra/site-api"
+   },
+   "Type": "AWS::ECR::Repository"
+  },
+  "SiteRepository": {
+   "Properties": {
+    "EncryptionConfiguration": {
+     "EncryptionType": "AES256"
+    },
+    "ImageScanningConfiguration": {
+     "ScanOnPush": true
+    },
+    "LifecyclePolicy": {
+     "LifecyclePolicyText": "{\"rules\":[{\"rulePriority\":1,\"description\":\"keep the last 15 images\",\"selection\":{\"tagStatus\":\"any\",\"countType\":\"imageCountMoreThan\",\"countNumber\":15},\"action\":{\"type\":\"expire\"}}]}"
+    },
+    "RepositoryName": "niadra/site"
+   },
+   "Type": "AWS::ECR::Repository"
+  },
+  "Vpc": {
+   "Properties": {
+    "CidrBlock": "10.40.0.0/16",
+    "EnableDnsHostnames": true,
+    "EnableDnsSupport": true,
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "niadra"
+     }
+    ]
+   },
+   "Type": "AWS::EC2::VPC"
+  },
+  "Zone": {
+   "Properties": {
+    "Name": "niadra.com"
+   },
+   "Type": "AWS::Route53::HostedZone"
+  }
+ }
+}

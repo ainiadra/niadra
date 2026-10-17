@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://docs.niadra.com/en
+    about: Guides, concepts and the API reference.
+  - name: Report a vulnerability
+    url: https://github.com/ainiadra/niadra/security/advisories/new
+    about: Please report security issues privately, never in a public issue.

@@ -1,0 +1,10 @@
+{
+  "idempotency_key": "0192b8a7-6a1b-7c22-8d4e-0f1a2b3c4d5e",
+  "subject": {
+    "type": "email",
+    "value": "marina@example.com"
+  },
+  "action": "resolve_open_item",
+  "open_item_id": "0192b6c0-1e3d-7a20-8000-00000000a001",
+  "reason": "visit happened on 09/23"
+}

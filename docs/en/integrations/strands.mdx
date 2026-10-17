@@ -1,0 +1,97 @@
+---
+title: "Strands Agents"
+description: "The customer's memory in a Strands agent, as a HookProvider and the history tools."
+---
+
+`NiadraHooks` is a Strands Agents `HookProvider`: before each model call it places the pack in the system prompt and restores it afterwards; `tools` brings the history kit. In TypeScript, `NiadraPlugin` is a plugin for Strands Agents for TypeScript. Built for teams already on AWS.
+
+## Install
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[strands]'   # strands-agents 1.57 or newer, below 2
+```
+```sh TypeScript
+npm install @niadra/sdk @strands-agents/sdk   # @strands-agents/sdk 1.19 or newer, below 2; Node 22 or newer
+```
+</CodeGroup>
+
+The TypeScript integration is in `@niadra/sdk` on npm.
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | Before each model call, the agent's system prompt gets the pack and the `turn_block` as text blocks after your own (cache points included); after the call your system prompt is restored, so nothing piles up and your prompt stays the cacheable prefix |
+| Turns | The user's message is recorded when an invocation starts and each model answer when its call ends, with the usage of that call (the agent's accumulated usage before and after it) and the model id |
+| Tools | `tools`: the history tools as Strands tools with the kit's names, descriptions and schemas, bound to the customer |
+| Verification | `conversation.verify()` before invoking |
+| Handoff | `transferred_to_agent()` and `transferred_to_human()` record the transfer; call them from your swarm or graph where the conversation changes hands |
+
+## Minimal example
+
+```python
+"""A Strands agent with the customer's memory as hooks."""
+
+import asyncio
+
+from strands import Agent
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.strands import NiadraHooks
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    memory = NiadraHooks(niadra.conversation("thread-81", subject=phone("+5511912345678")))
+    agent = Agent(system_prompt="You are Acme's agent.", tools=memory.tools, hooks=[memory])
+    print(await agent.invoke_async("Where is my replacement lid?"))
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+
+The same code is in `examples/strands_agent.py`.
+
+## In TypeScript
+
+`new NiadraPlugin(convo)` goes in the `Agent`'s `plugins`: an input middleware of `InvokeModelStage` records the customer's newest message once, adds the pack after your system prompt and folds the `turn_block` into the last user message (keeping the cache point before it, as Strands' own context injector does), without touching `agent.messages`; an output middleware records the final answer with the model's usage (Bedrock and Anthropic count cached tokens apart, the others inside); `getTools()` gives the kit when the session is fixed. The plugin takes the conversation or a function of the agent that finds it per call.
+
+```typescript
+import { Agent, BedrockModel } from "@strands-agents/sdk";
+import { Niadra, handles } from "@niadra/sdk";
+import { NiadraPlugin } from "@niadra/sdk/strands";
+
+const niadra = new Niadra();
+const convo = niadra.conversation({ subject: handles.appUserId(user.id), channel: "web_chat", conversation_id: chatId });
+const support = new Agent({
+  model: new BedrockModel({ modelId: "us.anthropic.claude-sonnet-4-5-20250929-v1:0" }),
+  systemPrompt: "You are Acme's support agent.",
+  plugins: [new NiadraPlugin(convo)],
+});
+const result = await support.invoke("Where is my replacement?");
+```
+
+## Agent memory
+
+`NiadraHooks(conversation, agent_memory=True)` puts the agent's own notes before the customer's context and adds the two tools. See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- Strands' `MemoryStore` stores the agent's own session; Niadra is not that store, so it plugs in through hooks, next to any session manager you use.
+- Nothing here fails the invocation: without a pack, the system prompt goes as you wrote it.
+- Strands for TypeScript needs Node 22 or later.
+- Tested against `strands-agents` 1.57 with the model replaced by a fake and Niadra on the emulator; in TypeScript, against `@strands-agents/sdk` 1.19.0, with a real `Agent` through its AI SDK model adapter.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Amazon Bedrock" href="/en/integrations/bedrock">
+    the Converse API `wrap()`, for those calling Bedrock directly.
+  </Card>
+  <Card title="Internal agents" href="/en/guides/internal-agents">
+    tasks, objects and actions that close open items.
+  </Card>
+</CardGroup>

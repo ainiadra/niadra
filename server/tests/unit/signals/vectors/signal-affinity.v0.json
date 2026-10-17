@@ -1,0 +1,2646 @@
+{
+ "vectors": "signal-affinity",
+ "version": "v0",
+ "spec": "domain/signals/affinity.py",
+ "cases": [
+  {
+   "id": "exposure.by_position",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:2",
+        "shown": {
+         "color": "bege"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:3",
+        "shown": {
+         "color": "azul"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|preto": {
+      "e": 1.0,
+      "e_top": 1.0,
+      "s": 0.0
+     },
+     "item_variant.color|bege": {
+      "e": 0.63093
+     },
+     "item_variant.color|azul": {
+      "e": 0.5
+     }
+    },
+    "already_presented": [
+     "item_variant:store:1",
+     "item_variant:store:2",
+     "item_variant:store:3"
+    ],
+    "hard": [],
+    "soft": []
+   }
+  },
+  {
+   "id": "exposure.visible_k_counts_only_the_visible",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "a"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:2",
+        "shown": {
+         "color": "b"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:3",
+        "shown": {
+         "color": "c"
+        }
+       },
+       {
+        "pos": 4,
+        "ref": "item_variant:store:4",
+        "shown": {
+         "color": "d"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00",
+      "visible_k": 2
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|a": {
+      "e": 1.0
+     },
+     "item_variant.color|b": {
+      "e": 0.63093
+     }
+    },
+    "no_values": [
+     "item_variant.color|c",
+     "item_variant.color|d"
+    ]
+   }
+  },
+  {
+   "id": "exposure.seen_extends_what_was_visible",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T11:58:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "a"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:2",
+        "shown": {
+         "color": "b"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:3",
+        "shown": {
+         "color": "c"
+        }
+       },
+       {
+        "pos": 4,
+        "ref": "item_variant:store:4",
+        "shown": {
+         "color": "d"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T11:58:00+00:00",
+      "visible_k": 2
+     }
+    },
+    {
+     "at": "2026-09-29T11:59:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "seen",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "max_index_seen": 3
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|c": {
+      "e": 0.5
+     }
+    },
+    "no_values": [
+     "item_variant.color|d"
+    ]
+   }
+  },
+  {
+   "id": "engaged.weights_by_how",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "bege"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:2",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:3",
+        "shown": {
+         "color": "azul"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "detail"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:2",
+      "how": "compare"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:3",
+      "how": "add_to_cart"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|bege": {
+      "s": 0.3,
+      "n": 1.0
+     },
+     "item_variant.color|preto": {
+      "s": 0.6,
+      "n": 1.0
+     },
+     "item_variant.color|azul": {
+      "s": 1.5,
+      "n": 1.0
+     }
+    },
+    "soft": [],
+    "hard": []
+   }
+  },
+  {
+   "id": "engaged.a_repeat_within_ten_minutes_counts_once",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T11:40:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T11:45:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "click"
+     }
+    },
+    {
+     "at": "2026-09-29T11:50:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "click"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|bege": {
+      "s": 0.3,
+      "n": 1.0
+     }
+    }
+   }
+  },
+  {
+   "id": "engaged.a_repeat_after_ten_minutes_counts_again",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T11:30:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T11:35:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "click"
+     }
+    },
+    {
+     "at": "2026-09-29T11:50:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "click"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|bege": {
+      "s": 0.6,
+      "n": 2.0
+     }
+    }
+   }
+  },
+  {
+   "id": "evidence.fewer_than_three_events_infer_nothing",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "list_id": "l2",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:2",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "ref": "item_variant:store:2",
+      "how": "add_to_cart"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|bege": {
+      "s": 3.0,
+      "n": 2.0,
+      "e": 2.0
+     }
+    },
+    "soft": []
+   }
+  },
+  {
+   "id": "evidence.three_sessions_infer_a_soft_preference",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "list_id": "l2",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:2",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "ref": "item_variant:store:2",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s3",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "list_id": "l3",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:3",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s3",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "ref": "item_variant:store:3",
+      "how": "add_to_cart"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|bege": {
+      "s": 4.5,
+      "n": 3.0,
+      "e": 3.0
+     }
+    },
+    "soft": [
+     {
+      "attr": "item_variant.color",
+      "value": "bege",
+      "polarity": "prefer",
+      "source": "inferred",
+      "weight": 0.50625,
+      "confidence": 0.375
+     }
+    ],
+    "hard": []
+   }
+  },
+  {
+   "id": "evidence.three_events_days_apart_still_count_three",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-26T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-26T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-26T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-27T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "list_id": "l2",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:2",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-27T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-27T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "ref": "item_variant:store:2",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-28T12:00:00+00:00",
+     "session": "s3",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "list_id": "l3",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:3",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-28T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-28T12:00:00+00:00",
+     "session": "s3",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "ref": "item_variant:store:3",
+      "how": "add_to_cart"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|bege": {
+      "n": 3.0
+     }
+    },
+    "soft": [
+     {
+      "attr": "item_variant.color",
+      "value": "bege",
+      "polarity": "prefer",
+      "source": "inferred"
+     }
+    ]
+   }
+  },
+  {
+   "id": "session.one_session_counts_for_thirty_percent",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "list_id": "l2",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:2",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "ref": "item_variant:store:2",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "list_id": "l3",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:3",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "ref": "item_variant:store:3",
+      "how": "add_to_cart"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "soft": [
+     {
+      "attr": "item_variant.color",
+      "value": "bege",
+      "polarity": "prefer",
+      "source": "inferred",
+      "weight": 0.16875,
+      "confidence": 0.375
+     }
+    ],
+    "hard": []
+   }
+  },
+  {
+   "id": "prior.lift_is_smoothed_toward_the_prior",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "list_id": "l2",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:2",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "ref": "item_variant:store:2",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s3",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "list_id": "l3",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:3",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s3",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "ref": "item_variant:store:3",
+      "how": "add_to_cart"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "soft": [
+     {
+      "attr": "item_variant.color",
+      "value": "bege",
+      "polarity": "prefer",
+      "source": "inferred",
+      "weight": 0.46875,
+      "confidence": 0.375
+     }
+    ]
+   },
+   "prior": {
+    "item_variant.color|bege": 0.1
+   }
+  },
+  {
+   "id": "decay.color_halves_in_ninety_days",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-07-01T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-07-01T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-07-01T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "detail"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|bege": {
+      "e": 0.5,
+      "s": 0.15,
+      "n": 1.0
+     }
+    }
+   }
+  },
+  {
+   "id": "decay.size_halves_in_a_year",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2025-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "size": "38"
+        }
+       }
+      ],
+      "delivered_at": "2025-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2025-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "add_to_cart"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.size|38": {
+      "e": 0.5,
+      "s": 0.75,
+      "n": 1.0
+     }
+    }
+   }
+  },
+  {
+   "id": "implicit.shown_at_the_top_and_never_engaged_is_a_weak_avoid",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "list_id": "l2",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:2",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "list_id": "l3",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:3",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000004",
+      "list_id": "l4",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:4",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000005",
+      "list_id": "l5",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:5",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000006",
+      "list_id": "l6",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:6",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000007",
+      "list_id": "l7",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:7",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000008",
+      "list_id": "l8",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:8",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|preto": {
+      "e_top": 8.0,
+      "s": 0.0
+     }
+    },
+    "soft": [
+     {
+      "attr": "item_variant.color",
+      "value": "preto",
+      "polarity": "avoid",
+      "source": "inferred",
+      "weight": 0.2,
+      "confidence": 0.2
+     }
+    ],
+    "hard": []
+   }
+  },
+  {
+   "id": "implicit.never_below_minus_half",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:3",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:4",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:5",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "list_id": "l2",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:6",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:7",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:8",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "list_id": "l3",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:9",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:10",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:11",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000004",
+      "list_id": "l4",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:12",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:13",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:14",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000005",
+      "list_id": "l5",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:15",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:16",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:17",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000006",
+      "list_id": "l6",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:18",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:19",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:20",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000007",
+      "list_id": "l7",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:21",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:22",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:23",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000008",
+      "list_id": "l8",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:24",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:25",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:26",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000009",
+      "list_id": "l9",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:27",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:28",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:29",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000010",
+      "list_id": "l10",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:30",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:31",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:32",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000011",
+      "list_id": "l11",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:33",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:34",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:35",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000012",
+      "list_id": "l12",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:36",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 2,
+        "ref": "item_variant:store:37",
+        "shown": {
+         "color": "preto"
+        }
+       },
+       {
+        "pos": 3,
+        "ref": "item_variant:store:38",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "soft": [
+     {
+      "attr": "item_variant.color",
+      "value": "preto",
+      "polarity": "avoid",
+      "source": "inferred",
+      "weight": 0.5,
+      "confidence": 0.5
+     }
+    ],
+    "hard": []
+   }
+  },
+  {
+   "id": "stated.a_persistent_prefer_adds_two_and_is_soft",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "preference",
+      "attr": "item_variant.color",
+      "op": "in",
+      "values": [
+       "bege"
+      ],
+      "strength": "prefer",
+      "scope": "persistent"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|bege": {
+      "s": 2.0,
+      "n": 1.0,
+      "e": 0.0
+     }
+    },
+    "soft": [
+     {
+      "attr": "item_variant.color",
+      "value": "bege",
+      "polarity": "prefer",
+      "source": "stated",
+      "weight": 1.0,
+      "confidence": 1.0
+     }
+    ],
+    "hard": []
+   }
+  },
+  {
+   "id": "hard.must_not_in_is_not_in",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "preference",
+      "attr": "item_variant.color",
+      "op": "in",
+      "values": [
+       "preto"
+      ],
+      "strength": "must_not",
+      "scope": "session"
+     },
+     "turn_id": "t1"
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "hard": [
+     {
+      "id": "h1",
+      "attr": "item_variant.color",
+      "op": "not_in",
+      "values": [
+       "preto"
+      ],
+      "source": "stated",
+      "scope": "session",
+      "turn_id": "t1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "hard.a_session_constraint_holds_only_in_its_conversation",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "preference",
+      "attr": "item_variant.color",
+      "op": "not_in",
+      "values": [
+       "preto"
+      ],
+      "strength": "must",
+      "scope": "session"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s2"
+   },
+   "expect": {
+    "hard": []
+   }
+  },
+  {
+   "id": "hard.a_persistent_constraint_holds_in_the_next_conversation",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "preference",
+      "attr": "item_variant.color",
+      "op": "not_in",
+      "values": [
+       "preto"
+      ],
+      "strength": "must",
+      "scope": "persistent"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s2"
+   },
+   "expect": {
+    "hard": [
+     {
+      "id": "h1",
+      "attr": "item_variant.color",
+      "op": "not_in",
+      "values": [
+       "preto"
+      ],
+      "source": "stated",
+      "scope": "persistent"
+     }
+    ]
+   }
+  },
+  {
+   "id": "hard.a_turn_constraint_never_reaches_a_read",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "preference",
+      "attr": "item_variant.color",
+      "op": "not_in",
+      "values": [
+       "preto"
+      ],
+      "strength": "must",
+      "scope": "turn"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "hard": []
+   }
+  },
+  {
+   "id": "hard.an_expired_constraint_is_gone",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T11:55:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "preference",
+      "attr": "item_variant.color",
+      "op": "not_in",
+      "values": [
+       "preto"
+      ],
+      "strength": "must",
+      "scope": "persistent",
+      "expires_at": "2026-09-29T11:59:00+00:00"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "hard": []
+   }
+  },
+  {
+   "id": "hard.captured_from_tool_arguments",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "preference",
+      "attr": "item_variant.color",
+      "op": "not_in",
+      "values": [
+       "preto"
+      ],
+      "strength": "must",
+      "scope": "session",
+      "source": "tool_args"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "hard": [
+     {
+      "id": "h1",
+      "attr": "item_variant.color",
+      "op": "not_in",
+      "values": [
+       "preto"
+      ],
+      "source": "tool_args",
+      "scope": "session"
+     }
+    ]
+   }
+  },
+  {
+   "id": "conflict.the_current_utterance_wins",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T11:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "preference",
+      "attr": "item_variant.color",
+      "op": "not_in",
+      "values": [
+       "preto"
+      ],
+      "strength": "must",
+      "scope": "persistent"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "preference",
+      "attr": "item_variant.color",
+      "op": "in",
+      "values": [
+       "preto"
+      ],
+      "strength": "must",
+      "scope": "session"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "hard": [
+     {
+      "id": "h1",
+      "op": "not_in",
+      "scope": "persistent"
+     },
+     {
+      "id": "h2",
+      "op": "in",
+      "scope": "session"
+     }
+    ],
+    "conflicts": [
+     {
+      "ids": [
+       "h1",
+       "h2"
+      ],
+      "kept": "h2",
+      "by": "current_utterance"
+     }
+    ]
+   }
+  },
+  {
+   "id": "conflict.what_was_said_wins_over_an_inference",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "list_id": "l2",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:2",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "ref": "item_variant:store:2",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s3",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "list_id": "l3",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:3",
+        "shown": {
+         "color": "preto"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s3",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "ref": "item_variant:store:3",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s4",
+     "interaction": {
+      "kind": "preference",
+      "attr": "item_variant.color",
+      "op": "not_in",
+      "values": [
+       "preto"
+      ],
+      "strength": "must",
+      "scope": "persistent"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s4"
+   },
+   "expect": {
+    "hard": [
+     {
+      "id": "h1",
+      "op": "not_in"
+     }
+    ],
+    "soft": [
+     {
+      "id": "s1",
+      "attr": "item_variant.color",
+      "value": "preto",
+      "polarity": "prefer",
+      "source": "inferred"
+     }
+    ],
+    "conflicts": [
+     {
+      "ids": [
+       "h1",
+       "s1"
+      ],
+      "kept": "h1",
+      "by": "precedence"
+     }
+    ]
+   }
+  },
+  {
+   "id": "size.an_inferred_size_applies_only_when_asked",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "size": "38"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "list_id": "l2",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:2",
+        "shown": {
+         "size": "38"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "ref": "item_variant:store:2",
+      "how": "add_to_cart"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s3",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "list_id": "l3",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:3",
+        "shown": {
+         "size": "38"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s3",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "ref": "item_variant:store:3",
+      "how": "add_to_cart"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "soft": [],
+    "hard": [],
+    "attributes": [
+     {
+      "name": "size",
+      "value": "38",
+      "source": "inferred",
+      "apply": "when_asked"
+     }
+    ],
+    "relaxation_order": [
+     "z1"
+    ]
+   }
+  },
+  {
+   "id": "size.a_said_size_applies_always",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "attribute",
+      "name": "size.pants",
+      "system": "BR",
+      "value": "38"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "attributes": [
+     {
+      "name": "size.pants",
+      "system": "BR",
+      "value": "38",
+      "source": "stated",
+      "apply": "always",
+      "confidence": 1.0
+     }
+    ],
+    "relaxation_order": []
+   }
+  },
+  {
+   "id": "beneficiary.a_dependents_constraint_stays_off_the_subject",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "preference",
+      "attr": "item_variant.color",
+      "op": "not_in",
+      "values": [
+       "preto"
+      ],
+      "strength": "must",
+      "scope": "persistent",
+      "for": "beneficiary:dep-1"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "hard": [],
+    "ask": [
+     "for_whom"
+    ]
+   }
+  },
+  {
+   "id": "beneficiary.the_dependents_block_holds_it",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "preference",
+      "attr": "item_variant.color",
+      "op": "not_in",
+      "values": [
+       "preto"
+      ],
+      "strength": "must",
+      "scope": "persistent",
+      "for": "beneficiary:dep-1"
+     }
+    }
+   ],
+   "read": {
+    "for": "beneficiary:dep-1",
+    "session": "s1"
+   },
+   "expect": {
+    "hard": [
+     {
+      "id": "h1",
+      "op": "not_in",
+      "values": [
+       "preto"
+      ]
+     }
+    ],
+    "ask": [],
+    "for": "beneficiary:dep-1"
+   }
+  },
+  {
+   "id": "gift.what_is_bought_as_a_gift_is_not_the_subjects_taste",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "rosa"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00",
+      "for": "gift"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "item_variant:store:1",
+      "how": "add_to_cart",
+      "for": "gift"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "list_id": "l2",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:2",
+        "shown": {
+         "color": "rosa"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00",
+      "for": "gift"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s2",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000002",
+      "ref": "item_variant:store:2",
+      "how": "add_to_cart",
+      "for": "gift"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s3",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "list_id": "l3",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:3",
+        "shown": {
+         "color": "rosa"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00",
+      "for": "gift"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s3",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000003",
+      "ref": "item_variant:store:3",
+      "how": "add_to_cart",
+      "for": "gift"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "soft": [],
+    "ask": [
+     "for_whom"
+    ],
+    "no_values": [
+     "item_variant.color|rosa"
+    ]
+   }
+  },
+  {
+   "id": "sensitive.an_object_of_a_sensitive_type_adds_nothing",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "plano:op:1",
+        "shown": {
+         "rede": "rede-x"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "engaged",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "ref": "plano:op:1",
+      "how": "add_to_cart"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "no_values": [
+     "plano.rede|rede-x"
+    ],
+    "already_presented": []
+   },
+   "catalog": {
+    "sensitive_types": [
+     "plano"
+    ]
+   }
+  },
+  {
+   "id": "hidden.a_personal_field_never_feeds_affinity",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "bege",
+         "owner_name": "Maria"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|bege": {
+      "e": 1.0
+     }
+    },
+    "no_values": [
+     "item_variant.owner_name|Maria"
+    ]
+   },
+   "catalog": {
+    "hidden": [
+     "item_variant.owner_name"
+    ]
+   }
+  },
+  {
+   "id": "feedback.a_negative_one_excludes_the_item",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "color": "bege"
+        }
+       }
+      ],
+      "delivered_at": "2026-09-29T12:00:00+00:00"
+     }
+    },
+    {
+     "at": "2026-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "feedback",
+      "ref": "item_variant:store:1",
+      "polarity": "negative"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.color|bege": {
+      "s": -1.0,
+      "n": 1.0
+     }
+    },
+    "exclude": [
+     "item_variant:store:1"
+    ]
+   }
+  },
+  {
+   "id": "family.a_declared_family_sets_the_half_life",
+   "now": "2026-09-29T12:00:00+00:00",
+   "entries": [
+    {
+     "at": "2025-09-29T12:00:00+00:00",
+     "session": "s1",
+     "interaction": {
+      "kind": "presented",
+      "exposure_id": "0192f5a0-0000-7000-8000-000000000001",
+      "list_id": "l1",
+      "offset": 0,
+      "items": [
+       {
+        "pos": 1,
+        "ref": "item_variant:store:1",
+        "shown": {
+         "tamanho": "M"
+        }
+       }
+      ],
+      "delivered_at": "2025-09-29T12:00:00+00:00"
+     }
+    }
+   ],
+   "read": {
+    "for": "self",
+    "session": "s1"
+   },
+   "expect": {
+    "values": {
+     "item_variant.tamanho|M": {
+      "e": 0.5
+     }
+    }
+   },
+   "catalog": {
+    "families": {
+     "item_variant.tamanho": "size"
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,196 @@
+---
+title: "History navigation"
+description: "Search, timeline and open: the agent looks up everything that ever happened with the customer."
+---
+
+The context covers what matters right now. For everything else, the agent looks up the **history**: everything that ever happened with the customer, on any channel, system or vendor. There are three operations (search, read the timeline and open an item) that any LLM calls on its own, as tools, or that your code calls directly through the SDK. No LLM sits in the path: search adds keyword search to a multilingual embedding model that runs inside the region. Every item stores its own vector when it is written, and a search encodes only the question, with a target of under 200 ms.
+
+## Context and history, side by side
+
+| | Context | History |
+|---|---|---|
+| When | Before the first word, always | Mid-conversation, when it needs more |
+| Who decides | Your code, in a fixed call | The agent's LLM, calling a tool, or your code |
+| What it covers | Identity, open items, what just happened, history highlights | Everything that ever happened with the customer |
+| What the read does | With a warm context, no database statement and no model | The customer's rows are read once and reused while their memory does not change; the question is encoded while they load |
+
+The memory in the context and the history go through the same policy and the same verification level, and both reads leave a receipt. The examples on this page follow Marina's call, where the network attestation proved V1, and every read asks for that level.
+
+## Search
+
+`search` takes a question in natural language or keywords and searches by keyword and by meaning, only inside that customer's history. It reaches conversations, facts, open items, promises, agent actions, patterns and business objects, with the state that system events gave each one.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+
+niadra = Niadra()
+
+result = niadra.search(
+    phone("+14155550123"),
+    "credit for missed technician visit",
+    max_tokens=300,
+    verification="V1",
+    conversation_id="call-4471",
+    voice=True,
+)
+if result.recurrence:
+    print(result.recurrence.occurrences, result.recurrence.last_resolution)
+```
+```typescript TypeScript
+const { data } = await niadra.search({
+  subject: handles.phone("+14155550123"),
+  query: "credit for missed technician visit",
+  max_tokens: 300,
+  verification: "V1",
+  conversation_id: "call-4471",
+});
+if (data?.recurrence) console.log(data.recurrence.occurrences, data.recurrence.last_resolution);
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/history/search" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"subject": {"type": "phone_e164", "value": "+14155550123"},
+       "query": "credit for missed technician visit", "max_tokens": 300, "verification": "V1", "conversation_id": "call-4471"}'
+```
+</CodeGroup>
+
+Each item comes back with its `kind`, dense text in the same style as the context, `at`, `channel`, `outcome`, `confidence` and `origin_event_id`, the event it came from. That is how the agent can say "on March 12, on the phone, you gave me a credit".
+
+### Recurrence
+
+When the search matches a category, the response carries a `recurrence` block: how many complaints of that category there were in the last 90 days, the date of the last one, its outcome and its resolution. It is a count over conversations that were already classified, not a model's guess. The context's count by matter in the slots and the "recurring complaint" pattern count with the same function, the same window and the same filter, so with the catalog defaults the three numbers are equal. For Marina, the search finds the March 12 call, which is outside the window, and the block counts today's WhatsApp complaint: `occurrences: 1`, `window_days: 90`.
+
+### Filters
+
+`filters` narrows the search by period (`since`, `until`), `channels`, `categories`, item kinds (`item_kinds`: `episode`, `fact`, `open_item`, `action`, `object`, `trait`, `system_event`), `outcome` and `object`. A system event of the hot window is a row of its own in the search and the timeline, with its type, the object it touched and a few fields, under the same policy as that object; `system_event` finds those rows and also the objects they changed, and the tool offers it. Handoffs and feedback stay out.
+
+`when` takes a time expression in the customer's words, in Portuguese, English or Spanish (`semana passada`, `last month`, `en marzo`, `ontem`), and the server turns it into `since` and `until` without an AI model, in the space's time zone and from the last event of the conversation in progress, so a replay reads the same words the same way. The answer says in `window` the period it read; an expression it does not recognize goes in `ignored` and never becomes an error. The tool description asks the model to pass the customer's expression as it came.
+
+`where` takes a tree of conditions, in the grammar anyone coming from another memory knows: `AND`, `OR` and `NOT` over the row fields (`id`, `kind`, `channel`, `category`, `outcome`, `source_id`, `vendor`, `at`, `valid_until`, `confidence`, `text`, `object_type`, `object_namespace`), with `eq`, `ne`, `in`, `nin`, `gt`, `gte`, `lt`, `lte`, `contains`, `icontains` (case and accents folded) and `exists`; a bare value means `eq`, a list means `in`, sibling keys are `AND`. Example: `{"AND": [{"kind": ["episode", "action"]}, {"NOT": {"vendor": "acme"}}, {"at": {"gte": "2026-09-01"}}]}`. The expression is checked in memory, after the policy, so it only narrows what the reader could already see and never changes the ranking; at most 64 conditions and 6 levels, and an error names the path, never a value. It holds on the search and the timeline, and the receipt's filters hash covers it. `limit` (1 to 100) caps the search's items after the token budget.
+
+A [settled value](/en/concepts/events#settled-values) is found by the value itself: a question that carries "88280" finds record 88280, and `45778-204` and `45778204` are the same postal code.
+
+What an event states can have a term: `valid_until` on the event says until when it holds, such as an offer valid until a date. After that moment, the facts it gave leave the context and the search; `show_expired: true` brings those items too.
+
+### Budget
+
+`max_tokens` caps the size of the answer: 50 to 4,000, default 800. Use 300 for voice. Items are cut by value, never by arrival order. The response reports `tokens_used`.
+
+## Timeline
+
+`timeline` pages through the customer in order, newest first: one conversation, system event or agent action per line, with a cursor. It is what the LLM uses when it does not know what to look for. When `filters.item_kinds` names `open_item`, `fact`, `trait` or `object`, the timeline lists those too, each at its own date, under the same policy as search: `item_kinds: ["open_item"]` lists every open item of the customer. Search ranks by a question, so use it to find something; use the timeline to list.
+
+`filters.item_statuses` lists open items by status: `open`, `overdue` and `resolved`. Without it, the rows hold the open and overdue items and the promises kept in the last 7 days, as the context shows them. `resolved` reaches every resolved item, however long ago. An open item's row carries `status`, `object` and `expected_operation`; a resolved one also `closed_at` and `closed_by`, the same object the `open_item.closed` webhook carried (`kind` `action` with `action_id` and `operation`, `system_event` with `event_id`, `conversation` with `session_id`, or `feedback`). Named, the statuses make the timeline list open items too: `item_kinds: ["open_item"], item_statuses: ["resolved"]` lists only what was done. Rows of other kinds pass as they are.
+
+<CodeGroup>
+```python Python
+page = niadra.timeline(phone("+14155550123"), filters={"since": "2026-01-01T00:00:00Z"}, limit=20, verification="V1", conversation_id="call-4471")
+for item in page.items:
+    print(item.at, item.kind, item.text)
+```
+```typescript TypeScript
+const { data: page } = await niadra.timeline({
+  subject: handles.phone("+14155550123"),
+  filters: { since: "2026-01-01T00:00:00Z" },
+  limit: 20,
+  verification: "V1",
+  conversation_id: "call-4471",
+});
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/history/timeline" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"subject": {"type": "phone_e164", "value": "+14155550123"}, "limit": 20, "verification": "V1", "conversation_id": "call-4471"}'
+```
+</CodeGroup>
+
+This timeline is a `POST` for the same reason as the context: the handle is personal data and stays out of the URL. `limit` ranges from 1 to 100; continue with `next_cursor`. When you already hold a profile id, send `profile_id` in place of `subject`, in the same `POST`. [`GET /v1/history/timeline?profile_id=...`](/en/api/history-timeline-by-profile) stays and returns the same page, with `cursor`, `limit`, `verification` and `conversation_id` in the query; prefer the `POST`, which keeps the conversation id out of the URL.
+
+History navigation reads one customer at a time. Questions about all customers at once ("which promises are overdue?", "who complained three times about delivery?") go to [base-wide analysis](/en/api/insights-aggregate), which answers with pseudonyms by default, suppresses small groups and reveals a customer only through [a reveal request](/en/api/insights-reveal) with a reason, which leaves a receipt.
+
+## Open an item
+
+`open` opens a conversation or an object found by search or timeline. Every row's `id` is a bare UUID and its `kind` says what it is; actions, system events, facts, patterns and open items are complete as listed and do not open. A conversation brings what was asked, what was promised and by whom, the outcome, the resolution (the summary and the resolution keep identifiers, amounts, dates, codes and addresses exactly as they were said, and never document, card or bank account numbers) and the memory items born from it; a conversation also brings its timeline, the agent actions and system events of the conversation and of the 15 minutes after it; an object brings the promises tied to it and the timeline of its actions and system events.
+
+<CodeGroup>
+```python Python
+item = niadra.open("0192f7a3-7c32-7b0c-9e16-5b8a0f1c2d34", verification="V1", conversation_id="call-4471")
+```
+```typescript TypeScript
+const { data: item } = await niadra.open("0192f7a3-7c32-7b0c-9e16-5b8a0f1c2d34", { verification: "V1", conversation_id: "call-4471" });
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/history/open" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"item_id": "0192f7a3-7c32-7b0c-9e16-5b8a0f1c2d34", "verification": "V1", "conversation_id": "call-4471"}'
+```
+</CodeGroup>
+
+[`POST /v1/history/open`](/en/api/history-open) takes the item id, the level and the conversation id in the body; with `subject` (or `profile_id`), it opens only an item of that customer, and any other answers 404. The SDKs use this route, and the tool kit sends the bound customer along. [`GET /v1/history/items/{item_id}`](/en/api/history-item) stays, with the conversation id in the query.
+
+An item this reader would not see and one that does not exist both answer 404.
+
+An item that has versions carries `versions`: a re-extracted conversation, an object that changed state. Each version comes with `version`, `changed_at` and `what_changed` (`created` for the first, then what changed: `outcome`, `resolution`, `summary`, `state`), oldest first.
+
+## As tools for any LLM
+
+`tools()` returns the three operations as tools in the most common function shape (`search_customer_history`, `get_customer_timeline`, `open_history_item`), with the customer **bound outside the model's reach**. The definitions have no customer parameter: the LLM chooses the question, never whom it is about. A prompt injection that says "now look up customer X" has nowhere to put X.
+
+<CodeGroup>
+```python Python
+kit = niadra.tools(phone("+14155550123"), verification="V1", conversation_id="call-4471", voice=True)
+
+reply = llm.chat.completions.create(model=MODEL, messages=messages, tools=kit.definitions)
+for call in reply.choices[0].message.tool_calls or []:
+    output = kit.call(call.function.name, call.function.arguments)
+    messages.append({"role": "tool", "tool_call_id": call.id, "content": output})
+```
+```typescript TypeScript
+const kit = niadra.tools(handles.phone("+14155550123"), { verification: "V1", conversation_id: "call-4471", voice: true });
+
+const reply = await llm.chat.completions.create({ model: MODEL, messages, tools: kit.definitions });
+for (const call of reply.choices[0].message.tool_calls ?? []) {
+  const output = await kit.call(call.function.name, call.function.arguments);
+  messages.push({ role: "tool", tool_call_id: call.id, content: output });
+}
+```
+</CodeGroup>
+
+With [agent memory](/en/concepts/agent-memory) on in the space, `tools(agent_memory=True)` adds `search_agent_memory` to the kit, and `write_agent_memory=True` also `remember`. In Python, `kit.anthropic_definitions()` returns the same tools in the Anthropic Messages API shape. The definitions are also served by [`GET /v1/history/tools`](/en/api/history-tools), and by the [MCP server](/en/guides/mcp), where the customer is bound by the `subject_token`.
+
+## Cost under control
+
+- The descriptions are fixed text, up to about 120 tokens per tool, and stay in the prefix the provider caches.
+- Each description tells the model when **not** to call: the answer may already be in the "History" line or in the slots of the context.
+- The same query, in the same conversation, returns the same bytes.
+- Declare the kit only on agents that need it. A short IVR pays nothing.
+- Searching is not billed separately: the unit is still the conversation or task.
+
+## What every answer guarantees
+
+- `withheld` says how many items the policy held back at this verification level, never their content.
+- `as_of` says up to when the history reflects events.
+- `degraded: "text_only"` means only keyword search ran: the embedding model did not answer within the read's deadline. The question is encoded in a lane of its own in the models service, beside the batches of text the write side is encoding, never behind them, so heavy writing does not slow a search down.
+- An item gets its vector seconds after it is written; until then, that item is found by keyword only.
+- Search sees memory as the customer's current generation compiled it, as the context does: a system event or an extraction becomes searchable when its compilation is published (the moment [`POST /v1/ingest/status`](/en/api/ingest-status) says `readable`), not when it was written. The read process reuses the customer's rows for up to 60 seconds while their generation and privacy version hold, and reads them again in the background before that; what depends on the moment (a fact's validity, a promise kept in the last days) is computed on every read, and a pattern's expiry and the edge of the system events' window may lag by up to 60 seconds.
+- Facts with a short value or a value from a closed list have no vector and are found by keyword.
+- Every query leaves a receipt with who asked, the query and, when there are any, the filters, as HMACs under the space's key, the ids of the returned items and how many were withheld.
+- What comes out by default are derived items, already screened for injection by Niadra's AI and marked as data, not instructions.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="MCP with any LLM" href="/en/guides/mcp">
+    the kit over Streamable HTTP.
+  </Card>
+  <Card title="Search history" href="/en/api/history-search">
+    the reference for `POST /v1/history/search`.
+  </Card>
+  <Card title="Receipts and audit" href="/en/concepts/receipts">
+    what each query leaves on record.
+  </Card>
+</CardGroup>

@@ -1,0 +1,205 @@
+{{- if eq .Values.part "base" }}
+# Certificates from Let's Encrypt: proven in the domain's Route 53 zone once it is live (with the
+# machine's role; needed for the wildcard of the space addresses), over HTTP on port 80 before.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.tls.issuer }}
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef: {name: {{ .Values.tls.issuer }}-account}
+    solvers:
+      {{- if .Values.tls.route53Zone }}
+      - dns01: {route53: {region: {{ .Values.region }}, hostedZoneID: {{ .Values.tls.route53Zone }}}}
+      {{- else }}
+      - http01: {ingress: {ingressClassName: traefik}}
+      {{- end }}
+{{- end }}
+{{- if eq .Values.part "app" }}
+{{- $tls := dict "cert-manager.io/cluster-issuer" .Values.tls.issuer "traefik.ingress.kubernetes.io/router.entrypoints" "websecure" }}
+# TLS 1.3 only, on every host the edge serves: Traefik applies the TLSOption named `default` to each
+# router that names none. There may be one in the cluster, and this is it. TLS 1.3 fixes its own cipher
+# suites, so none are listed.
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: default
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  minVersion: {{ .Values.tls.minVersion }}
+---
+# Only the mTLS address forwards a client certificate to the cell; every other route drops a
+# header a client may have sent with that name, so the cell can trust it.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-client-cert
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  headers:
+    customRequestHeaders: {X-Forwarded-Tls-Client-Cert: ""}
+---
+# The service ingresses answer HTTPS only; plain HTTP on every host lands here and is redirected.
+# The certificate challenge paths are longer, so cert-manager's own ingresses still win them.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: https
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  redirectScheme: {scheme: https, permanent: true}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: http-redirect
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    {{- $served := concat .Values.hosts.site .Values.hosts.api (list .Values.hosts.control .Values.hosts.grafana (include "niadra.siteAdminHost" .)) }}
+    {{- if .Values.controlPlane.url }}{{ $served = concat .Values.hosts.api (list .Values.hosts.grafana) }}{{ end }}
+    {{- range $served }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: site, port: {name: http}}}}
+    {{- end }}
+---
+# The API host: each path group goes to the deployable that serves it; the rest to admin.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+  annotations:
+    {{- toYaml $tls | nindent 4 }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-strip-client-cert@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls: [{hosts: {{ toJson .Values.hosts.api }}, secretName: tls-api}]
+  rules:
+    {{- range $host := .Values.hosts.api }}
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          {{- range $service, $paths := $.Values.exactRoutes }}
+          {{- range $paths }}
+          - {path: {{ . }}, pathType: Exact, backend: {service: {name: {{ $service }}, port: {name: http}}}}
+          {{- end }}
+          {{- end }}
+          {{- range $service, $paths := $.Values.routes }}
+          {{- range $paths }}
+          - {path: {{ . }}, pathType: Prefix, backend: {service: {name: {{ $service }}, port: {name: http}}}}
+          {{- end }}
+          {{- end }}
+          - {path: /, pathType: Prefix, backend: {service: {name: admin, port: {name: http}}}}
+    {{- end }}
+{{- $wildcard := "" }}
+{{- range .Values.hosts.api }}{{ if hasPrefix "*." . }}{{ $wildcard = trimPrefix "*." . }}{{ end }}{{ end }}
+{{- if $wildcard }}
+{{- $mtls := printf "mtls.%s" $wildcard }}
+---
+# The mTLS address of the generic webhook, under the wildcard the API certificate already
+# covers: the handshake asks for a client certificate and proves the client holds its key; the cell
+# compares the forwarded certificate with the fingerprint the source registered. Nothing verifies a
+# chain, since a pinned fingerprint names the one certificate that may send.
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: mtls
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  minVersion: {{ .Values.tls.minVersion }}
+  clientAuth:
+    clientAuthType: RequireAnyClientCert
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: pass-client-cert
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  passTLSClientCert: {pem: true}
+---
+# No cert-manager annotation: the certificate is the API's wildcard, which the api ingress requests.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: webhooks-mtls
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls.options: {{ .Release.Namespace }}-mtls@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-strip-client-cert@kubernetescrd,{{ .Release.Namespace }}-pass-client-cert@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls: [{hosts: [{{ $mtls | quote }}], secretName: tls-api}]
+  rules:
+    - host: {{ $mtls | quote }}
+      http:
+        paths:
+          - {path: /v1/ingest/webhook, pathType: Prefix, backend: {service: {name: ingest, port: {name: http}}}}
+{{- end }}
+{{- if not .Values.controlPlane.url }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: control
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+  annotations: {{- toYaml $tls | nindent 4 }}
+spec:
+  ingressClassName: traefik
+  tls: [{hosts: [{{ .Values.hosts.control | quote }}], secretName: tls-control}]
+  rules:
+    - host: {{ .Values.hosts.control | quote }}
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: control, port: {name: http}}}}
+---
+# The site, its docs and the Console; the contact form's API under /api.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: site
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+  annotations: {{- toYaml $tls | nindent 4 }}
+spec:
+  ingressClassName: traefik
+  tls: [{hosts: {{ toJson .Values.hosts.site }}, secretName: tls-site}]
+  rules:
+    {{- range .Values.hosts.site }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - {path: /api, pathType: Prefix, backend: {service: {name: site-api, port: {name: http}}}}
+          - {path: /, pathType: Prefix, backend: {service: {name: site, port: {name: http}}}}
+    {{- end }}
+---
+# The site's admin panel: the page from the site pod (Caddy serves it for this host
+# only), its API from the site API, which answers /api/admin/* for this host only. No other /api path
+# is reachable here.
+{{- $siteAdmin := include "niadra.siteAdminHost" . }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: site-admin
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+  annotations: {{- toYaml $tls | nindent 4 }}
+spec:
+  ingressClassName: traefik
+  tls: [{hosts: [{{ $siteAdmin | quote }}], secretName: tls-site-admin}]
+  rules:
+    - host: {{ $siteAdmin | quote }}
+      http:
+        paths:
+          - {path: /api/admin, pathType: Prefix, backend: {service: {name: site-api, port: {name: http}}}}
+          - {path: /, pathType: Prefix, backend: {service: {name: site, port: {name: http}}}}
+{{- end }}
+{{- end }}

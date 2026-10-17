@@ -1,0 +1,184 @@
+---
+title: "Agentes de saúde"
+description: "Uma operadora de planos com um agente de vendas: uma cotação derivada dos dados do lead, que vence no instante em que um dado muda, uma taxa que uma fonte informa errado, beneficiários com sinais separados, e uma transferência ao corretor humano com desfecho."
+---
+
+Este guia monta, com exemplos sintéticos, o que uma operadora de planos de saúde liga na Niadra para um agente que cota planos e passa o fechamento a um corretor humano. Em saúde, a cotação é uma função dos dados de quem pergunta, o dado é sensível, e a pessoa que pergunta muitas vezes compra para outra. Cada parte abaixo é uma funcionalidade do espaço, ligada por si.
+
+## O que o setor pede
+
+- Uma cotação depende da cidade, das idades e do tipo de produto: quando um dado desses muda, a cotação vence na hora, não quando passa o prazo.
+- Uma das fontes informa a taxa de adesão errada, e a operadora sabe disso: o valor certo vem de outra fonte.
+- O agente cota para um dependente, para os pais, para um grupo: os sinais de cada beneficiário ficam separados, e o dado de saúde nunca vira afinidade.
+- O fechamento é de um corretor humano; o agente passa a conversa com o pacote e recebe o desfecho.
+
+## 1. O tipo: a cotação derivada
+
+A cotação é um tipo do **cliente** com `nature: derived`: uma função dos insumos que nomeia, e a Niadra a vence quando um deles muda.
+
+```json
+{
+  "type": "health_plan_quote",
+  "ownership": "subject",
+  "nature": "derived",
+  "mirror_of": { "system": "pricing", "derived_by": "declaration", "drift": "alert" },
+  "inputs": ["lead.city", "lead.state", "lead.ages", "lead.household", "turn.product_type", "campaign.discount_validity"],
+  "fields": {
+    "price_full": { "type": "money", "role": "price_full", "sensitivity": "none", "claim": { "allowed": true, "class": "money", "nature": "computed" } },
+    "price_discounted": { "type": "money", "role": "price_discounted", "claim": { "allowed": true, "class": "money", "nature": "computed" } },
+    "enrollment_fee": { "type": "money", "logic": "tri", "role": "enrollment_fee", "unobserved_blocks": ["decide:close"], "claim": { "allowed": true, "class": "money", "nature": "computed" } },
+    "waiting_period_days": { "type": "duration", "claim": { "allowed": true, "class": "duration", "nature": "computed" } }
+  },
+  "sources": {
+    "quote_api": { "kind": "pull", "precedence": 1, "known_defects": [{ "field": "enrollment_fee", "use_source": "budget_document" }] },
+    "budget_document": { "kind": "pull", "precedence": 1, "authoritative_for": ["enrollment_fee"] },
+    "curated_table": { "kind": "batch", "precedence": 2, "active_when": "config.discount_source == 'table'", "empty_means": "absent" }
+  },
+  "purposes": {
+    "display": { "on_stale": "serve_with_age" },
+    "claim": { "on_stale": "serve_with_prohibitions", "prohibitions": ["affirm_price"] },
+    "decide": { "on_stale": "structured_refusal", "reason": "stale_quote", "action": "requote" }
+  }
+}
+```
+
+A API de cotação informa a taxa de adesão errada, e o tipo declara isso: o campo é `known_defect` para essa fonte, e a leitura serve o valor do documento de orçamento; enquanto nenhuma fonte informou, `enrollment_fee` é `unobserved`, e isso bloqueia `decide:close`, uma tarefa da operadora que o código do agente honra. Uma leitura `decide` de uma cotação vencida por insumo leva a recusa estruturada `stale_quote` com a ação `requote`, ao lado dos valores: a ferramenta da operadora responde "a cotação venceu, cote de novo", e a Niadra nunca decide por ela. O `lead` é um tipo do cliente com cidade, estado, idades e composição familiar, marcado `sensitivity: health` onde cabe.
+
+## 2. O turno do agente
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+from niadra.turns import tool
+
+niadra = Niadra(channel="whatsapp")
+BUILD = Niadra.build(prompts={"sales": "v9"}, model="gpt-4.1")
+
+
+@tool("quote", provenance=lambda r: [{"ref": f"health_plan_quote:pricing:{r['quote_id']}",
+                                      "fields": {"price_full": r["price_full"], "price_discounted": r["price_discounted"]},
+                                      "provenance": {"source": "live", "source_observed_at": r["observed_at"], "scope": "customer"}}])
+def quote(city: str, ages: list[int], product_type: str) -> dict:
+    return pricing.quote(city=city, ages=ages, product_type=product_type)
+
+
+with niadra.conversation("wa-2201", subject=phone("+5511900001234"), agent_id="sales") as conversation:
+    conversation.customer("Quanto fica um plano para meus pais, 62 e 65 anos, em Campinas?")
+    with conversation.turn(build=BUILD) as frame:
+        context = conversation.context(include=["constraints", "state"])
+        frame.interact({"kind": "attribute", "name": "household.ages", "value": [62, 65], "source": "stated", "for": "beneficiary:parents"})
+        found = quote("Campinas", [62, 65], "family")
+        verdict = conversation.verify_claim(f"health_plan_quote:pricing:{found['quote_id']}", "price_full", found["price_full"])
+        reply = conversation.claims.guard_text(model(prompt_with(context, found, verdict)), context="chat")
+        conversation.agent(reply)
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+const BUILD = Niadra.build({ prompts: { sales: "v9" }, model: "gpt-4.1" });
+const quote = Niadra.tool("quote", (q: QuoteArgs) => pricing.quote(q), {
+  provenance: (r) => [{ ref: `health_plan_quote:pricing:${r.quote_id}`, fields: { price_full: r.price_full, price_discounted: r.price_discounted }, provenance: { source: "live", source_observed_at: r.observed_at, scope: "customer" } }],
+});
+
+const convo = niadra.conversation({ subject: handles.phone("+5511900001234"), channel: "whatsapp", conversation_id: "wa-2201" });
+convo.customer("Quanto fica um plano para meus pais, 62 e 65 anos, em Campinas?", { idempotency_key: inbound.id });
+await convo.turn({ build: BUILD }, async () => {
+  const ctx = await convo.context({ include: ["constraints", "state"] });
+  const found = await quote({ city: "Campinas", ages: [62, 65], product_type: "family" });
+  const verdict = await convo.verifyClaim(`health_plan_quote:pricing:${found.quote_id}`, "price_full", found.price_full);
+  const guarded = await convo.claims.guardText(await model(promptWith(ctx, found, verdict)), { context: "chat" });
+  convo.agent(guarded.text);
+});
+```
+</CodeGroup>
+
+"Para meus pais" é um **beneficiário**: as idades declaradas vão para `beneficiary:parents`, e os sinais dessa cotação nunca viram atributo da pessoa que pergunta; o bloco de restrições de um turno para os pais traz as entradas deles. O dado de saúde nunca vira afinidade: de uma interação com um objeto sensível a Niadra guarda só o tipo e uma contagem. `verify_claim` diz se o preço pode ser afirmado agora; uma cotação vencida por insumo (a cidade mudou no turno seguinte) responde `claim_safe: false`, e o agente cota de novo em vez de repetir o valor. Em TypeScript, as interações vão como itens do lote ([Sinais](/concepts/signals#interações)).
+
+## 3. O contrato de afirmação
+
+```json
+{
+  "version": "2026-09-29.1",
+  "languages": ["pt", "es"],
+  "categories": [
+    {
+      "id": "price",
+      "detect": { "classes": ["money"], "roles": { "price_full": ["sai por", "mensalidade", "por mês", "al mes"], "price_discounted": ["com desconto", "promocional", "con descuento"], "enrollment_fee": ["taxa de adesão", "adesão", "cuota de ingreso"] } },
+      "evidence": { "value": { "same_role": true, "fresh_for": "claim", "type": "health_plan_quote" } },
+      "natures": { "computed": "check", "quoted": "verbatim", "model": "block" },
+      "actions": { "default": "warn", "contexts": { "chat": "rewrite_if_unequivocal", "proposal": "block" } }
+    },
+    {
+      "id": "waiting_period",
+      "detect": { "classes": ["duration"], "terms": ["carência", "carencia"] },
+      "evidence": { "value": { "type": "health_plan_quote", "value": "waiting_period_days" } },
+      "actions": { "default": "warn", "contexts": { "proposal": "block" } }
+    },
+    {
+      "id": "coverage_promise",
+      "detect": { "terms": ["cobre", "está coberto", "tem cobertura", "cubre"] },
+      "evidence": { "tool": "check_coverage" },
+      "actions": { "default": "warn", "contexts": { "proposal": "block" } }
+    }
+  ],
+  "negative_corpus": { "version": "2026-09-29", "phrases": ["A carência varia conforme o procedimento.", "Posso cotar para 2 dependentes?", "A mensalidade depende da faixa etária."] },
+  "outputs": { "immutable": ["proposal"], "mutable": ["chat"] }
+}
+```
+
+"A mensalidade sai por R$ 511,06" é conferida contra `price_full` da cotação do turno, com a idade de afirmação do tipo; um preço que o modelo disse sem cotação no turno é bloqueado. "Cobre fisioterapia" sem uma chamada de `check_coverage` é uma promessa de cobertura sem consulta, marcada no chat e bloqueada numa proposta, que é imutável: a proposta inteira vai a uma pessoa. "Posso cotar para 2 dependentes?" e "a carência varia conforme o procedimento" nunca disparam. Veja [Afirmações](/concepts/claims).
+
+## 4. A transferência ao corretor
+
+O fechamento é de um corretor humano. O agente cria uma [transferência](/concepts/coordination#transferências) com o pacote compilado no nível de verificação do corretor, e a pessoa fica retida no nível `transfer_pending` até o desfecho, então o agente de retenção da operadora não a contata no meio.
+
+<CodeGroup>
+```python Python
+from niadra.models.coordination import HandoffCreate, HandoffOutcome
+
+handoff = niadra.api.create_handoff(HandoffCreate(
+    subject=phone("+5511900001234"), target="closing_desk", agent="sales", level="V1",
+    reason="quote accepted for two dependents; closing needs a person",
+), idempotency_key=f"handoff-{conversation.conversation_id}")
+
+# Later, from the broker's tool
+niadra.api.handoff_outcome(handoff.handoff_id, HandoffOutcome(outcome="closed_won"), idempotency_key=f"outcome-{handoff.handoff_id}")
+```
+```typescript TypeScript
+const handoff = await niadra.api.createHandoff(
+  { subject: handles.phone("+5511900001234"), target: "closing_desk", agent: "sales", level: "V1", reason: "quote accepted for two dependents; closing needs a person" },
+  { idempotency_key: `handoff-${convo.id}` },
+);
+
+// Later, from the broker's tool
+await niadra.api.handoffOutcome(handoff.handoff_id, { outcome: "closed_won" }, { idempotency_key: `outcome-${handoff.handoff_id}` });
+```
+</CodeGroup>
+
+O desfecho (`closed_won`, `closed_lost`, `no_answer`, o vocabulário que o documento `coordination` declara) encerra a retenção, entra na memória como a ação `handoff.outcome` do corretor sobre o objeto da transferência (o próximo agente vê "fechado pelo corretor") e alimenta as supressões que o espaço mapeia: um `closed_lost` por preço pode suprimir `retention` por 90 dias. Uma transferência sem desfecho até `expected_by` lê como vencida. A [medição de desfechos](/concepts/outcomes) atribui a proposta assinada ao agente que cotou pelo método `assisted_handoff`, provável, com a faixa dita ao lado.
+
+## 5. Privacidade
+
+O lead, a cotação e os sinais dos beneficiários são dado de saúde: a política do espaço os libera só para a finalidade `sales` dos agentes de venda, em V1 quando é a própria pessoa que informa ([o espelho](/concepts/privacy#o-espelho-da-política)), e nunca para uma fonte de análise. As inferências sobre a pessoa ficam no [perfil revisável](/concepts/privacy#o-perfil-revisável), e um pedido de revisão de uma decisão automatizada (uma recusa de cotação, por exemplo) vai ao encarregado da operadora com a explicação montada dos comprovantes. Apagar a pessoa apaga a cotação, os sinais de todos os beneficiários e os turnos dela.
+
+## O que fica desligado
+
+Tudo acima vem ligado: `state` traz a cotação derivada e as recusas estruturadas; `signals`, os beneficiários e o bloco; `claims` e `turns`, o contrato e o registro; `coordination`, a transferência com desfecho; `measurement`, a atribuição do fechamento.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Tipos de objeto e estado" href="/concepts/object-types">
+    objetos derivados, defeitos conhecidos e a recusa estruturada.
+  </Card>
+  <Card title="Sinais e restrições" href="/concepts/signals">
+    beneficiários e o que nunca vira afinidade.
+  </Card>
+  <Card title="Coordenação" href="/concepts/coordination">
+    transferências, posse e o desfecho que alimenta a memória.
+  </Card>
+  <Card title="Privacidade" href="/concepts/privacy">
+    o dado sensível, o espelho e o perfil revisável.
+  </Card>
+</CardGroup>

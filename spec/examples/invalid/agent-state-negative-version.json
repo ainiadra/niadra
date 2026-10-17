@@ -1,0 +1,10 @@
+{
+  "scope": {
+    "kind": "conversation",
+    "id": "c-8812"
+  },
+  "agent": "closing",
+  "mode": "cas",
+  "if_version": -1,
+  "body": {}
+}

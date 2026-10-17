@@ -1,0 +1,167 @@
+---
+title: "Afirmações"
+description: "O contrato de afirmação: o que um agente pode afirmar, a evidência que cada tipo de afirmação precisa ter no turno, as três naturezas de um número, os vereditos e as ações."
+---
+
+Um agente erra menos por falta de memória do que por afirmar o que não consultou: um preço que ninguém cotou, um prazo três dias fora, uma promessa sem ação por trás, a citação de um artigo que diz outra coisa. O **contrato de afirmação** declara o que um agente pode afirmar e a evidência que cada tipo de afirmação precisa ter no [registro do turno](/concepts/turn-records). A conferência roda sem modelo, no processo do agente, no último ponto antes do cliente ou antes de um documento ser salvo; a Niadra só recebe os vereditos e os soma. O contrato nunca reescreve por padrão, nunca reescreve uma saída imutável, e vem com uma lista versionada de frases do ofício que nunca podem disparar.
+
+## Ligar e desligar
+
+O contrato é a funcionalidade `claims` do espaço, ligada por padrão; um espaço a desliga no documento `features`, pelo papel `security`. O próprio contrato fica no documento `claim-contract`, dos papéis `integration` e `security`, e chega ao SDK pelo [perfil do SDK](/api/sdk-profile), sem as frases do corpus negativo (só a versão dele), que só o `niadra contract test` do seu CI lê, da sua própria cópia. As afirmações que o SDK confere entram no registro de turno, então a funcionalidade `turns` é o que as leva à Niadra e ao [aproveitamento](/concepts/context-use). Sem contrato, nada é conferido.
+
+## O documento
+
+| Campo | O que diz |
+|---|---|
+| `version` | A versão do contrato, que o registro de turno cita |
+| `languages` | `pt`, `en` ou `es`; o primeiro lê uma saída de idioma desconhecido |
+| `categories` | Os tipos de afirmação, até 64, cada um com `id` (`price`, `deadline`, `action_promise`), os `agents` a que se aplica, como as afirmações são achadas (`detect`), a evidência que o turno precisa ter (`evidence`), como um número é tratado conforme a origem (`natures`) e o que acontece com uma afirmação que não se sustenta (`actions`) |
+| `negative_corpus` | A lista versionada de frases do ofício que nunca podem disparar; obrigatória quando há categorias |
+| `internal_text` | Impressões digitais do seu próprio prompt |
+| `outputs` | Os contextos `immutable` e `mutable`, à parte |
+
+A **detecção** é lexical: números de certas `classes` (com `terms`, um número só conta numa frase que traz um dos termos), `roles` (as palavras que dão a um número o papel dele: "de" e "antes" para o preço de lista, "por" e "com desconto" para o preço promocional), `terms` do ofício sozinhos ("separei", "já enviei o link"), `patterns` nomeados (`article_citation`, `precedent_citation`) ou `document_sections`, em que toda frase é uma afirmação de fato.
+
+A **evidência** é exatamente uma de: `value` (um valor com proveniência no turno, do resultado de uma ferramenta ou do que os blocos de uma leitura de contexto serviram, com `same_role`, `fresh_for: claim` para exigir a idade de afirmação do tipo, e `must_state_gaps` para exigir que as lacunas declaradas do valor sejam ditas com ele), `tool` (uma chamada desta ferramenta no turno: a fronteira do que o agente pode saber, e um agente sem a ferramenta sempre falha), `tool_any` (uma chamada de qualquer uma destas ferramentas: uma promessa de ação precisa da ação) ou `anchor` (o texto cita uma fonte por uma âncora que bate com ela, a 0,90 ou mais).
+
+O que os blocos de uma leitura de contexto (`include`) serviram é evidência do turno: os campos e valores calculados da view de estado, o valor novo do que mudou desde que o cliente viu, os valores das restrições e os números com que cada oferta já mostrada foi mostrada (`already_presented[].values` do [bloco de restrições](/concepts/signals): preço, total, desconto, parcela), cada um com o papel do campo e se ainda pode ser afirmado. Um preço que só o texto do pacote diz não é evidência: o agente que o repete tem a afirmação conferida como `unsupported`, e uma oferta mostrada há mais tempo do que o tipo deixa afirmar dá `stale`.
+
+Um exemplo de categoria, de um contrato de varejo:
+
+```json
+{
+  "id": "price",
+  "detect": {
+    "classes": ["money"],
+    "roles": {
+      "price_list": ["de", "antes", "era", "was"],
+      "price_sale": ["por", "sai por", "com desconto", "now"]
+    }
+  },
+  "evidence": { "value": { "same_role": true, "fresh_for": "claim" } },
+  "natures": { "computed": "check", "quoted": "verbatim", "model": "warn" },
+  "actions": { "default": "warn", "contexts": { "chat": "rewrite_if_unequivocal" } }
+}
+```
+
+## Os números
+
+O analisador lê todo número de uma saída, num idioma, e cada número cai em no máximo uma menção: primeiro os **rótulos** pela forma (um número de processo, um CEP, um telefone, uma hora) e pela palavra anterior (pedido, protocolo, artigo, tamanho, página); depois as **datas**, dia primeiro em português e espanhol, mês primeiro em inglês; depois as **quantias**, pelo que vem antes ou depois (moeda, `%`, dias úteis, `mg`, `kg`, `10x`); depois códigos e ordinais, que são rótulos; e o resto (cinco dígitos ou mais e um ano são rótulos, dois decimais são dinheiro sem moeda, um inteiro antes de uma palavra é uma contagem). Um número por extenso só conta antes de uma unidade ("quinze dias úteis"), porque "um" também é artigo. Duas quantias ligadas por "a", "até" ou um hífen fazem uma faixa. As classes são `money`, `percent`, `date`, `duration`, `quantity`, `count`, `dosage` e `label`; um rótulo nomeia em vez de medir, nenhuma categoria o detecta e nada jamais o reescreve. Quando um número tem `.` e `,`, o último é o decimal; "R$ 511.06" em português é 511,06 mesmo assim.
+
+Um **papel** vale quando o termo dele está a até 6 palavras do número, na mesma frase; o termo mais próximo dá o papel, e dois papéis empatados deixam o número `ambiguous`, que nunca é aprovado.
+
+## As três naturezas
+
+| Natureza | O que é | Tratamento (`natures`) |
+|---|---|---|
+| **Citado** | O número está entre aspas: reproduzido como a fonte escreveu, mesmo falso, porque contestar uma alegação exige dizê-la. A conferência confirma só que o trecho citado está num documento do turno | `verbatim` (o padrão) ou `count` |
+| **Computado** | O turno tem um valor da classe do número com o papel dele, ou com o valor dele, vindo de um valor com proveniência, calculado por uma regra ou observado de uma fonte | `check` (o padrão) ou `count` |
+| **Dito pelo modelo** | Nenhum dos dois: não tem origem | `block`, `warn` ou `count`, ou a ação da categoria |
+
+O validador que derruba toda quantia ausente do histórico é uma categoria de classe `money` com `model: block`.
+
+## Vereditos e ações
+
+| Veredito | Quando |
+|---|---|
+| `matched` | Um valor da evidência é igual ao número (do papel dele, quando há papel; da classe dele, quando não há) |
+| `mismatch` | Há valores na evidência e nenhum é igual |
+| `no_evidence` | A evidência não tem valor para conferir; com `tool` ou `tool_any`, o turno não chamou a ferramenta |
+| `stale` | O valor igual não está fresco o bastante para afirmar |
+| `gap_not_stated` | O valor igual declara lacunas que a saída não diz |
+| `role_ambiguous` | Termos de dois papéis empataram |
+| `unsupported` | O número não tem origem |
+| `quoted_found`, `quoted_missing` | O trecho de um número citado está, ou não, num documento do turno |
+| `anchored`, `below_threshold`, `source_missing` | A âncora bate, fica abaixo de 0,90, ou cita um documento que o turno não tem |
+| `not_checked` | O tratamento da natureza é `count`, ou nenhuma âncora foi emitida |
+| `internal_text_found` | A saída repetiu impressões digitais do seu próprio prompt |
+
+`matched`, `quoted_found` e `anchored` não tomam ação; `not_checked` é contado. Todo outro veredito toma a ação da categoria para o contexto da saída (`actions.contexts`, ou `actions.default`), e `unsupported` toma `natures.model` quando definida:
+
+| Ação | O que acontece |
+|---|---|
+| `block` | Numa saída mutável, o trecho dá lugar a `replace_with`; numa imutável, a saída inteira vai a uma pessoa, intocada |
+| `warn` | A saída vai como está, e a afirmação fica marcada |
+| `count` | Só medida |
+| `rewrite_if_unequivocal` | O número é reescrito só quando é inequívoco; nos demais casos, marcado como `warn` |
+| `discard_anchor_and_count` | A âncora é descartada e contada |
+
+Uma reescrita é **inequívoca** só quando tudo vale: a saída é mutável; a classe é dinheiro, porcentagem, data ou duração (uma dose, uma medida técnica, um tamanho, uma posição e um identificador nunca são reescritos, em nenhum contexto); o número é um valor só, não uma faixa; o veredito é `stale` e o número é uma cópia literal de um campo de um objeto, cujo valor fresco no turno é outro; e nenhum outro número da classe está na frase. Um contrato não pode nomear `rewrite_if_unequivocal` como padrão, nem para um contexto que não lista como mutável. O princípio: corrigir, anotar ou contar; nunca bloquear com uma mensagem genérica, e nunca reescrever o que é imutável. Dizer a lacuna é uma resposta aceitável.
+
+## O corpus negativo
+
+Todo contrato com categorias vem com a lista versionada de frases do ofício que um léxico ingênuo pegaria e que nunca podem disparar ("não temos certeza do prazo", "o prazo para contestação é de 15 dias úteis", "Seu CEP é 01310-100?"). Uma frase dispara quando, lida em qualquer idioma do contrato e para qualquer agente dele, uma categoria acha uma afirmação nela. O comando `niadra contract test` dos SDKs falha quando uma dispara, e é feito para o seu CI: um falso positivo que bloqueia um documento com prazo correndo é o maior risco do contrato, e o teste faz parte dele.
+
+```sh
+niadra contract test --contract claim-contract.json --examples tests/claims/examples.json
+```
+
+O comando lê a sua cópia do contrato (ou o do perfil, com o corpus em `--corpus`) e arquivos de turnos de exemplo, e sai com 0 quando tudo vale, 1 quando não, 2 quando não conseguiu rodar.
+
+## Texto interno
+
+A sua empresa pode registrar impressões digitais do próprio prompt: hashes de cada `n` palavras seguidas (8 por padrão), calculados pelo SDK, nunca o prompt. Uma saída que repete uma delas dá lugar a `redact`: o trecho vira uma afirmação da categoria reservada `internal_text`, com o veredito `internal_text_found` e a ação `block` (numa saída imutável, a saída inteira vai a uma pessoa), e o turno é marcado `guard_acted`. O registro nunca guarda o texto redigido.
+
+## A âncora de texto
+
+Uma ferramenta ou o agente emite âncoras: onde na saída, o texto citado e o documento que ele cita. Os dois textos são normalizados do mesmo jeito (minúsculas, sem acentos, tudo que não é letra ou dígito vira um espaço) e a distância de edição entre a citação e algum trecho do documento dá a pontuação `1 - d / len(citação)`. Uma âncora vale a 0,90 ou mais; abaixo disso é descartada e contada, nunca consertada. Um número dentro de um trecho ancorado é conferido como número mesmo assim: a pontuação sozinha deixaria passar uma quantia trocada. `coverage` separa lei e fato, que nunca se somam.
+
+## Onde roda
+
+No SDK, na ponte do stream, antes do cliente (um candidato fica retido no máximo 150 ms e uma mensagem no máximo 300 ms; passado isso, o texto vai como está, anotado `guard_budget_exceeded`), ou antes de um documento ser salvo. O servidor nunca roda a conferência num turno.
+
+<CodeGroup>
+```python Python
+# Count mode: what the agent says inside a turn is checked against what its tools returned,
+# each claim goes to the record with its verdict, and nothing changes the output.
+with conversation.turn(build=BUILD):
+    ...
+    conversation.agent(reply)
+
+# The guard that acts, as the contract's actions say
+reply = conversation.claims.guard_text(draft, context="chat")
+for chunk in conversation.claims.guard(stream, context="chat"):
+    speak(chunk)
+
+# On demand, without acting
+records = conversation.claims.check(draft, context="proposal", immutable=True)
+```
+```typescript TypeScript
+// Count mode: what the agent says inside a turn is checked against what its tools returned,
+// each claim goes to the record with its verdict, and nothing changes the output.
+await convo.turn({ build: BUILD }, async () => {
+  // ...
+  convo.agent(reply);
+});
+
+// The guard that acts, as the contract's actions say
+const guarded = await convo.claims.guardText(draft, { context: "chat" });
+for await (const chunk of convo.claims.guard(stream, { context: "chat" })) speak(chunk);
+
+// On demand, without acting
+const records = await convo.claims.check(draft, { context: "proposal", immutable: true });
+```
+</CodeGroup>
+
+Cada afirmação vira uma entrada de `claims` no registro do turno: a categoria, a classe, a natureza e o papel de um número, o trecho em pontos de código, o valor normalizado, a evidência (a chamada e o campo, o objeto e o campo, ou o documento e a pontuação), o veredito e a ação tomada (`none`, `block`, `warn`, `count`, `rewrite` ou `discard_anchor`). Um valor que não está seguro para afirmar pode ser lido de novo pelo seu resolvedor, dentro da sua empresa e em 300 ms, antes de a resposta sair: `conversation.verify_claim()` em Python, `convo.verifyClaim()` em TypeScript. Veja [O worker de resolução](/guides/resolver-worker).
+
+## Ler os números
+
+[`GET /v1/context-use`](/api/context-use), com a funcionalidade `claims` ligada, traz em `claims`, por fonte e agente, as afirmações das saídas dele por categoria e veredito, e quantas se apoiam em evidência (`evidenced`). É a taxa do que o agente afirma sem consultar. Um contrato com categorias, um corpus negativo que o CI mantém e essa taxa no Console são o que a sua empresa mede; a Niadra soma, e nunca roda um modelo a mais por turno.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Tipos de objeto e estado" href="/concepts/object-types">
+    a idade de afirmação de cada campo e as proibições.
+  </Card>
+  <Card title="Registros de turno" href="/concepts/turn-records">
+    onde os vereditos ficam.
+  </Card>
+  <Card title="Agentes de varejo" href="/guides/retail-agents">
+    um contrato de preço, disponibilidade e promessa de ação.
+  </Card>
+  <Card title="Agentes jurídicos" href="/guides/legal-agents">
+    prazos com lacunas declaradas e citações ancoradas.
+  </Card>
+</CardGroup>

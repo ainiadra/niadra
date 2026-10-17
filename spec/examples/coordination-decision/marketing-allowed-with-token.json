@@ -1,0 +1,27 @@
+{
+  "decision": "allow",
+  "reasons": [],
+  "channel": {
+    "free_form_until": "2026-09-30T09:15:00Z",
+    "template_required": false,
+    "quiet_until": null
+  },
+  "contact_budget": {
+    "marketing": {
+      "remaining": 1,
+      "next_allowed_at": null
+    }
+  },
+  "suppressions": [],
+  "commitments_active": [
+    {
+      "id": "cm_0199a3b2",
+      "type": "discount",
+      "valid_until": "2026-10-03T23:59:59Z"
+    }
+  ],
+  "promises_open": [],
+  "decision_id": "0199a3b2-5c00-7a1e-8f3d-2b6c0e4a9d01",
+  "valid_for_s": 30,
+  "contact_token": "nct1.eyJraWQiOiJja190ZXN0X3NwYWNlX2FfMSIsInNwYWNlIjoiMDE5MmY1YTAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBhMDA0IiwianRpIjoiMDE5OWEzYjItNWMwMC03YTFlLThmM2QtMmI2YzBlNGE5ZDAxIiwicHVycG9zZSI6Im1hcmtldGluZyIsImNoYW5uZWwiOiJ3aGF0c2FwcCIsInJjcHQiOiJHZ0RLTnluY2tOQnhvYy00eUtSUVFUS19wNVhqZFUydG5NLURBYklEWERJIiwiZ2F0ZXdheSI6IndhX2dhdGV3YXkiLCJpYXQiOjE3OTAwMDAwMDAsImV4cCI6MTc5MDAwMDEyMH0.Ia4bN-vqYirRYvJCdAiYDiJwagYiR19hh-rOclLSJWeBr8Jv4HjKVIsE_hEgVzAqdh1e-Hgygcu58DPROmlEBw"
+}

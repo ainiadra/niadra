@@ -1,0 +1,219 @@
+---
+title: "Sistemas, objetos e ações"
+description: "Eventos de CRM, ERP e help desk, objetos de negócio e as ações que fecham pendências."
+---
+
+A memória da Niadra se monta a partir de todo canal, plataforma e sistema da empresa, e serve tanto os agentes que atendem o cliente quanto os que trabalham por dentro, no CRM, no ERP, no help desk, na cobrança e nos pedidos. Dos sistemas, a memória recebe três coisas: os **eventos de sistema** que eles já emitem, os **objetos de negócio** a que eles se referem e as **ações** que os agentes fazem neles. É assim que o agente de voz sabe às 14h07 o que o agente de cobrança fez às 14h06.
+
+## Eventos de sistema
+
+Um evento de sistema é uma mudança de estado num sistema de registro: pedido criado, fatura contestada, ticket reaberto, pagamento recusado. Ele entra como `kind: "system_event"`, com `speaker` igual a `system` e um `canonical_type`, como `invoice.credited`, além dos campos estruturados em `fields`.
+
+Há três portas de entrada:
+
+| Porta | Quando usar |
+|---|---|
+| [Webhook genérico](/guides/system-webhooks) | O sistema já manda webhook. Você aponta para `POST /v1/ingest/webhook/{source_id}`, e um mapeamento versionado transforma o payload em evento |
+| Importação de arquivo | O sistema não tem webhook e exporta arquivos: mande um JSONL de itens do lote para [`POST /v1/ingest/files`](/api/ingest-files), com até 512 MB, e acompanhe por [`GET /v1/ingest/files/{import_id}`](/api/ingest-file) |
+| API | O seu código já sabe do evento e manda pelo SDK ou por `POST /v1/batch` |
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, system_id
+
+niadra = Niadra()
+
+niadra.track({
+    "kind": "system_event",
+    "channel": "erp",
+    "canonical_type": "invoice.credited",
+    "idempotency_key": "erp-inv-0823-credit-1",
+    "handles": [system_id("crm", "48213")],
+    "object_refs": [{"type": "invoice", "namespace": "erp", "id": "0823"}],
+    "speaker": {"role": "system"},
+    "fields": {"amount": 40.0, "currency": "USD"},
+})
+```
+```typescript TypeScript
+niadra.track({
+  kind: "system_event",
+  channel: "erp",
+  canonical_type: "invoice.credited",
+  idempotency_key: "erp-inv-0823-credit-1",
+  handles: [handles.systemId("48213", "crm")],
+  object_refs: ["invoice:erp:0823"],
+  speaker: "system",
+  fields: { amount: 40.0, currency: "USD" },
+});
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/batch" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"items": [{"type": "event", "kind": "system_event", "channel": "erp",
+       "canonical_type": "invoice.credited", "idempotency_key": "erp-inv-0823-credit-1",
+       "handles": [{"type": "system_id", "value": "48213", "scope": "crm"}],
+       "object_refs": [{"type": "invoice", "namespace": "erp", "id": "0823"}],
+       "speaker": {"role": "system"}, "fields": {"amount": 40.0, "currency": "USD"},
+       "occurred_at": "2026-09-22T17:06:21Z"}]}'
+```
+</CodeGroup>
+
+Evento de sistema é dado estruturado e entra **sem modelo de IA**: o mapeamento extrai tipo, objeto, os ids do cliente, campos e horário. Só tipos mapeados entram na memória, o que protege a memória do volume de um ERP. O payload cru de um tipo não mapeado fica guardado como chegou, até um apagamento ou o prazo que você definir em `raw_content`, e não entra na memória. Texto livre de dentro de um sistema, como a descrição de um ticket, entra como `message` num canal próprio, com o id do ticket em `conversation_id`, e passa pela extração normal. Numa regra de webhook com `"kind": "message"` e sem expressão para `conversation_id`, o texto fica sob o objeto que a regra nomeia (`obj:<tipo>:<namespace>:<id>`), então os textos sobre o mesmo ticket formam uma conversa. Veja [Webhooks de sistema](/guides/system-webhooks).
+
+Eventos de sistema não entram na cobrança. A unidade continua sendo a conversa ou tarefa.
+
+## Objetos de negócio
+
+Pedido, ticket, fatura, contrato, entrega e assinatura são **objetos**. Cada um é identificado pelo trio `type`, `namespace` e `id`, único no espaço, como `invoice:erp:0823`. Os SDKs aceitam essa forma curta.
+
+O objeto se prende ao cliente pelo id dele naquele sistema, o handle `system_id`, e guarda um **estado derivado**, sempre com `as_of`, a fonte e a referência ao registro de origem, as ações dos agentes e a linha do tempo dos eventos, tanto os da janela quente do espaço (90 dias por padrão) quanto os que já saíram dela para o arquivo frio, que a linha do tempo lê só no mês em que cada um chegou. **O valor oficial continua no seu sistema.** A memória guarda o bastante para o agente lembrar e agir, e aponta para a origem. Uma separação de perfis leva os pedidos e as faturas para o dono certo sozinha, porque o objeto está preso ao handle de origem.
+
+Leia um objeto por [`GET /v1/objects/{object_type}/{namespace}/{external_id}`](/api/object) e os eventos e ações dele por [`/timeline`](/api/object-timeline), as duas com o escopo `context` e comprovante. Os ids podem ter barra e dois-pontos. A leitura responde o objeto como uma leitura de estado `display` o serve ([o que uma leitura devolve](/concepts/object-types#o-que-uma-leitura-devolve)): cada campo com o valor lógico, os carimbos e o frescor; um tipo que o registro não declara é lido como um tipo sem regras. Nos SDKs, `object_state()` e `object_timeline()` em Python, `objectState()` e `objectTimeline()` em TypeScript:
+
+<CodeGroup>
+```python Python
+invoice = niadra.object_state("invoice:erp:0823")
+if invoice:
+    print({name: f.v for name, f in invoice.fields.items()}, invoice.as_of)
+```
+```typescript TypeScript
+const { data: invoice } = await niadra.objectState("invoice:erp:0823");
+if (invoice) console.log(invoice.fields, invoice.as_of);
+```
+```bash cURL
+curl "https://acme-prod.us-east-2.api.niadra.com/v1/objects/invoice/erp/0823" \
+  -H "Authorization: Bearer $NIADRA_API_KEY"
+```
+</CodeGroup>
+
+O seu time de governança vê todos os objetos de um cliente, com as ações sobre eles, por [`GET /v1/profiles/{profile_id}/objects`](/api/profile-objects).
+
+### Objetos com tipo declarado
+
+Com a funcionalidade `state` ligada no espaço, um objeto pode ter um **tipo declarado** no documento `object-types`: os campos com frescor e política de afirmação, os quatro valores lógicos (presente, ausente, não observado, defeito conhecido), as fontes e a precedência delas, os valores que a sua empresa computa, o ciclo de vida e os temporizadores. O sistema de registro envia o estado por [`POST /v1/objects/push`](/api/objects-push), com a versão dele, e uma leitura por [`POST /v1/state/read`](/api/state-read) diz, campo a campo, quão velho o valor está, de que fonte veio e o que o agente não pode afirmar com ele. Um tipo pode ser derivado do esquema do seu próprio banco. Os objetos sem tipo declarado continuam exatamente como acima. Veja [Tipos de objeto e estado](/concepts/object-types).
+
+## Ações de agente
+
+Uma ação é o registro do que um agente, interno ou de atendimento, ou um atendente humano fez num sistema: a operação canônica (`credit`, `reschedule`), o objeto, o resultado, a finalidade e, opcionalmente, `closes`, a pendência que a ação cumpre.
+
+<CodeGroup>
+```python Python
+niadra.action(
+    "credit",
+    subject=system_id("crm", "48213"),
+    object="invoice:erp:0823",
+    result="$40 credit on the August bill",
+    closes={"object": {"type": "invoice", "namespace": "erp", "id": "0823"}, "operation": "credit"},
+    channel="erp",
+    task_id="billing-7741",
+)
+```
+```typescript TypeScript
+niadra.action({
+  channel: "erp",
+  task_id: "billing-7741",
+  handles: [handles.systemId("48213", "crm")],
+  object_refs: ["invoice:erp:0823"],
+  operation: "credit",
+  result: "$40 credit on the August bill",
+  closes: { object: { type: "invoice", namespace: "erp", id: "0823" }, operation: "credit" },
+});
+```
+</CodeGroup>
+
+`closes` aponta a pendência pelo `item_id` ou pelo par objeto e operação que ela espera, nunca pelos dois. Sem `closes`, a ação fecha a pendência que espera a mesma operação sobre o mesmo objeto. Quando só o objeto e a operação ligam as duas, a ação vale se foi feita até 72 horas antes ou depois da promessa, ou, numa pendência com prazo, até 72 horas depois dessa data: "protocolar a réplica até o dia 9", dito no dia 3, fecha com o protocolo do dia 8. Quando a ação diz as palavras da pendência, ou o modelo de decisão confirma que ela cumpre a pendência, ela fecha a qualquer momento depois da promessa, mesmo com atraso: uma promessa cumprida tarde fecha. Uma ação ou um evento sobre uma parte do objeto também fecha, pelas relações de um para um do tipo da parte: uma petição que nomeia o processo em `case_id` fecha uma pendência sobre o processo. Uma promessa que diz o valor fecha também pelo valor: um evento do sistema de registro (ou a ação que ele confirma) que traz nos campos o mesmo valor que a promessa diz (`amount`, `value`, `total`, `valor`, `monto` ou `importe`), com uma operação da mesma família (`refund_fee` é um `refund`; `cancel_subscription`, um `cancel`) e sobre o mesmo objeto quando a promessa nomeia um, fecha a promessa se chega até 30 dias depois dela (ou nas 72 horas antes): "reembolsar a taxa de frete de R$ 41,78", que não nomeia pedido nenhum, fecha quando o ERP registra `order.refunded` de 41,78 num pedido do cliente dias depois. Sem valor nos dois lados, ou sem a operação que a promessa espera, nada fecha pelo valor, e uma ação declarada por uma fonte que não é confiável para a operação continua não fechando nada. Registrar ação exige o escopo `act` da chave e, quando a fonte declara `trusted_action_ops`, uma operação dessa lista; `track` sozinho não basta. Uma correção vai como uma ação nova, com `corrects_action_id`.
+
+As operações são comparadas na forma canônica: `invoice.credited`, `credited` e `credit` são a mesma operação. A pendência extraída da conversa guarda a operação nessa forma, então a promessa "vou pedir o crédito da fatura 0823" espera `credit` e fecha com a ação `credit` do agente de cobrança, e o evento `invoice.credited` do ERP confirma essa ação. Um evento do catálogo que chega sem ação nenhuma, como `invoice.credited`, também fecha sozinho a pendência que espera `credit` sobre aquela fatura, porque o evento do sistema de registro já é a confirmação. Uma operação que o catálogo não conhece continua valendo pelo nome que você deu, sem diferença de maiúsculas. Um evento de sistema seu nomeia a operação que confirma em `fields.operation` (`filing.protocolled` com `{"operation": "file"}`); um estado do ciclo de vida nunca é lido como operação.
+
+A extração dá a uma pendência uma operação que conhece, sem configuração: as do catálogo, as que os agentes do espaço registram e as que os sistemas dele confirmam (`fields.operation` de um evento de sistema), e também as que o espaço declara, quando declara: as `trusted_action_ops` das fontes, as dos mapeamentos e as de `operations` do esquema de extração (o documento de configuração `schemas`). Quando três ações com o mesmo nome trazem texto, a IA da Niadra escreve o que a operação quer dizer a partir desses textos, mascarados, e a extração lê esse sentido ao lado do nome; um sentido declarado vale por cima. Uma pendência dita antes de qualquer operação aparecer não espera nenhuma, e fecha mesmo assim, pelo que a ação ou o evento diz sobre o mesmo objeto (veja abaixo). Declarar `operations` é opcional e adianta a primeira pendência. Cada operação é um nome ou um nome com o que ela significa, nas palavras da empresa e na língua das conversas: `{"name": "file", "description": "protocolar uma peça ou petição no processo"}` (até 200 caracteres). A extração lê a descrição ao lado do nome para saber qual operação uma pendência espera; sem ela, uma pendência dita em português raramente ganha uma operação nomeada em inglês. Uma pendência que só fala do assunto de uma operação não a espera: "enviar o comprovante do estorno" não espera `refund`. Para as pendências que já existem ganharem a operação, mude também a `version` do esquema: a Niadra extrai de novo as conversas dos últimos 30 dias e atualiza a pendência que cada uma já tinha, sem criar outra. A busca e a linha do tempo mostram o `object` e a `expected_operation` de cada pendência.
+
+### Declarada, confirmada, divergente
+
+| Estado | Quando |
+|---|---|
+| `declared` | O agente registrou e o sistema de registro ainda não confirmou. O contexto diz isso: "declarado pela Cobrança às 14h06; o sistema ainda não confirmou" |
+| `confirmed` | Chegou o evento do sistema que confirma, como `invoice.credited`. A ação e o evento viram um registro só, e o crédito nunca conta duas vezes |
+| `divergent` | A janela venceu sem confirmação. Você pode ser avisado por [gatilho](/concepts/triggers-and-webhooks) |
+
+A janela só corre para o que um sistema de registro deveria confirmar. O compromisso (`commitment:coordination:<id>`) e o desfecho de uma transferência (`handoff:coordination:<id>`) registram o que um agente prometeu e o que quem recebeu decidiu, não um efeito num sistema: nenhum evento os confirma, então ficam `declared` e nunca viram `divergent`, e o próximo agente os lê como feitos por outro. O namespace `coordination` é só da [coordenação](/concepts/coordination): um item que nomeia um objeto nele volta com `invalid_input`.
+
+Ação declarada fecha pendência quando a fonte confia na operação dela: uma fonte sem `trusted_action_ops` confia em todas, porque registra qualquer uma, e as travas do fechamento decidem; uma fonte com a lista confia só nas da lista. Ação confirmada sempre fecha. A mesma operação sobre o mesmo objeto fecha pela operação. Uma pendência que não espera operação, ou que espera uma da mesma família da ação (`pay` e `pay_court_fees`), fecha sobre o mesmo objeto quando o que a ação ou o evento diz traz as palavras dela, ou quando o modelo de decisão julga que ele a cumpre. O que um agente que fala com o cliente (uma fonte com `audience: customer_agent`) diz que fez não é registro de sistema: a ação declarada dele fecha a pendência que nomeia em `closes.item_id` (puro ou como `open_item:<id>`, a forma que o histórico e o contexto dão), ou uma cujas palavras o `result` diz, ou uma que o modelo de decisão julga cumprida quando as palavras não bastam ("informar que a sentença foi julgada improcedente" cumpre "comunicar a sentença ao cliente"; "avisar o cliente sobre a verificação da sentença" não). Numa conversa, ela ainda precisa que a resposta do agente ao cliente, na mesma conversa, tenha entregado o que a pendência prometia, ou pedido o que ela pedia: "já estou enviando" não fecha "enviar a cópia da decisão". A ação confiável de um agente interno e toda confirmação continuam fechando por objeto e operação. Antes de uma ação contar, cada turno de texto da conversa ou tarefa dela até ali passa pela triagem contra injeção de prompt, seja quem for que falou; uma sessão marcada tem a ação em quarentena desde a chegada, então ela não fecha nada e nunca aparece como feita, sem esperar a conversa terminar e ser extraída. Os vereditos ficam guardados por evento, e a extração também tria os turnos do agente e das ferramentas. Uma sessão marcada depois põe em quarentena as ações que já tinha: o que elas tinham fechado volta a abrir, com o webhook `open_item.reopened`. Uma ação que nomeia outra em `corrects_action_id` toma o lugar dela: a corrigida sai do contexto e da busca e fica no registro.
+
+### Fechamento retroativo
+
+A ação pode chegar antes da pendência. Às 14h05 Marina contesta a fatura no app, e a pendência só nasce quando a sessão do app fecha e é extraída, às 14h35. O agente de cobrança age às 14h06. Ao criar a pendência, a Niadra procura ações já aplicadas sobre o mesmo objeto e operação dentro da janela, e eventos de sistema que já confirmaram essa operação sobre o objeto ou uma parte dele (do cliente, da organização em nome de quem a pessoa age, ou do dono e dos participantes do objeto, como quando o sistema registra o pagamento na conta do cliente e a pendência nasce da conversa de um funcionário), e a pendência nasce `resolved`, fechada pela ação das 14h06. Uma pendência que não espera uma operação é julgada contra o que o evento registra, como quando o evento chega depois dela. Uma promessa sem objeto mas com valor, extraída depois do reembolso, nasce fechada do mesmo jeito, pelo estado confirmado dos objetos do cliente: o último evento de um deles é uma operação da mesma família, com aquele valor, dentro da janela.
+
+Uma promessa cumprida nos últimos 7 dias não sai do contexto: fica entre as pendências dizendo quando foi cumprida, ao lado do registro que a cumpriu ([o contexto e as views](/concepts/context#esqueleto-e-encaixes-por-turno)). E a conversa que deixou a promessa deixa de parecer pendente: o resumo foi escrito quando ela terminou, então a linha da conversa com desfecho em aberto diz que as pendências dela foram cumpridas, e quando, por mais antigo que seja, ou que parte delas foi cumprida, quando alguma ainda está aberta.
+
+### Um id por pendência
+
+O id de uma pendência é um UUID derivado uma vez do que ela é: o cliente de quem ela é (o handle de onde veio), as palavras de conteúdo da descrição (sem artigos, preposições e palavras de data), o vencimento e o objeto. Quando a pendência não tem vencimento nem objeto, a conversa em que foi dita também entra no id. A mesma promessa dita de novo, com outras palavras ou em outra conversa da mesma pessoa ("sobre planta e termo", "sobre a planta e o termo"), com o mesmo vencimento e o mesmo objeto, é a mesma pendência: a repetição a atualiza no lugar, e nunca se grava uma segunda linha para ela. Um vencimento ou um objeto diferente separa duas pendências, e um "me liga de volta" sem data dito em outro dia é uma pendência nova.
+
+Assim uma pendência tem um id só enquanto existir: a correção, o `closes.item_id` de uma ação, os webhooks, a exportação e os comprovantes a nomeiam por esse id.
+
+## Contexto por tarefa
+
+O agente interno lê o contexto centrado no objeto, com uma view de tarefa e o nível `no_customer`, porque não há cliente presente. Nesse nível ele lê só as categorias que a política libera para tarefas sem cliente (`no_customer_allowed`), no contexto e nas falas recentes em `live`; uma fala que cita um objeto fica na categoria do tipo dele:
+
+<CodeGroup>
+```python Python
+with niadra.task(
+    "billing-7741",
+    object="invoice:erp:0823",
+    view="task:billing",
+    verification="no_customer",
+    channel="erp",
+) as task:
+    ctx = task.context()
+    # o agente decide e lança o crédito no ERP, com as credenciais dele
+    task.action("credit", result="$40 credit on the August bill")
+# ao sair do bloco, o SDK envia task.ended
+```
+```typescript TypeScript
+const task = niadra.task({
+  task_id: "billing-7741",
+  channel: "erp",
+  object: "invoice:erp:0823",
+  view: "task:billing",
+  verification: "no_customer",
+});
+const ctx = await task.context();
+// o agente decide e lança o crédito no ERP, com as credenciais dele
+task.action({ operation: "credit", object_refs: ["invoice:erp:0823"], result: "$40 credit on the August bill" });
+await task.end();
+```
+</CodeGroup>
+
+A view de tarefa prioriza os objetos do tipo da tarefa, as pendências ligadas a eles e o que foi dito sobre eles nas conversas. O que a finalidade da fonte não permite fica de fora: o agente de cobrança lê faturas e contestações, não lê pendência técnica.
+
+## O caminho das 14h06
+
+1. **14h05, app:** a contestação entra e, com a resposta do lote, está legível e ligada a `invoice:erp:0823`.
+2. **14h06, agente de cobrança:** lê o contexto da fatura, recebe a contestação pelo `live`, lança o crédito no ERP e registra a ação.
+3. **14h06, ERP:** emite `invoice.credited`; a ação passa a `confirmed`.
+4. **Em segundos:** o contexto de voz ganha "Outro agente: crédito de R$ 40, confirmado pelo sistema".
+5. **14h07, ligação:** o agente de voz diz que o crédito já foi lançado.
+
+Nenhum modelo de IA fica no caminho entre a ação e o contexto de voz: a ação e o evento de sistema passam pela transação completa, e os workers recompilam o contexto do perfil em seguida.
+
+<Note>
+A Niadra nunca escreve num sistema de registro. Quem age é o agente, com as credenciais dele. Para devolver o desfecho ao CRM, consuma os webhooks `conversation.outcome`, `open_item.closed` e `action.recorded` ([Gatilhos e webhooks](/concepts/triggers-and-webhooks)).
+</Note>
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Agentes internos" href="/guides/internal-agents">
+    o guia completo do agente de cobrança.
+  </Card>
+  <Card title="Webhooks dos seus sistemas" href="/guides/system-webhooks">
+    mapeamento e autenticação.
+  </Card>
+  <Card title="Ler um objeto" href="/api/object">
+    estado derivado e pendências abertas.
+  </Card>
+  <Card title="Tipos de objeto e estado" href="/concepts/object-types">
+    tipos declarados, frescor por campo e o estado que o sistema de registro envia.
+  </Card>
+</CardGroup>

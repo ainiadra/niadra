@@ -1,0 +1,75 @@
+---
+title: "VoltAgent"
+description: "The customer's memory in a VoltAgent Agent: prepare, end and handoff hooks, and the kit as tools."
+---
+
+`niadraHooks()` returns `onPrepareModelMessages`, `onEnd` and `onHandoff` for `new Agent({ hooks })`, and `niadraTools(session)` returns the kit as VoltAgent tools. VoltAgent's own memory (conversations, working memory) stays VoltAgent's; Niadra is the customer's memory shared with the company's other agents. TypeScript only.
+
+## Install
+
+```sh
+npm install @niadra/sdk @voltagent/core   # @voltagent/core 2.10 or newer, below 3, on AI SDK 6
+```
+
+The integration is in `@niadra/sdk` on npm.
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | `onPrepareModelMessages` puts the pack (after the agent's own notes, with `agentMemory`) as a system message after your instructions and the `turn_block` at the end of the last user message, only in what goes to the model: nothing of it lands in VoltAgent's memory |
+| Turns | `onPrepareModelMessages` records the user's newest message; `onEnd` records the answer with the usage of the whole operation (prompt cache reads and writes included) |
+| Tools | `niadraTools(session)`: VoltAgent tools with the kit's JSON Schemas, bound to the customer |
+| Verification | `verify` in the hooks options, recorded once before the first context |
+| Handoff | `onHandoff` records a delegation to a subagent as a handoff between agents, when the hooks are built for a fixed conversation |
+
+The conversation comes from the operation's context (`context: { niadra: convo }` on `generateText` or `streamText`), or is fixed when you pass `session` while building the hooks.
+
+## Minimal example
+
+```typescript
+import { Agent } from "@voltagent/core";
+import { openai } from "@ai-sdk/openai";
+import { Niadra, handles } from "@niadra/sdk";
+import { niadraHooks, niadraTools } from "@niadra/sdk/voltagent";
+
+const niadra = new Niadra();
+const support = new Agent({
+  name: "support",
+  instructions: "You are Acme's support agent.",
+  model: openai("gpt-4.1"),
+  hooks: niadraHooks(),
+});
+
+const convo = niadra.conversation({ subject: handles.appUserId(user.id), channel: "web_chat", conversation_id: chatId });
+const { text } = await support.generateText("Where is my replacement?", {
+  context: { niadra: convo },
+  tools: niadraTools(convo),
+});
+```
+
+## Agent memory
+
+`niadraHooks({ agentMemory: true })` and `niadraTools(convo, { agentMemory: true })` put the agent's own notes before the customer's context and add the two tools. See [Agent memory](/en/concepts/agent-memory).
+
+## Turn records
+
+With the `turns` feature on in the space (it ships on), the adapter's hooks with `turns: true` record each run as a [turn record](/en/concepts/turn-records), with each tool call by the framework's own id and each model call. The VoltAgent hooks cannot stop a tool, so wrap the tools with `Niadra.tool()` for a [replay](/en/guides/replay-in-ci) to answer them from the record. A turn never waits for Niadra and never repeats the conversation's text.
+
+## Limits
+
+- VoltAgent 2.x runs on AI SDK 6; the adapter follows it.
+- When the model's name does not tell the provider, pass `provider` in the hooks options for the usage of the agent's turn.
+- Nothing here stops the agent: with Niadra slow or down, the messages go to the model as they came.
+- Tested against `@voltagent/core` 2.10.0 with a real `Agent` over a test model and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Vercel AI SDK" href="/en/integrations/ai-sdk">
+    the middleware for calling the AI SDK directly.
+  </Card>
+  <Card title="History navigation" href="/en/concepts/history">
+    the three tools the agent receives.
+  </Card>
+</CardGroup>

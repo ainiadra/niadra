@@ -1,0 +1,39 @@
+# Checks every push and pull request: the reference is up to date with the contract, the tests
+# (contract, translations, brand rules) pass, and Mintlify validates the site with no broken link.
+# Mintlify publishes main by itself (its GitHub app).
+name: docs
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+permissions:
+  contents: read
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    working-directory: docs
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - run: npm ci
+      - name: Build, tests, mint validate and mint broken-links
+        run: npm run check
+      - name: Generated files committed
+        run: git diff --exit-code -- openapi api en/api docs.json

@@ -1,0 +1,72 @@
+---
+title: "Cloudflare Agents"
+description: "A memória do cliente num Agent do Cloudflare Agents SDK: o middleware do AI SDK com as escritas entregues a ctx.waitUntil(), o kit como ferramentas e o preparo para modelos chamados sem o AI SDK."
+---
+
+`niadraAgent(this, { niadra, subject })` devolve um ajudante por instância de `Agent` (um Durable Object), amarrado a uma conversa cujo id é o nome do agente (o id para o qual você roteia, como um chat ou um usuário), a não ser que você dê outro. Só APIs web e o AI SDK, que o pacote `agents` já exige: roda nos Workers como está. Só em TypeScript.
+
+## Instalar
+
+```sh
+npm install @niadra/sdk agents ai   # agents 0.24 ou mais novo, abaixo da 1, como peer dependency opcional
+```
+
+A integração está no `@niadra/sdk` no npm.
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | `middleware` é o middleware do [AI SDK](/integrations/ai-sdk) para `wrapLanguageModel()`, o jeito como os agentes chamam modelos (`AIChatAgent.onChatMessage`, `streamText`, `generateText`): o contexto depois do seu prompt de sistema e o `turn_block` no fim da última mensagem do usuário. Para um modelo chamado sem o AI SDK (o binding do Workers AI, o `onTurn()` de um agente de voz), `prepare(messages)` devolve as mensagens com o contexto no lugar |
+| Turnos | O middleware registra a mensagem mais nova do cliente e a resposta com o uso do provedor; `record(text, { usage: workersAiUsage(answer, model) })` registra uma resposta dada sem o AI SDK. Depois de cada resposta, as escritas na fila vão para `ctx.waitUntil()`, para a instância não ficar ociosa antes de a Niadra as receber |
+| Ferramentas | `tools()`: o kit como ferramentas do AI SDK, amarradas ao cliente |
+| Verificação | `verify` na opção, registrado uma vez antes do primeiro contexto |
+| Transbordo | `end()` encerra a conversa; `session.handoff()` onde o seu agente transfere |
+
+## Exemplo mínimo
+
+```typescript
+import { AIChatAgent } from "@cloudflare/ai-chat";
+import { convertToModelMessages, streamText, wrapLanguageModel } from "ai";
+import { createWorkersAI } from "workers-ai-provider";
+import { Niadra, handles } from "@niadra/sdk";
+import { niadraAgent } from "@niadra/sdk/cloudflare-agents";
+
+let niadra: Niadra | undefined; // one client per isolate
+
+export class Support extends AIChatAgent<Env> {
+  async onChatMessage() {
+    niadra ??= new Niadra({ apiKey: this.env.NIADRA_API_KEY });
+    const memory = niadraAgent(this, { niadra, subject: handles.appUserId(this.name) });
+    const result = streamText({
+      model: wrapLanguageModel({ model: createWorkersAI({ binding: this.env.AI })("@cf/openai/gpt-oss-120b"), middleware: memory.middleware }),
+      system: "You are Acme's support agent.",
+      messages: await convertToModelMessages(this.messages),
+      tools: { ...memory.tools(), ...yourTools },
+    });
+    return result.toUIMessageStreamResponse();
+  }
+}
+```
+
+## Memória do agente
+
+`niadraAgent(this, { ..., agentMemory: true })` põe as notas do próprio agente antes do contexto do cliente e acrescenta as duas ferramentas. Veja [Memória do agente](/concepts/agent-memory).
+
+## Limites
+
+- A primeira chamada constrói o ajudante; as seguintes na mesma instância devolvem o mesmo, então a conversa mantém o contexto fixado e os deltas entre os turnos.
+- `channel: "voice"` dá o orçamento e a view de voz; `session` recebe uma conversa ou uma tarefa que você mesmo abriu, no lugar de `subject`.
+- Nada aqui para o agente: com a Niadra lenta ou fora, o modelo recebe as mensagens como vieram; sem cliente encontrado, tudo passa direto.
+- Testado com os tipos do `agents` 0.24.0 e, empacotado com o AI SDK, rodando dentro do workerd (`pnpm runtimes`), com a Niadra no emulador.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Vercel AI SDK" href="/integrations/ai-sdk">
+    o middleware que este adaptador reaproveita.
+  </Card>
+  <Card title="SDK de TypeScript" href="/sdk/typescript">
+    o cliente, as conversas e as tarefas.
+  </Card>
+</CardGroup>

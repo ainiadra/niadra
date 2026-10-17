@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/counterfactual-results.v0.json",
+  "title": "Niadra Counterfactual Results v0",
+  "description": "What a runner measured running recorded tool calls live with and without one element: overlaps and positions per case, never an item. See spec/counterfactual.md.",
+  "$defs": {
+    "CounterfactualCase": {
+      "additionalProperties": false,
+      "description": "One recorded tool call run live three times at the same moment: twice with the element (the base, whose two lists measure the tool's own noise) and once without it (the variant). Positions and overlaps only: never an item, an argument or a result.",
+      "properties": {
+        "turn_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "call_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Call Id",
+          "type": "string"
+        },
+        "status": {
+          "description": "`no_dry_run` for a tool that writes state and has no dry run: it is never called. `tool_error` when a call failed, `infrastructure_error` when the runner could not run the case.",
+          "enum": [
+            "completed",
+            "no_dry_run",
+            "tool_error",
+            "infrastructure_error"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "dry_run": {
+          "default": false,
+          "description": "The calls ran as the tool's dry run.",
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "k": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The positions compared: the recorded list's `visible_k`, else the run's `k`.",
+          "title": "K"
+        },
+        "overlap": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "overlap@k of the base's first list and the variant's.",
+          "title": "Overlap"
+        },
+        "noise": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "overlap@k of the base's two lists: the tool's own noise.",
+          "title": "Noise"
+        },
+        "base_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Items in the base's first list.",
+          "title": "Base Count"
+        },
+        "variant_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Items in the variant's list.",
+          "title": "Variant Count"
+        },
+        "engaged": {
+          "items": {
+            "$ref": "#/$defs/CounterfactualEngaged"
+          },
+          "maxItems": 50,
+          "title": "Engaged",
+          "type": "array"
+        }
+      },
+      "required": [
+        "turn_id",
+        "call_id",
+        "status"
+      ],
+      "title": "CounterfactualCase",
+      "type": "object",
+      "if": {
+        "properties": {
+          "status": {
+            "const": "completed"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "k",
+          "overlap",
+          "noise",
+          "base_count",
+          "variant_count"
+        ],
+        "properties": {
+          "k": {
+            "type": "integer"
+          },
+          "overlap": {
+            "type": "number"
+          },
+          "noise": {
+            "type": "number"
+          },
+          "base_count": {
+            "type": "integer"
+          },
+          "variant_count": {
+            "type": "integer"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "k": {
+            "type": "null"
+          },
+          "overlap": {
+            "type": "null"
+          },
+          "noise": {
+            "type": "null"
+          },
+          "base_count": {
+            "type": "null"
+          },
+          "variant_count": {
+            "type": "null"
+          },
+          "engaged": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    "CounterfactualEngaged": {
+      "additionalProperties": false,
+      "description": "An item the person engaged with in the recorded turn, by its 1-based position in each live list; absent where the list does not hold it.",
+      "properties": {
+        "base": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base"
+        },
+        "variant": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Variant"
+        }
+      },
+      "title": "CounterfactualEngaged",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "tool": {
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$",
+      "title": "Tool",
+      "type": "string"
+    },
+    "element": {
+      "enum": [
+        "constraints",
+        "hard",
+        "size",
+        "exclude"
+      ],
+      "title": "Element",
+      "type": "string"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "A name for the run, such as the commit or the build it ran on.",
+      "title": "Label"
+    },
+    "k": {
+      "default": 10,
+      "description": "The positions compared when a recorded list has no `visible_k`.",
+      "maximum": 100,
+      "minimum": 1,
+      "title": "K",
+      "type": "integer"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/CounterfactualCase"
+      },
+      "maxItems": 5000,
+      "minItems": 1,
+      "title": "Cases",
+      "type": "array"
+    }
+  },
+  "required": [
+    "tool",
+    "element",
+    "cases"
+  ],
+  "type": "object"
+}

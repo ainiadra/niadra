@@ -1,0 +1,145 @@
+---
+title: "Sinais e restrições"
+description: "O que o cliente foi mostrado, viu, quis e recusou: interações, o bloco de restrições para as ferramentas do agente, beneficiários, inferências e o perfil revisável."
+---
+
+"Nada em preto", "essa rede não", "não use esse argumento": o que uma pessoa quer, recusa e é, numa forma que as ferramentas do agente conseguem usar. A memória deriva os **sinais** do cliente do que ele foi mostrado, do que viu, com o que interagiu, do que disse querer ou recusar e do que disse ser, e os devolve às ferramentas como um **bloco de restrições**, uma vez por turno, junto com o contexto. Uma preferência dita é uma restrição rígida; uma inferência é no máximo branda, e o cliente pode vê-la, corrigi-la e apagá-la.
+
+## Ligar e desligar
+
+Os sinais são a funcionalidade `signals` do espaço, ligada por padrão; um espaço a desliga no documento `features`, pelo papel `security`. Com ela desligada, um item `interaction` no lote é recusado, [`POST /v1/constraints`](/api/constraints) responde 404 e uma leitura de contexto que pede `include: ["constraints"]` recebe o contexto sem o bloco. As interações chegam dentro do [registro do turno](/concepts/turn-records), quando o espaço grava turnos, ou como itens do lote quando não.
+
+## Interações
+
+Uma interação é o que a pessoa foi mostrada ou fez, em oito tipos:
+
+| `kind` | O que é |
+|---|---|
+| `presented` | Uma lista entregue à pessoa: a exposição, com `exposure_id`, a lista, a página, os itens com a posição e os valores mostrados, e quantos estavam visíveis |
+| `seen` | Até onde a pessoa viu a lista, como o componente de lista reporta |
+| `engaged` | Um clique, um detalhe aberto, uma menção ("me fala da segunda"), um item posto no carrinho, comparado ou compartilhado |
+| `feedback` | A pessoa gostou ou não de um objeto, e por quê, por campo |
+| `preference` | O que a pessoa quer ou recusa: um campo de um tipo declarado, um operador (`in`, `not_in`, `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `between`), valores, a força (`must` e `must_not` fazem uma restrição rígida; `prefer` e `avoid`, uma branda), o escopo (`turn`, `session` ou `persistent`) e a categoria |
+| `attribute` | O que a pessoa é: um tamanho, uma rede preferida, uma dieta, com o sistema de medida |
+| `watch` | "Me avise quando": uma condição sobre um objeto compartilhado, com o evento de consentimento |
+| `unwatch` | O fim de um watch |
+
+A **exposição** tem um momento canônico: `delivered_at`, quando a lista chegou ao cliente, nunca quando uma ferramenta devolveu os resultados nem quando o modelo os nomeou. Ela recebe um id (um UUIDv7 que o SDK cria na entrega) e cada item tem uma posição na lista inteira; "ver mais" é a mesma lista com a página seguinte. Um item conta como exposto quando a posição dele está entre as visíveis, ou até o maior `max_index_seen` de um `seen` da mesma exposição. `method` diz como a Niadra soube: `bridge` pela ponte da interface, `otel` por um span `niadra.exposure`, ou `tool_result`, inferido do que uma ferramenta devolveu, que conta mais do que a pessoa viu e nunca serve à atribuição por linha. `shown` guarda os valores que o item mostrou nos campos que o tipo acompanha ou deixa afirmar, e é contra eles que a leitura de estado diz depois o que mudou desde que a pessoa viu.
+
+Compras, entregas, devoluções e "ficou" não são interações: vêm dos desfechos do ciclo de vida dos objetos que os registram, nunca do que um agente diz. Uma preferência nunca é inferida: `source` é `stated` (a pessoa disse), `tool_args` (o SDK a capturou dos argumentos de uma chamada de ferramenta) ou `correction` (a pessoa corrigiu uma inferência). A Niadra nunca deriva afinidade ou interesse de uma interação com um objeto cujo tipo ou campo é sensível; desses, guarda só o tipo e uma contagem. As interações cruas ficam guardadas até um apagamento, ou pelo prazo que você definir em `raw_content`; a passagem noturna da medição as lê e guarda os agregados ao lado.
+
+<CodeGroup>
+```python Python
+from niadra.exposure import exposure_token
+
+# What the person was shown, recorded in the turn; the token goes on the card
+with conversation.turn(build=BUILD) as frame:
+    exposure_id = uuid7()
+    frame.interact({
+        "kind": "presented", "exposure_id": exposure_id, "list_id": "results-1", "list_kind": "search_products",
+        "delivered_at": now_iso(), "visible_k": 3,
+        "items": [{"pos": 1, "ref": "item_variant:store:991", "shown": {"price_sale": 199.9}}],
+    })
+    card_token = exposure_token(exposure_id, 1)  # nx1.<id>.1.<verifier>, copied by the app into the cart line
+    frame.interact({"kind": "preference", "attr": "item_variant.color", "op": "not_in", "values": ["black"], "strength": "must_not", "source": "stated"})
+```
+```typescript TypeScript
+import { exposureToken, uuidv7 } from "@niadra/sdk";
+
+// The token goes on the card; the app copies it into the cart line as an opaque string.
+// In TypeScript the interactions themselves travel as batch items (the cURL tab).
+const exposureId = uuidv7();
+const cardToken = exposureToken(exposureId, 1); // nx1.<id>.1.<verifier>
+```
+```bash cURL
+# A source that records no turns sends each interaction as one item of the batch
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/batch" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"items": [{"type": "interaction", "idempotency_key": "pref-8812-1",
+       "handle": {"type": "phone_e164", "value": "+5511900005678"}, "conversation_id": "wa-8812",
+       "occurred_at": "2026-09-29T14:02:11Z",
+       "interaction": {"kind": "preference", "attr": "item_variant.color", "op": "not_in", "values": ["black"], "strength": "must_not", "source": "stated"}}]}'
+```
+</CodeGroup>
+
+## O bloco de restrições
+
+O bloco chega ao agente uma vez por turno, com o contexto (`include: ["constraints"]`), ou por [`POST /v1/constraints`](/api/constraints), para um cliente e, se quiser, renderizado para uma ferramenta. Ele tem uma `version` (`cv_` e um digest do conteúdo, que o registro do turno cita) e:
+
+| Campo | O que traz |
+|---|---|
+| `subject.for` | De quem é o bloco: `self`, `beneficiary:<id>` ou `gift` |
+| `hard` | O que a pessoa disse querer ou recusar, e precisa valer: cada uma com `attr`, `op`, `values`, `source`, `scope`, `category`, `relax` (`never` ou `ask`), a origem (o evento ou o turno em que foi dita) e `expires_at` |
+| `soft` | Preferências com peso: afinidade inferida, ou um `prefer` ou `avoid` dito |
+| `attributes` | O que a pessoa é (um tamanho, uma rede), com a origem e quando se aplica |
+| `exclude`, `already_presented` | Objetos a não oferecer de novo, e os já mostrados, com quantas vezes e os números com que cada um foi mostrado por último (`values`: cada campo `money`, `percent` ou `number` do tipo, com o papel dele e `claim_safe`, verdadeiro enquanto o tipo deixa afirmar o campo e a idade de afirmação dele não passou desde que foi mostrado). O [contrato de afirmação](/concepts/claims) os usa como evidência |
+| `relaxation_order` | O que cede primeiro quando uma busca não acha nada: `soft`, depois ids |
+| `precedence` | `current_utterance`, `stated_persistent`, `inferred`: o que vence o quê |
+| `rules` | As regras da sua própria empresa entregues com o bloco, cada uma com a origem (`code`, `db:<tabela>`, `prompt:<versão>`, `policy:<versão>`) e a posição na ordem que a empresa declarou |
+| `conflicts` | Entradas que não podem valer juntas, a mantida e por quê |
+| `ask` | Perguntas que o agente deve fazer antes de presumir, como `for_whom` |
+| `omitted` | Só quando o tamanho do bloco deixou algo de fora: quantas entradas de cada tipo (`hard`, `soft`, `exclude`, `already_presented`, `instructions`) ficaram fora. As restrições (`must_not`, `only_with`) guardam o espaço delas primeiro, das mais novas para as mais antigas, as instruções vão até 500, e `text` diz numa linha o que ficou de fora. Nada sai da memória: o que não coube continua guardado e volta na próxima leitura que tiver espaço |
+| `text` | O bloco em linhas para um modelo, renderizado pelo servidor no idioma do espaço (português, inglês ou espanhol): cada campo pelo rótulo do tipo dele (`label` do campo, ou o nome em palavras) e cada operador em palavras, como `exigido: sem coparticipação` ou `required: monthly price at most 700`. Uma restrição que perdeu um conflito fica de fora, e `text` não entra em `version`. O SDK o coloca no bloco do turno ao lado do texto da view de estado; um bloco sem nada a dizer traz `text` vazio |
+
+O bloco passa pelo [portão de verificação](/concepts/context#blocos-por-include) do contexto da mesma leitura: quando o contexto ou os turnos ao vivo retiveram algo até a identidade ser mais verificada, o bloco não diz nada do cliente. [`POST /v1/constraints`](/api/constraints), sozinha, é uma leitura de programa, com comprovante próprio, e não passa pelo portão.
+
+O que pode entrar: uma restrição rígida vem só do que a pessoa disse; uma inferência nunca vira rígida, e um negativo inferido do comportamento é no máximo brando. Um atributo que a pessoa não disse (`acquired`, `kept`, `returned_for_size`, `inferred`) se aplica só `when_asked`: um tamanho inferido só vale quando a pessoa pede "o meu tamanho". A fala de agora vence: quando uma restrição rígida dita agora choca com uma dita antes, o bloco mantém a nova e reporta o par em `conflicts`; entre uma dita e uma inferida, fica a dita. As duas entradas de um conflito ficam no bloco, para o registro do turno citar qualquer uma, e `kept` diz qual vale. Um choque entre duas regras da empresa é mantido pela posição e devolvido à empresa como [problema de dados](/api/data-issues). Uma restrição de sessão dura no máximo 24 horas, e uma de turno nunca chega ao servidor.
+
+### Vinculações de ferramenta
+
+As **vinculações** de uma ferramenta ficam no documento de configuração `tool-bindings` do espaço, do papel `integration`: uma por ferramenta e fonte (`sources` vazio vale para todas as fontes), com `args`, que argumento leva que campo (`attr` como `tipo.campo`, `param`, `transform`, `negation.param`, `ops`); `results`, onde o resultado traz objetos de um tipo (`path`, `type`, `namespace`, `id`) e que chave de cada item guarda que campo (`fields`); e `capabilities`: `overfetch` (a ferramenta devolve mais do que pediram, e o SDK filtra o residual), `relax_flag` (onde o resultado diz que a ferramenta relaxou o pedido), `dry_run_param` (o argumento que faz uma chamada não mudar nada, para o [contrafactual](/concepts/outcomes)) e `mask_output` (o SDK mascara na saída os campos que a chave não pode ler).
+
+[`GET /v1/sdk/profile`](/api/sdk-profile) serve em `tool_bindings` as vinculações da fonte que chama, sem `sources`. O documento é o único lugar onde uma vinculação existe: o SDK nunca a recebe do código. Ele mede o bloco pela vinculação servida para o nome da ferramenta, roda o contrafactual por ela e, quando o código não define `mask_output`, segue `capabilities.mask_output`; uma ferramenta que o espaço não vincula não é medida, e o contrafactual dela para antes de chamá-la. [`POST /v1/constraints`](/api/constraints) com `tool` devolve o bloco já renderizado para essa ferramenta em `rendered`, no modo de aviso, pela vinculação da fonte que chama, sem mudar `version`; uma ferramenta que o espaço não vincula para essa fonte responde 422. Um agente só com MCP pede o mesmo pela ferramenta [`get_constraints`](/guides/mcp), com `tool` opcional.
+
+```json
+{
+  "tool": "search_plans",
+  "args": [
+    { "attr": "health_plan.copay", "param": "copay", "ops": ["eq"] },
+    { "attr": "health_plan.monthly_price", "param": "max_price", "ops": ["lte"] },
+    { "attr": "health_plan.network", "param": "networks", "negation": { "param": "exclude_networks" } }
+  ],
+  "results": { "path": "$.plans", "type": "health_plan", "namespace": "sales", "id": "plan_id", "fields": { "copay": "copay", "monthly_price": "price" } },
+  "capabilities": { "overfetch": true, "dry_run_param": "dry_run", "mask_output": true }
+}
+```
+
+### Renderizar para uma ferramenta
+
+O SDK renderiza o bloco para cada ferramenta pelas vinculações dela: que argumento leva que atributo (`attr`, `param`, `transform`, `negation.param`, `ops`) e se a ferramenta busca com sobra. `in` e `eq` vão para o parâmetro, `not_in` e `ne` para o parâmetro de negação, as comparações só quando `ops` as lista; uma restrição que nenhum argumento expressa é **residual**, filtrada dos resultados pelo SDK quando a ferramenta busca com sobra, e sem imposição quando não, o que a renderização diz. No modo de aviso (o padrão), a chamada vai como está e o SDK devolve as sugestões; no modo de aplicação, ele acrescenta um parâmetro sugerido só quando a chamada o deixou de fora e tudo por trás dele pode ser injetado (uma restrição rígida dita, de turno ou sessão, sem conflito; um atributo dito), nunca sobrepõe um argumento que a chamada definiu, nunca injeta um tamanho inferido nem uma restrição persistente. Quando a chamada põe no próprio argumento de uma restrição um valor que ela recusa, vale o da chamada, e o par é reportado como conflito.
+
+Enviado não é aplicado: uma ferramenta pode relaxar um filtro por conta própria. Depois da chamada, o SDK lê os resultados e conta, sobre as restrições rígidas enviadas, `results_checked`, `violations`, `unverifiable` (os que não quebram nenhuma, mas não têm o campo de uma) e `relaxed`. A medida é "enviado, verificável, violado", nunca só "enviado"; as contagens vão ao registro do turno e ao [aproveitamento](/concepts/context-use) (`constraints`, por fonte e agente). Uma ferramenta decorada com `@Niadra.tool(...)` em Python, ou `niadra.tool(name, fn)` em TypeScript, faz essa medição sozinha, pela vinculação que o espaço declara para ela e o perfil serve; `niadra.constraints.render` em Python e `renderConstraints()` e `honoredConstraints()` em TypeScript expõem a renderização e a contagem. O exemplo do contrafactual de uma ferramenta vinculada está em [`examples/tool_counterfactual.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/tool_counterfactual.py) e [`examples/tool-counterfactual.ts`](https://github.com/ainiadra/niadra-sdk-ts/blob/main/examples/tool-counterfactual.ts).
+
+## Beneficiários e presentes
+
+Toda interação leva `for`: `self` (o padrão), `beneficiary:<id>` (uma pessoa sob o perfil do cliente, como um dependente) ou `gift`. Os sinais ficam separados por `for`: o que uma pessoa compra para um dependente nunca vira o gosto dela, e o bloco de um beneficiário traz as entradas dele, porque o tamanho de quem vai usar decide. Um presente vai para um balde descartável e nunca vira atributo do cliente. Uma entrega em outro endereço nunca é tomada como beneficiário por si: o bloco pergunta `for_whom` em `ask`. Veja [Identidade e verificação](/concepts/identity#beneficiários).
+
+## Inferências e o perfil revisável
+
+Uma **inferência** é uma coisa que os sinais inferem sobre o cliente, com o que a sustenta: uma afinidade (`soft_constraint` quando o bloco já a leva como entrada branda, `affinity` quando ainda não), um tamanho inferido dos desfechos (`attribute`) ou um interesse por um objeto (`interest`). A evidência é em contagens: exposição efetiva (ponderada pela posição, `1 / log2(pos + 1)`), sinal ponderado, eventos, sessões e ganho; um item mostrado muitas vezes e nunca escolhido vira um negativo implícito, brando. A derivação roda quando o item pendente mais antigo chega a 5 minutos ou quando a sessão fica 1 minuto em silêncio; uma passagem noturna ajusta os priores com o que o espaço viu em 90 dias, só de valores vistos por ao menos 10 pessoas. O que o cliente disse não é inferência e não aparece aqui.
+
+O cliente pode ver, corrigir e apagar cada inferência, pela sua equipe: [`GET /v1/profiles/{profile_id}/inferences`](/api/profile-inferences) lista cada uma com origem, evidência, confiança, finalidades de uso e data; [`/correct`](/api/profile-inference-correct) troca a inferência pelo que o cliente diz, como preferência ou atributo declarado, e a apaga; [`DELETE`](/api/profile-inference-delete) deixa uma lápide, e a mesma evidência nunca a infere de novo. Uma oposição ao perfilamento ([`POST /v1/profiles/{profile_id}/traits/opt-out`](/api/traits-opt-out)) para a derivação. No Console, a aba Inferências do perfil mostra tudo isso, para o papel `security`.
+
+Um **pedido de revisão** ([`POST /v1/profiles/{profile_id}/review-requests`](/api/review-requests-create)) leva ao encarregado de proteção de dados da controladora o pedido de um titular de revisar uma decisão automatizada, com a explicação montada dos [comprovantes](/concepts/receipts): os ids, tipos, superfícies, regras, versões e entradas deles, por referência, nunca conteúdo pessoal. A decisão da controladora é registrada uma vez ([`/resolve`](/api/review-request-resolve)), e os webhooks `review_request.created` e `review_request.resolved` avisam. Os pedidos ficam ao menos 395 dias depois de resolvidos, como obrigação legal, e um apagamento do titular os conta em `retained`. Veja [Privacidade](/concepts/privacy#o-perfil-revisável).
+
+## Experimentos por elemento
+
+O espaço pode medir o que cada elemento do bloco faz: um experimento no documento `measurement` tira, por braço, o bloco de restrições, os sinais brandos inferidos, os tamanhos inferidos ou o bloco de estado, e compara o que as pessoas fizeram depois. Fontes críticas nunca vão a um braço de controle, e o grupo de controle da memória não recebe bloco nenhum. Antes de um experimento, o **contrafactual de ferramenta** diz se o elemento muda o que a ferramenta devolve, a partir dos turnos gravados. Veja [Desfechos e atribuição](/concepts/outcomes).
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Tipos de objeto e estado" href="/concepts/object-types">
+    os campos e as famílias de atributo que uma preferência nomeia.
+  </Card>
+  <Card title="Desfechos e atribuição" href="/concepts/outcomes">
+    da exposição ao pedido, pelo token de exposição.
+  </Card>
+  <Card title="Bloco de restrições" href="/api/constraints">
+    a referência de `POST /v1/constraints`.
+  </Card>
+  <Card title="Agentes de varejo" href="/guides/retail-agents">
+    listas, tamanhos e "nada em preto" numa loja.
+  </Card>
+</CardGroup>

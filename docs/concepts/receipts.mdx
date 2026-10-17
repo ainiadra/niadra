@@ -1,0 +1,178 @@
+---
+title: "Comprovantes e auditoria"
+description: "Cada leitura deixa um comprovante encadeado por SHA-256: quem leu o quê, sob qual política."
+---
+
+Toda vez que um agente lê a memória, a Niadra deixa um comprovante: qual fonte leu, sobre quem, para qual finalidade, em qual nível de verificação, sob qual versão da política, quais itens foram entregues e quantos ficaram retidos. A leitura recusada também deixa o dela. O comprovante sai antes da resposta, nunca é opcional, e os comprovantes são encadeados por SHA-256, para que ninguém altere o passado sem quebrar a corrente. É assim que você responde, meses depois, por que um agente disse o que disse.
+
+## O que deixa comprovante
+
+| Tipo | Gerado por |
+|---|---|
+| `read` | Leituras de contexto (`POST` e `GET /v1/context`) e de objetos; o comprovante de uma leitura de contexto guarda em `detail.server_ms` quanto o servidor levou para respondê-la, sem a rede; os encaixes de um turno ficam num comprovante próprio, na superfície `slots`, com os ids dos itens, o manifesto dos encaixes e o que as regras leram do turno (tipos, contagens, o tipo de evento da âncora), e o turno só como um hash com chave, nunca as palavras; `detail.slots` é o manifesto: o orçamento do turno e `budget_rule`, a regra que o fixou; `detail.weights` diz a versão dos pesos de fusão aprendidos que a leitura usou, e `detail.why` guarda por que cada encaixe entrou: a posição em cada canal, a contribuição ponderada de cada um, a pontuação fundida, se a linha foi cortada (`excerpt`) ou entrou como átomo (`atom`) e a regra de cada linha derivada, em ids e números, nunca uma linha, um valor ou a pergunta. Veja [O comprovante dos encaixes](#o-comprovante-dos-encaixes) |
+| `history` | Navegação do histórico: busca, linha do tempo e abrir item |
+| `analytics` | [Análise da base](/api/insights-aggregate), com pseudônimo por padrão; uma revelação registra o motivo |
+| `admin` | Ações de governança: asserções, uniões e separações, apagamentos, exportações e downloads de pacote, segredos e credenciais gravados, padrões retirados e oposições ao perfilamento, testes a seco de regras, reenvios de entrega, cortes de fonte, simulações de política, vereditos de revisão e pedidos ao assistente. Também as leituras de governança que mostram memória a uma pessoa: o perfil, a memória e os objetos de um perfil, a linhagem e a fila de revisão |
+| `holdout` | O grupo de controle: o contexto que teria sido entregue, registrado e não entregue |
+| `denied` | Leituras recusadas de uma fonte autenticada: no contexto, no histórico, nos objetos e nas ferramentas MCP |
+| `agent_memory` | Leituras da [memória do próprio agente](/concepts/agent-memory): o bloco para o prompt (superfície `agent_block`) e a busca nas notas (`agent_search`), com os ids das notas entregues. As escritas, edições, aposentadorias, destilações, aprovações e apagamentos de notas entram como `admin` |
+
+Cada bloco que uma leitura de contexto acrescenta com `include` ([restrições, estado, coordenação e orçamento](/concepts/context#blocos-por-include)) deixa um comprovante próprio, ao lado do do contexto, com a versão do bloco e as contagens, nunca um valor; as leituras de [estado tipado](/concepts/object-types) e as perguntas e declarações da [coordenação](/concepts/coordination) entram na mesma trilha, sem o handle. As liberações de conteúdo, as inferências corrigidas ou apagadas, os pedidos de revisão e as retenções legais entram como `admin`, com a ação e o alvo.
+
+Mudanças de identidade, apagamentos, exportações, cortes de fonte, retiradas de padrão, simulações e vereditos de revisão caem na mesma trilha das leituras; as mudanças do plano de controle também chegam à cadeia de cada espaço como comprovantes `admin`: cada configuração aplicada (`config.applied`, com a versão do instantâneo e o resumo do documento; quem propôs e quem aprovou fica no histórico versionado do plano de controle), cada chave emitida, alterada ou revogada (`key.issued`, `key.updated`, `key.revoked`, com o alvo `key:<id da chave>:source:<id da fonte>`, que diz de qual fonte é a chave) e cada mudança de acesso das pessoas e do SSO (convites, papéis, desativações, redefinições de segundo fator, conexões de SSO, pessoas criadas e papéis sincronizados num login por SSO), que a célula busca do plano de controle a cada 15 s por um feed assinado e grava uma vez em cada espaço do tenant, só com ids. O ator desses comprovantes é o plano de controle. O comprovante de uma ação de uma pessoa guarda o id dela (`person_id`), e a leitura devolve ao lado o e-mail (`person_label`), que fica fora da cadeia, como o pseudônimo do perfil (`pseudonym`): qualquer papel que lê comprovantes lê o nome.
+
+Um comprovante `denied` guarda quem tentou, em qual superfície (`pack`, `search`, `timeline`, `open` ou `object`) e por quê, em `detail.reason`: `scope_missing` (a chave não tem o escopo da rota), `forbidden` (a finalidade da fonte não cobre aquele tipo de objeto, a navegação está desligada para a fonte, a ferramenta MCP não é oferecida a ela ou o token pertence a outra fonte), `verification_not_allowed` (o nível pedido não vale para a fonte: acima do teto dela, ou `no_customer` fora de um agente interno) ou `about_without_link` (a leitura em nome de uma organização sem vínculo ativo). O que foi pedido nunca entra: nem o cliente, nem a consulta. Uma chave desconhecida nunca chega à corrente de um espaço, então ninguém de fora consegue enchê-la. Num comprovante `admin`, `detail` guarda a ação (`action`), o alvo (`target`, quando há um) e os papéis da pessoa ou o id da chave que agiu.
+
+## O que um comprovante guarda
+
+```json
+{
+  "receipt_id": "0192f7a4-2b61-7c1e-8a3d-5f0e9c7b1d24",
+  "kind": "read",
+  "surface": "object",
+  "read_at": "2026-09-22T17:07:03Z",
+  "source_id": "0192f79e-11aa-7b20-9f3e-6c1d2e4f5a60",
+  "profile_id": "0192f7a0-3b2e-7d41-8c5a-2e9f4b7a1c03",
+  "conversation_id": "call-4471",
+  "audience": "customer_agent",
+  "purpose": "customer_service",
+  "verification": "V1",
+  "policy_version": "pol-14",
+  "item_ids": ["0192f7a2-5d10-7a8e-b1c4-3f6e8d9a0b10", "0192f7a2-9d52-7f4b-8a6e-3d5f7a9b1c24", "0192f7a2-8c41-7e3a-9b5d-2c4e6f8a0b13"],
+  "withheld": 2,
+  "manifest_hash": "sha256:5b1e0c",
+  "day": "2026-09-22",
+  "slice": 3,
+  "seq": 88213,
+  "prev_hash": "sha256:0d9f3a",
+  "hash": "sha256:7e21c8"
+}
+```
+
+Os itens aparecem por id, e o conteúdo nunca é copiado para o comprovante. O `manifest_hash` aponta para o manifesto de origem daquela entrega, que registra:
+
+- cada item incluído, com o evento de onde veio e, quando a memória o registrou, de quem são as palavras dele (`spoken_by`: `customer`, `mixed` ou `company`), se são as palavras do próprio cliente sobre si para este leitor (`own_words`) e a regra que o liberou acima do nível mínimo da categoria (`rule: mirror`, o [espelho](/concepts/privacy#o-espelho-da-política)); a releitura na hora da entrega decide com os mesmos dados que o compilador;
+- cada exclusão, com o motivo: `policy`, `verification` ou `quarantine` quando a política reteve o item, `budget` quando ele não coube no orçamento (com a regra que decidiu: `budget` para um item de valor que não coube, `low_value` para um abaixo do valor mínimo, `skeleton` para uma linha que espera na reserva pelos encaixes do turno, `view` para uma seção que a view não traz e `duplicate` para uma pendência que outra já diz ou um fato que uma conversa fixada no esqueleto já diz) e `unused` quando a fonte não usa aquele tipo de item ([Contexto mais enxuto por agente](/concepts/context-use#contexto-mais-enxuto-por-agente));
+- as versões do compilador, do modelo de texto, da política e do extrator;
+- tokens por seção e a decisão de cache de prompt.
+
+### O comprovante dos encaixes
+
+Uma leitura com `query` deixa um segundo comprovante `read`, na superfície `slots`, com o que o turno escolheu da memória. `detail.slots` é o manifesto dos encaixes, em JSON canônico:
+
+- `budget`, os tokens que os encaixes do turno podiam somar, e `budget_rule`, a regra que fixou esse orçamento: `question`, quando o turno pediu um valor (um número que ele nomeia ou um tipo de valor), uma contagem ou um dia, ou `turn`, em qualquer outro turno. Na voz, `question` vale 100 tokens e até três linhas, `turn` 60 e duas; nas outras views a regra é registrada e o orçamento é o da view;
+- `tokens`, o que os encaixes somaram, e `items`, cada encaixe com `id`, `kind`, `channels`, `position`, `tokens` e, num valor, `value_type`;
+- `derived`, os tipos das linhas derivadas; `channels`, por canal, quantos acertos houve e se ele perdeu o prazo (`skipped`); e `guards`, quando houve, com `id`, `value_type` e o braço (`arm`) do grupo de controle.
+
+`detail.why` diz por que cada encaixe entrou. Cada item traz `id`, a posição e a contribuição de cada canal, a pontuação fundida e, quando valem, `excerpt: true` (a linha foi cortada às frases que respondem ao turno) e `atom: true` (a conversa entrou como o [átomo](/concepts/context#esqueleto-e-encaixes-por-turno) dela: o assunto e o valor que respondem ao turno, numa linha curta). Os dois só aparecem quando são verdadeiros, e uma linha nunca é as duas coisas. Uma linha derivada traz `rule`, a regra que a escreveu, e o que ela contou: a contagem pelo assunto que a extração nomeou escreve `count_matter` ou `count_matter_complaints`, com `units`, `matched`, `matters` (quantas chaves de assunto entraram na contagem), `counted` e `window_days`; a contagem pelas palavras, `count_topic` ou `count_topic_complaints`, com `units` e `matched`. Uma promessa cumprida nos últimos 7 dias, que o contexto mantém entre as pendências dizendo quando foi cumprida, entra no manifesto como qualquer pendência: um item `open_item` da seção `pending`, sem campo próprio; o que a distingue é a linha do contexto. Nada disso guarda as palavras nem o número: o mesmo turno sobre a mesma memória escreve o mesmo manifesto. A resposta de `POST /v1/context` com `explain: true` traz em `pack.slots[].why` a mesma posição, contribuição e pontuação e o `excerpt`; `budget_rule` e `atom` ficam só no comprovante.
+
+Os comprovantes da navegação também registram a consulta, por HMAC com a chave do espaço, os ids dos itens devolvidos e quantos ficaram retidos. Uma busca ou uma linha do tempo com filtros guarda também um HMAC dos filtros enviados, com a mesma chave, em `detail.filters_hash`: o comprovante prova quais filtros foram pedidos sem guardar o que eles dizem, e `detail` entra na corrente como o resto.
+
+## A corrente
+
+Comprovantes só crescem. Cada um traz a própria posição (`seq`) e o hash do anterior (`prev_hash`), encadeados por espaço, por fatia e por dia. `detail` entra no hash como o resto; um comprovante sem `detail` tem o hash que sempre teve, então os comprovantes antigos continuam conferindo. Um espaço pequeno tem uma fatia; um grande tem até 16, escolhidas pelo perfil, para que o espaço mais movimentado grave sem gargalo único.
+
+Uma vez por dia, quando todo comprovante daquele dia já foi gravado, as cabeças das fatias são combinadas numa raiz de Merkle. A raiz fica no banco da célula e numa cópia fora dele, num armazenamento de gravação única (S3 com Object Lock em modo de conformidade): a cópia só é gravada se ainda não existe e fica retida por cinco anos, e ninguém, nem a própria célula, consegue apagá-la ou trocá-la antes disso. Alterar qualquer comprovante passado quebra todos os hashes seguintes e deixa de bater com a raiz, e reescrever comprovantes, cabeças e a raiz no banco ao mesmo tempo ainda deixa de bater com a cópia.
+
+### A exportação de auditoria: a raiz na sua própria cadeia
+
+A Niadra não guarda uma segunda cadeia de auditoria para o que os agentes fizeram: ela entrega a dela à sua. O evento diário `audit.root`, por webhook ou pelo [feed de avisos](/concepts/triggers-and-webhooks#o-feed-de-avisos), leva a raiz dos comprovantes do dia e, num espaço que grava [registros de turno](/concepts/turn-records), a raiz do índice da camada guardada (`turns.root`, com `turns.count`): cada turno guardado no dia tem uma linha (o id do turno, a fonte, o agente, o tipo, a hora, o modo de conteúdo e o hash da build) com o digest SHA-256 dela, e os digests, em ordem de id do turno, dobram-se numa raiz de Merkle com os prefixos da RFC 6962, um nó ímpar subindo sozinho. Só digests e contagens saem: nunca o que um turno leu ou disse.
+
+[`GET /v1/turns/index/{day}`](/api/turns-index) lista as linhas de um dia UTC com os digests, por cursor, para a sua empresa recalcular `turns.root`, e [`GET /v1/receipts/verify`](/api/receipts-verify) recalcula a raiz dos comprovantes, para conferir as duas e ancorá-las onde quiser. Uma linha que vence ou é apagada depois deixa a raiz ancorada como estava: a raiz prova o que o dia teve, não o que ainda existe. O índice pede uma chave com o escopo `replay` ou uma pessoa com o papel `integration` ou `security`, e a funcionalidade `turns`. O webhook `receipt.recorded` entrega os elos da corrente (fatia, dia, `seq`, `prev_hash` e `hash`) assim que o gravador os guarda, para quem prefere manter a cópia em tempo próprio. Nenhum dos dois leva o que foi lido.
+
+Nenhuma leitura sai sem comprovante. A fila confirma o comprovante em até 20 ms; quando não confirma, ele vai para o banco da célula como uma tarefa de gravação, que o escreve na corrente pelo menos uma vez e sem duplicar, porque o id do comprovante é único. Só quando os dois caminhos falham ele espera na memória do processo; com esse acúmulo cheio, as categorias sensíveis param de sair, e, com o dobro, as leituras param até os comprovantes serem gravados.
+
+Uma conferência rápida de continuidade sobre uma página de uma fatia:
+
+<CodeGroup>
+```python Python
+import os
+import httpx
+
+response = httpx.get(
+    "https://acme-prod.us-east-2.api.niadra.com/v1/receipts",
+    params={"conversation_id": "call-4471"},
+    headers={"Authorization": f"Bearer {os.environ['NIADRA_API_KEY']}"},
+)
+items = sorted(response.json()["items"], key=lambda r: r["seq"])
+for previous, current in zip(items, items[1:]):
+    if current["seq"] == previous["seq"] + 1:
+        assert current["prev_hash"] == previous["hash"], current["receipt_id"]
+```
+```typescript TypeScript
+const url = new URL("https://acme-prod.us-east-2.api.niadra.com/v1/receipts");
+url.searchParams.set("conversation_id", "call-4471");
+
+const response = await fetch(url, {
+  headers: { Authorization: `Bearer ${process.env.NIADRA_API_KEY}` },
+});
+const items = (await response.json()).items.sort((a: { seq: number }, b: { seq: number }) => a.seq - b.seq);
+for (let i = 1; i < items.length; i++) {
+  if (items[i].seq === items[i - 1].seq + 1 && items[i].prev_hash !== items[i - 1].hash) {
+    throw new Error(`chain broken at ${items[i].receipt_id}`);
+  }
+}
+```
+```bash cURL
+curl "https://acme-prod.us-east-2.api.niadra.com/v1/receipts?conversation_id=call-4471" \
+  -H "Authorization: Bearer $NIADRA_API_KEY"
+```
+</CodeGroup>
+
+A conferência completa fica no servidor: [`GET /v1/receipts/verify?day=2026-09-22`](/api/receipts-verify) percorre todas as fatias daquele dia e responde `valid`, o número de `receipts`, as cabeças de cada fatia em `heads`, as quebras que achou em `breaks`, se a raiz recalculada bate com a ancorada (`root_matches`), se a cópia de fora do banco guarda a mesma raiz (`anchor_copy_matches`) e se essa cópia está no armazenamento de gravação única (`anchor_locked`). `valid` só é verdadeiro sem quebras e sem divergência da raiz ou da cópia. Enquanto o dia não foi ancorado, esses três campos vêm nulos; `anchor_copy_matches` também vem nulo quando a cópia não pode ser lida naquele momento, e falso quando ela falta ou guarda outra raiz.
+
+As rotas de comprovante são rotas de governança: uma pessoa do Console com o papel `security`, ou uma chave de escopo `admin`. Filtre a lista por `profile_id`, `conversation_id`, `source_id`, `kind` e por uma janela `since`/`until`, e pagine com `cursor`, no corpo de [`POST /v1/receipts/search`](/api/receipts-search): um id de conversa pode ser um telefone ou um e-mail, e fica fora da URL. [`GET /v1/receipts`](/api/receipts) aceita os mesmos filtros na query e continua. Cada comprovante da resposta traz, ao lado do `profile_id`, o `pseudonym` do perfil, o nome a mostrar a uma pessoa; ele vem do perfil na hora da leitura e não faz parte do comprovante encadeado.
+
+## Três perguntas que os comprovantes respondem
+
+**Por que o agente disse X?** Às 14h07, o agente de voz disse à Marina que o crédito de 40 já tinha sido lançado. O comprovante de `call-4471` lista, entre os itens entregues, o id da ação do agente de cobrança das 14h06 (`0192f7a2-9d52-7f4b-8a6e-3d5f7a9b1c24`); o manifesto mostra que ela veio da ação `credit` sobre `invoice:erp:0823`, confirmada pelo evento do ERP. Comprovante, manifesto, item, evento: quatro passos da frase até a origem. [`GET /v1/lineage/receipt/{receipt_id}`](/api/lineage-receipt) percorre esses passos por você e devolve o comprovante, os itens entregues com a origem de cada um e as exclusões.
+
+**Quem viu o fato F?** [`GET /v1/lineage/fact/{fact_id}`](/api/lineage-fact) devolve cada comprovante cuja entrega levou aquele fato: cada fonte que o recebeu, com finalidade, nível e horário.
+
+**O que foi retido, e por quê?** `withheld` diz quantos itens a política segurou; o manifesto diz qual motivo valeu para cada um (`policy`, `verification` ou `quarantine`). O agente fica sabendo só da contagem, nunca do conteúdo, e entende que verificar o cliente libera mais. A pergunta inversa também tem resposta: um item que um leitor em V1 viu numa categoria que pede V2 leva `rule: mirror` no manifesto, a prova de que ele viu o que o cliente mesmo disse, não o que a empresa guarda sobre ele.
+
+## Comprovantes no seu SIEM
+
+Os comprovantes chegam ao seu SIEM segundos depois de entrar na corrente, pelo mesmo mecanismo de entrega dos webhooks. O fluxo é um endpoint no documento de configuração `webhook-endpoints`, mudado por um [diff aprovado](/api/control/config-diffs), com `format`:
+
+- `ocsf`: um evento OCSF 1.3 de API Activity (`class_uid` 6003) por comprovante, um JSON por linha (`application/x-ndjson`);
+- `hec`: o mesmo evento dentro do envelope de um HTTP Event Collector (`time`, `source`, `sourcetype` `niadra:ocsf:api_activity` e `event`), também um por linha.
+
+Em `event_types` vão os tipos de comprovante (`read`, `history`, `analytics`, `admin`, `holdout`, `denied`, `agent_memory`) ou `*` para todos. O segredo de assinatura e, se o coletor pedir, o token que segue no cabeçalho `Authorization` (como `Splunk <token>`) são gravados no cofre da célula por [`PUT /v1/secrets/webhook/{id}`](/api/secrets), e o documento aponta para eles como `spaces/<id do espaço>/webhook/<id>`, em `secret_refs` e em `authorization_ref`. Toda referência a segredo (`secret_refs`, `authorization_ref`, o `credential_ref` de uma exportação, o `secret_ref` de um mapeamento) precisa ficar sob `spaces/<o seu espaço>/`: o cofre é da célula, compartilhado pelos espaços que ela atende, e a célula recusa uma referência a outro espaço na hora de usar (a entrega falha como `secret_outside_space`, o webhook responde 403, a exportação e a gravação da credencial são recusadas), e o plano de controle recusa um documento novo que a cite.
+
+```json
+{
+  "endpoint_id": "siem",
+  "url": "https://siem.acme.example/services/collector/event",
+  "source_id": "0192f79e-11aa-7b20-9f3e-6c1d2e4f5a60",
+  "format": "hec",
+  "event_types": ["*"],
+  "secret_refs": ["spaces/0192f700-1c2d-7e3f-8a4b-5c6d7e8f9a01/webhook/siem"],
+  "authorization_ref": "spaces/0192f700-1c2d-7e3f-8a4b-5c6d7e8f9a01/webhook/siem-token"
+}
+```
+
+Cada entrega leva até 200 comprovantes, é assinada como todo webhook (`webhook-id`, `webhook-timestamp` e `webhook-signature`, sobre o corpo cru) e tem as mesmas retentativas por 24 horas e a mesma fila de mortos, com reenvio pelo Console. Para conferir o fluxo antes de depender dele, [uma entrega de teste](/api/webhook-endpoint-test) manda um evento OCSF marcado com `unmapped.niadra.test`, fora da corrente. Um fluxo de SIEM nunca é destino de uma regra de aviso: o plano de controle recusa a regra. O evento diz quem leu (a fonte ou a pessoa), a superfície ou a ação, o perfil e o objeto pelos ids, nunca por telefone ou e-mail, a finalidade, o nível, a versão da política, se a leitura foi recusada (`status` `Failure`, com o motivo em `status_detail`) e a posição na corrente em `unmapped.niadra.chain` (fatia, dia, `seq`, `prev_hash` e `hash`), para o seu SIEM conferir a corrente por conta própria. Como o comprovante, nunca leva o que foi lido.
+
+A exportação contínua também leva a tabela `receipts` para o seu bucket, na frequência do agendamento.
+
+## Comprovantes e apagamento
+
+Quando um titular é esquecido, os comprovantes de leitura não são reescritos: eles já guardam só ids e hashes, então provam que a leitura aconteceu sem guardar o que foi lido. O próprio apagamento deixa um comprovante `admin`, o comprovante de apagamento, que lista o que foi apagado e as execuções de exportação que já continham o dado. As linhas de medição seguem a retenção e a política do comprovante a que pertencem.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Privacidade, apagamento e exportação" href="/concepts/privacy">
+    o comprovante de apagamento e a linhagem que ele percorre.
+  </Card>
+  <Card title="Aproveitamento do contexto" href="/concepts/context-use">
+    cada entrega medida traz o hash do manifesto que o comprovante da leitura registra.
+  </Card>
+  <Card title="O contexto e as views" href="/concepts/context">
+    itens retidos e níveis de verificação.
+  </Card>
+  <Card title="Buscar comprovantes" href="/api/receipts-search">
+    o endpoint em detalhe.
+  </Card>
+</CardGroup>

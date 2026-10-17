@@ -1,0 +1,161 @@
+---
+title: "Questionário de segurança"
+description: "As perguntas comuns de uma revisão de segurança de banco, seguradora ou operadora de saúde, respondidas como a plataforma está hoje, com a evidência de cada resposta."
+---
+
+Respostas às perguntas que um questionário de segurança costuma fazer, verdadeiras em 30/09/2026. Cada resposta aponta para a evidência: um arquivo no repositório aberto da Niadra ([github.com/ainiadra/niadra](https://github.com/ainiadra/niadra): `server/`, `deploy/`, `web/`), uma página desta documentação ou um recurso da nuvem. Quando a resposta honesta é "ainda não", ela diz isso e diz o que existe no lugar.
+
+Se o seu questionário tem um formato próprio, a Niadra o responde a partir destas mesmas respostas; peça pelo [formulário do Enterprise](https://niadra.com/enterprise).
+
+## Organização e certificações
+
+**A Niadra tem certificação ISO 27001, SOC 2 ou PCI DSS?**
+Não. As certificações são da nuvem em que a Niadra roda (AWS: EC2, RDS, S3, KMS, Secrets Manager, SNS, CloudWatch Logs, ECR, SES, em `us-east-2`), não da Niadra. Uma certificação própria não está contratada.
+
+**Houve teste de invasão por empresa independente?**
+Ainda não. O que existe: os testes automáticos de isolamento que rodam em todo pull request do servidor (segurança por linha do PostgreSQL, um banco por espaço, a chave de uma empresa que não abre o dado de outra: `server/tests/unit/test_keys.py::test_one_companys_key_never_opens_anothers_data`), o [modelo de ameaças](/security/threat-model) e o canal de divulgação responsável em [niadra.com/.well-known/security.txt](https://niadra.com/.well-known/security.txt) (RFC 9116). No plano Regulado, o teste de invasão por empresa independente entra no contrato, com o relatório disponível sob acordo de confidencialidade.
+
+**Quem é o responsável pela segurança?**
+O fundador, que opera a plataforma e responde aos incidentes. Não há time de segurança separado nem plantão em turnos; o [plano de resposta a incidentes](/security/incident-response) diz como isso funciona na prática.
+
+**Quem tem acesso à produção?**
+Uma pessoa, o fundador, pela conta da AWS, sem porta SSH: a máquina é alcançada pelo Systems Manager, com a sessão registrada no CloudTrail da conta. Nenhuma credencial da AWS existe fora dessa conta; o GitHub não tem nenhuma (`deploy/README.md`, "Continuous integration and deploy").
+
+## Controle de acesso
+
+**Como os agentes e sistemas se autenticam?**
+Com uma chave de fonte por agente, fornecedor ou canal, com escopos (`track`, `act`, `context`, `search`, `identify`, `admin`, `analytics` e os das funcionalidades de agente) e uma classe de audiência. Rota sem o escopo responde 403 `scope_missing` e deixa um comprovante `denied`. A chave é guardada só como hash: um HMAC com pepper para a busca e um scrypt lento para a conferência (`server/src/niadra/domain/edge/keys.py`). Veja [Espaços e chaves](/concepts/spaces-and-keys).
+
+**Há revogação imediata e rotação de chaves?**
+Sim. Revogar uma chave corta o acesso em segundos; um período de graça opcional deixa a chave antiga responder enquanto o agente troca para a nova (`server/src/niadra/app/control.py`, `expire_key`). Chaves são criadas e revogadas pelo Console ou pela API de controle.
+
+**Como as pessoas entram no Console?**
+Com senha (hash scrypt, cerca de 50 ms e 16 MiB por conferência) e segundo fator TOTP, obrigatório por padrão em todo tenant (`server/src/niadra/domain/control/credentials.py`; `app/control.py`, `mfa_required`), ou por SSO com o provedor de identidade da sua empresa, por OIDC ou SAML 2.0, com os papéis vindos dos grupos do provedor (`server/src/niadra/app/sso.py`). A sessão é um JWT EdDSA de curta duração.
+
+**Há papéis e privilégio mínimo?**
+Sim. Papéis `admin`, `security`, `integration`, `review`, `analysis` e `vendor`, combináveis (`server/src/niadra/domain/control/records.py`). Apagar, exportar, criar retenção legal e mudar a política exigem `security`; toda ação de pessoa deixa comprovante `admin`. Veja [Acesso ao Console](/concepts/console-access).
+
+**O que um agente pode ler?**
+O que a política do espaço libera, item a item, por categoria, sensibilidade, finalidade, audiência e nível de verificação do cliente na conversa. A política nega por padrão: categoria não declarada não chega a ninguém, e categoria sensível só chega por uma liberação com finalidade. Veja [Acesso negado por padrão](/concepts/privacy#acesso-negado-por-padrão-liberado-por-finalidade).
+
+## Criptografia
+
+**Os dados são cifrados em repouso?**
+Sim, em duas camadas. A nuvem cifra o disco do banco (`StorageEncrypted: true` em `deploy/aws/cluster.yaml`) e os buckets. A aplicação cifra o conteúdo de conversas, eventos, fatos e contexto com AES-256-GCM sob a chave de dados do espaço, com espaço, tabela, coluna e linha como dado autenticado: uma linha de uma empresa não decifra sob a chave de outra (`server/src/niadra/adapters/outbound/keys/kms.py`; teste `tests/unit/test_keys.py`).
+
+**Onde ficam as chaves?**
+A chave-mestra fica no AWS KMS (`alias/niadra-cell`), em HSMs com validação FIPS 140-3, e nunca sai de lá; o KMS rotaciona o material todo ano. As chaves de dados de cada espaço saem do `GenerateDataKey` e são guardadas embrulhadas, no banco da célula, fora do banco do espaço. A política da chave separa quem usa (o papel da máquina: `Encrypt`, `Decrypt`, `GenerateDataKey`, `DescribeKey`) de quem administra (a conta); mudar isso exige mudar a política, o que o CloudTrail registra (`deploy/aws/cluster.yaml`, `CellKey`). No plano Regulado, a célula dedicada tem a própria chave-mestra, e sob contrato a chave que embrulha as chaves de dados pode ser a da sua conta na nuvem.
+
+**Os dados são cifrados em trânsito?**
+Sim. TLS 1.3 no mínimo na borda, em todo host (`deploy/k8s/charts/niadra/templates/ingress.yaml`, `TLSOption`), e TLS 1.3 obrigatório entre o pooler de conexões e o banco (`ssl_min_protocol_version: TLSv1.3` em `aws/cluster.yaml`). Entre os pods dentro da mesma máquina o tráfego não é cifrado; é um risco residual declarado no [modelo de ameaças](/security/threat-model#riscos-residuais).
+
+**Dado pessoal chega à IA da Niadra?**
+O texto vai mascarado: e-mail, telefone, cartão, IBAN, endereço, códigos postais, documentos de vários países e contas bancárias são trocados por marcadores dentro da célula antes da chamada (`server/src/niadra/domain/extract/redaction.py`), e cada pedido exige retenção zero e proíbe guardar o texto para treino (`server/src/niadra/adapters/outbound/llm/`). Veja [Uso de dados](/security/data-use).
+
+## Registro e monitoramento
+
+**Que registros existem e por quanto tempo?**
+Três tipos. (1) Comprovantes: toda leitura de agente, inclusive a recusada, toda ação de pessoa, todo apagamento e toda mudança de configuração deixam um comprovante encadeado por SHA-256, com a raiz diária selada em armazenamento de escrita única por cinco anos; a retenção dos comprovantes no banco é configurável, no mínimo 30 dias ([Comprovantes](/concepts/receipts)). (2) Logs dos processos: 30 dias no CloudWatch Logs, sem conteúdo de cliente, provado por um teste canário (`server/tests/unit/flow/test_log_canary.py`). (3) Chamadas à conta da AWS, inclusive ao KMS e ao Systems Manager: CloudTrail da conta.
+
+**Os registros podem ir para o meu SIEM?**
+Sim. Um endpoint com formato `ocsf` ou `hec` recebe os comprovantes em segundos, em lotes de até 200, assinados, com retentativas por 24 horas e fila de erros; só ids e hashes. Veja [Comprovantes](/concepts/receipts).
+
+**Há monitoramento e alertas?**
+Sim. Prometheus e Grafana no cluster; 21 regras de alerta em `deploy/k8s/charts/niadra/files/alerts.yaml` (latência do contexto acima de 100 ms no p95, confirmação da ingestão acima de 80 ms, erros do servidor, outbox e fila parados, comprovantes perdidos, cache e armazenamento de estado falhando, banco de espaço falhando, comprovante de apagamento pendente, cópia de segurança que falhou ou envelheceu, entre outras). As de severidade `page` e `ticket` vão a um tópico SNS com assinatura de e-mail confirmada e se repetem a cada 4 horas enquanto duram.
+
+## Cópias de segurança e recuperação
+
+**Como são as cópias de segurança?**
+Toda noite, às 02:30 UTC, um `pg_dump` do banco da célula e de cada banco de espaço vai para o bucket da célula, cifrado, com 35 dias de retenção (`deploy/k8s/charts/niadra/templates/ops.yaml`). O RDS guarda a cópia automática da instância por um dia, o que o plano da conta permite hoje; a instância tem proteção contra exclusão.
+
+**A restauração é testada?**
+Sim, toda semana: no domingo o mesmo job restaura cada cópia mais recente num banco temporário e conta as linhas. Um alerta dispara quando a cópia falha ou envelhece (`BackupJobFailed`, `BackupStale`). Restaurar um espaço só, sem tocar os outros, e conferir uma cópia à mão são runbooks no `server/README.md`.
+
+**Qual o RPO e o RTO?**
+RPO: até um dia para a cópia automática da instância e até 24 horas para as cópias noturnas por banco. RTO: não medido. A reconstrução é pelo template (`deploy/scripts/stack.sh`) e uma implantação; ver o [plano de resposta a incidentes](/security/incident-response#recuperação).
+
+## Resposta a incidentes
+
+**Existe um plano de resposta a incidentes?**
+Sim: [Resposta a incidentes](/security/incident-response), com papéis, severidades, o que detecta, os passos, a notificação ao cliente e a revisão depois do incidente. O fundador é o responsável e o plantão.
+
+**Em quanto tempo o meu time é avisado?**
+No prazo do contrato. Sem prazo no contrato, em até 24 horas depois de a Niadra confirmar um incidente que toque dados da sua empresa, com atualizações a cada 24 horas até o encerramento e um relatório escrito ao fim.
+
+## Gestão de vulnerabilidades
+
+**Há varredura de vulnerabilidades em dependências e imagens?**
+Nas dependências, sim; nas imagens, ainda não. Desde 30/09/2026, cada componente e cada SDK com dependências roda uma auditoria contra o arquivo de versões travadas antes de cada merge e no CI (os workflows em `.github/workflows/`):
+
+- servidor, especificações e SDK de Python: `pip-audit` sobre todas as versões do `uv.lock`, inclusive as de desenvolvimento e as dos extras de integração; qualquer vulnerabilidade conhecida barra o merge, seja qual for a gravidade (`scripts/audit.py`);
+- SDK de TypeScript e site: `pnpm audit --prod` e `npm audit --omit=dev`, que barram vulnerabilidade alta ou crítica nas dependências que vão para produção. O SDK de TypeScript não tem dependência de produção;
+- a documentação não entra: ela não publica código próprio, quem a serve é a Mintlify.
+
+Uma vulnerabilidade sem versão corrigida só passa numa lista de exceções com motivo e data de validade de no máximo 30 dias; vencida a data, o merge volta a ser barrado. Na primeira rodada, a do servidor (PyJWT) e as do SDK de Python com correção (LiteLLM, oauthlib) foram corrigidas atualizando a versão; ficaram como exceção até 30/10/2026 as que não têm correção publicada ou que um framework de integração trava (ChromaDB, DiskCache, NLTK e Werkzeug), todas em extras usados só nos testes do SDK. Os pacotes do sistema das imagens de contêiner não são varridos, e as dependências de desenvolvimento dos repositórios de TypeScript não barram o merge. O restante: versões travadas (`uv.lock`, `pnpm-lock.yaml`, `package-lock.json`), testes em todo pull request (lint, tipos, fronteiras de módulo, testes de unidade e de integração contra PostgreSQL, PgBouncer, RabbitMQ e Redis reais), imagens construídas na máquina a partir do commit publicado, e o canal de divulgação responsável.
+
+**Como reportar uma vulnerabilidade?**
+Pelo canal em [niadra.com/.well-known/security.txt](https://niadra.com/.well-known/security.txt): o formulário do Enterprise com o interesse "Segurança", em português ou inglês. Não há programa de recompensa.
+
+**Como as correções chegam à produção?**
+Por pull request em `main` com o CI verde; uma pessoa move a branch `release` e a máquina implanta, com verificação de ponta a ponta depois e volta automática quando ela falha (`deploy/scripts/cd.sh`, `on-ops.sh`). Uma correção de segurança segue o mesmo caminho, no mesmo dia em que fica pronta.
+
+## Desenvolvimento seguro
+
+**Como é o ciclo de desenvolvimento?**
+Toda mudança entra por pull request, e o CI (`.github/workflows/server.yml`) exige: as migrações iguais aos modelos (`alembic check` nas três histórias), `ruff` (lint e formato), `mypy`, `import-linter` (as camadas do código não se invertem) e a suíte de testes de unidade e de integração, com mais de três mil testes. O front exige tipos, testes e build com os links internos conferidos; a infraestrutura exige `shellcheck`, o chart renderizado nos dois modos, as rotas de alerta testadas com `amtool`, o orçamento de memória e `cfn-lint`.
+
+**Há separação entre ambientes?**
+Sim. A célula local roda com PostgreSQL, Valkey, RabbitMQ, armazenamento compatível com S3 e a IA da Niadra simulada, só com dados sintéticos; a produção tem um tenant sintético para a verificação de ponta a ponta. Por projeto do cliente, os ambientes `sandbox` e `produção` são espaços separados, com chaves e dados isolados.
+
+**Segredos ficam em repositório?**
+Não. Nascem uma vez no Secrets Manager (`deploy/scripts/bootstrap-secrets.sh`) e chegam a cada processo só pelo Secret dele; a máquina usa o papel da instância, nunca chaves de acesso.
+
+**Há revisão de código?**
+Toda mudança passa por pull request, com o CI como revisor automático. Como a Niadra tem uma pessoa desenvolvendo hoje, a revisão por uma segunda pessoa não existe; é dito aqui para não parecer o contrário.
+
+## Retenção e apagamento
+
+**Por quanto tempo os dados ficam?**
+Por classe de dado, configurável por espaço: eventos pela janela quente (90 dias por padrão, de 30 a 90) e depois no arquivo frio até o espaço definir um prazo; fatos, episódios, comprovantes, sessões e conteúdo cru (payloads, mídia e interações) pelo `retention_days` de cada um, guardados até você definir um prazo. A tabela completa, armazenamento a armazenamento, está em [Onde cada cópia mora](/concepts/privacy#onde-cada-cópia-mora-e-por-quanto-tempo).
+
+**Como um titular é apagado?**
+Por [`POST /v1/forget`](/api/forget), por perfil, identificador ou conversa: a cascata percorre a linhagem inteira (eventos, fatos, episódios, objetos, ações, padrões, vínculos, vetores, contexto compilado, arquivos, cache, registros de turno) e termina num comprovante de apagamento e num webhook `erasure.completed`. Um registro lacrado fora do banco faz uma restauração de cópia reexecutar o apagamento. Veja [Apagar](/concepts/privacy#apagar).
+
+**E ao fim do contrato?**
+Apagar um espaço derruba o banco dele, apaga objetos, cópias noturnas, segredos e chaves de cache, e destrói as chaves de dados por último; o comprovante registra as versões destruídas e diz quando expira a última cópia automática da instância, a partir da qual a destruição por chave vale para toda cópia. A exportação (sob demanda ou contínua, em Parquet) sai antes, para o seu bucket.
+
+## Continuidade de negócio
+
+**Qual a arquitetura de disponibilidade?**
+Uma máquina k3s e um RDS sem Multi-AZ, numa zona de `us-east-2`. A perda da máquina ou da zona derruba a API e o Console até a reconstrução. O caminho para três máquinas em três zonas e um banco Multi-AZ está descrito no `deploy/README.md` e não está implantado. Não há SLA de disponibilidade publicado fora do contrato.
+
+**O que acontece quando a IA da Niadra fica fora?**
+A ingestão confirma antes de qualquer modelo, a leitura do contexto não chama modelo, a extração espera e tenta de novo, e cada decisão vale pelo rótulo conservador. Nada é perdido; a memória nova atrasa.
+
+**Há dependência de uma pessoa?**
+Sim. A operação é do fundador; o template da nuvem, o chart, os scripts e os runbooks estão no repositório (`deploy/`) para que outra pessoa com acesso à conta reconstrua e opere a plataforma.
+
+## Uso dos dados
+
+**Os dados são usados para outro fim, vendidos ou usados para treinar modelos?**
+Não, não e não. Veja [Uso de dados](/security/data-use), com a conferência de cada afirmação no código.
+
+**Onde os dados ficam?**
+Em `us-east-2`, na região da AWS que o contrato nomeia. Só sai da região o texto mascarado que vai à IA da Niadra, como diz [Uso de dados](/security/data-use).
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Modelo de ameaças" href="/security/threat-model">
+    controle por componente e riscos residuais.
+  </Card>
+  <Card title="Resposta a incidentes" href="/security/incident-response">
+    o plano, como ele roda hoje.
+  </Card>
+  <Card title="Uso de dados" href="/security/data-use">
+    o que sai da célula e o que a Niadra nunca faz com os dados.
+  </Card>
+  <Card title="Política de versões da API" href="/security/api-versioning">
+    o que muda, o que não muda e com que aviso.
+  </Card>
+</CardGroup>

@@ -1,0 +1,80 @@
+---
+title: "Agno"
+description: "The customer's memory in an Agno agent, as dynamic instructions, Functions and run hooks."
+---
+
+`NiadraAgno` gives you `instructions` (a dynamic instruction with the pack), `tools` (the kit as Agno `Function`s) and the `pre_hook` and `post_hook` hooks that record the turns. Python only.
+
+## Install
+
+```sh
+pip install 'niadra[agno]'   # agno 3.0.11 or newer, below 4
+```
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | `instructions` is a dynamic instruction: your own instructions first, then the agent's notes (with `agent_memory=`), the pack and the `turn_block`, read for every run. With an `AsyncNiadra` conversation it is a coroutine function, so use `arun` |
+| Turns | `pre_hook` records the run's input as the customer's turn and `post_hook` the run's answer as the agent's, with the run's usage and model |
+| Tools | `tools`: Agno `Function`s with the kit's names, descriptions and schemas, bound to the customer |
+| Verification | `conversation.verify()` before the run |
+| Handoff | `transferred_to_agent()` and `transferred_to_human()` record the transfer, for a team that delegates or a hand-off to a person |
+
+## Minimal example
+
+```python
+"""An Agno agent with the customer's memory as instructions, tools and hooks."""
+
+import asyncio
+
+from agno.agent import Agent
+from agno.models.openai import OpenAIChat
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.agno import NiadraAgno
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    memory = NiadraAgno(
+        niadra.conversation("thread-81", subject=phone("+5511912345678")),
+        instructions="You are Acme's agent.",
+    )
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4.1"),
+        instructions=memory.instructions,
+        tools=memory.tools,
+        pre_hooks=[memory.pre_hook],
+        post_hooks=[memory.post_hook],
+    )
+    print((await agent.arun("Where is my replacement lid?")).content)
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+
+The same code is in `examples/agno_agent.py`.
+
+## Agent memory
+
+`NiadraAgno(conversation, instructions=..., agent_memory=True)` puts the agent's own notes between your instructions and the customer's context and adds the two tools. See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- Agno's own memory and storage stay Agno's; Niadra is the company's memory of the customer.
+- Nothing here fails the run: without a pack, `instructions` returns your text alone.
+- Tested against `agno` 3.0.11 with the model replaced by a fake and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="History navigation" href="/en/concepts/history">
+    the three tools the agent receives.
+  </Card>
+  <Card title="Agent memory" href="/en/concepts/agent-memory">
+    the agent's own working notes.
+  </Card>
+</CardGroup>

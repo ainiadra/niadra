@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/object-timeline.v0.json",
+  "title": "Niadra Object Timeline v0",
+  "description": "System events and agent actions about one business object, newest first. See spec/business-object.md.",
+  "$defs": {
+    "ClosedBy": {
+      "additionalProperties": false,
+      "description": "What closed an open item: the same object the `open_item.closed` webhook carried.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "action",
+            "system_event",
+            "conversation",
+            "feedback"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "action_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`action`: the agent action that closed it.",
+          "title": "Action Id"
+        },
+        "event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The event that closed it: the action's, the system of record's, or the feedback's.",
+          "title": "Event Id"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`conversation`: the session that resolved it.",
+          "title": "Session Id"
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`action` and `system_event`: the operation done.",
+          "title": "Operation"
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`feedback`: the source that sent it.",
+          "title": "Source Id"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ClosedBy",
+      "type": "object"
+    },
+    "HistoryItem": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
+        },
+        "channel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channel"
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Id"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "origin_event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Origin Event Id"
+        },
+        "object": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ObjectRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The business object the row is about: an open item's or a fact's, an object's own, the one a system event touched."
+        },
+        "expected_operation": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An open item's: the operation that closes it when an action or a system event confirms it on its object or on a part of it. Absent: only a later conversation or a correction closes it.",
+          "title": "Expected Operation"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "open",
+                "overdue",
+                "resolved"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An open item's status.",
+          "title": "Status"
+        },
+        "closed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A resolved item's: when it was closed.",
+          "title": "Closed At"
+        },
+        "closed_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClosedBy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A resolved item's: what closed it."
+        },
+        "item_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "promise",
+                "dispute",
+                "request"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An open item's: a promise someone made, a dispute the customer raised or a request.",
+          "title": "Item Kind"
+        },
+        "audience": {
+          "anyOf": [
+            {
+              "enum": [
+                "shared",
+                "internal"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A fact's or an open item's about an object: `shared` reaches every participant of the object, a customer-facing agent included; `internal`, the internal readers only.",
+          "title": "Audience"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "text",
+        "at"
+      ],
+      "title": "HistoryItem",
+      "type": "object"
+    },
+    "ObjectRef": {
+      "additionalProperties": false,
+      "description": "A business object in a system of record, e.g. `invoice` / `erp` / `0823`.",
+      "properties": {
+        "type": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Type",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "namespace",
+        "id"
+      ],
+      "title": "ObjectRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "ref": {
+      "$ref": "#/$defs/ObjectRef"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/HistoryItem"
+      },
+      "title": "Items",
+      "type": "array"
+    },
+    "next_cursor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Next Cursor"
+    },
+    "as_of": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "As Of"
+    }
+  },
+  "required": [
+    "ref",
+    "items"
+  ],
+  "type": "object"
+}

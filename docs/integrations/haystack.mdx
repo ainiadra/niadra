@@ -1,0 +1,89 @@
+---
+title: "Haystack"
+description: "A memória do cliente num pipeline ou num Agent do Haystack 3: dois componentes, hooks e o kit como Tools."
+---
+
+Num pipeline, `NiadraContext` entra entre o prompt builder e o chat generator, e `NiadraReply` depois do generator. Num `Agent`, `NiadraAgentHooks(conversation).hooks` e `history_tools(conversation)` fazem o mesmo. Só em Python; precisa do Haystack 3.2 ou mais novo.
+
+## Instalar
+
+```sh
+pip install 'niadra[haystack]'   # haystack-ai 3.2 ou mais novo, abaixo da 4
+```
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | O contexto (depois das notas do agente, com `agent_memory=`) vai logo depois das mensagens de sistema iniciais e o `turn_block` no fim, como mensagens de sistema. As mensagens que a Niadra pôs num turno anterior saem primeiro, então um histórico devolvido nunca as tem duas vezes e a saída `messages` do agente nunca as carrega |
+| Turnos | `NiadraContext` e o hook `before_run` registram a última mensagem de usuário como turno do cliente; `NiadraReply` e o hook `after_run` registram o texto do assistente como turno do agente, com o uso e o modelo |
+| Ferramentas | `history_tools()` dá `Tool`s do Haystack cujos parâmetros são os esquemas JSON do kit, amarradas ao cliente, com função síncrona e assíncrona |
+| Verificação | `conversation.verify()` antes de rodar |
+| Transbordo | Fora dos componentes: `conversation.handoff()` onde o seu fluxo transfere |
+
+## Exemplo mínimo
+
+```python
+"""A Haystack Agent with the customer's memory as hooks and tools."""
+
+from haystack.components.agents import Agent
+from haystack.components.generators.chat import OpenAIChatGenerator
+from haystack.dataclasses import ChatMessage
+
+from niadra import Niadra, phone
+from niadra.integrations.haystack import NiadraAgentHooks, history_tools
+
+niadra = Niadra(channel="chat")
+conversation = niadra.conversation("thread-81", subject=phone("+5511912345678"))
+agent = Agent(
+    chat_generator=OpenAIChatGenerator(model="gpt-4.1"),
+    system_prompt="You are Acme's agent.",
+    tools=history_tools(conversation),
+    hooks=NiadraAgentHooks(conversation).hooks,
+)
+result = agent.run(messages=[ChatMessage.from_user("Where is my replacement lid?")])
+print(result["last_message"].text)
+niadra.close()
+```
+
+O mesmo código está em `examples/haystack_agent.py`.
+
+## Num pipeline
+
+```python
+from haystack import Pipeline
+from haystack.components.builders import ChatPromptBuilder
+from haystack.components.generators.chat import OpenAIChatGenerator
+
+from niadra.integrations.haystack import NiadraContext, NiadraReply
+
+pipeline = Pipeline()
+pipeline.add_component("prompt", ChatPromptBuilder())
+pipeline.add_component("niadra", NiadraContext(conversation))
+pipeline.add_component("llm", OpenAIChatGenerator())
+pipeline.add_component("reply", NiadraReply(conversation))
+pipeline.connect("prompt.prompt", "niadra.messages")
+pipeline.connect("niadra.messages", "llm.messages")
+pipeline.connect("llm.replies", "reply.replies")
+```
+
+## Memória do agente
+
+`NiadraContext(conversation, agent_memory=True)`, `NiadraAgentHooks(conversation, agent_memory=True)` e `history_tools(conversation, agent_memory=True)` põem as notas do próprio agente antes do contexto do cliente e acrescentam as duas ferramentas. Veja [Memória do agente](/concepts/agent-memory).
+
+## Limites
+
+- Os componentes e os hooks aceitam conversas de `Niadra` e de `AsyncNiadra`; com `AsyncNiadra`, rode o pipeline ou o agente com `run_async`.
+- Nada aqui para o pipeline: com a Niadra lenta ou fora, as mensagens seguem sem o contexto e uma ferramenta responde que o histórico está indisponível.
+- Testado contra `haystack-ai` 3.2.0 com o generator substituído por um fake e a Niadra no emulador.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Navegação do histórico" href="/concepts/history">
+    as três ferramentas que o agente recebe.
+  </Card>
+  <Card title="O contexto e as views" href="/concepts/context">
+    o que entra no contexto e por quê.
+  </Card>
+</CardGroup>

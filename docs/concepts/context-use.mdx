@@ -1,0 +1,188 @@
+---
+title: "Aproveitamento do contexto"
+description: "A medição por agente e por fornecedor: uso, repetição, contradição e transferência sem leitura."
+---
+
+Uma memória entregue e não usada não vale nada. A Niadra mede se cada agente usou o contexto que recebeu, por agente, por fornecedor e por canal. Só a memória consegue fazer isso: ela segura os dois lados da conta, o contexto entregue e a conversa que veio depois. A medição olha para o que o agente fez com o contexto. Ela nunca dá nota a fornecedor e nunca sugere prompt. O que ela muda no produto é o contexto de cada agente: o tipo de item que um agente nunca usa deixa de ser enviado para ele (veja [Contexto mais enxuto por agente](#contexto-mais-enxuto-por-agente)).
+
+## Os quatro sinais
+
+| Sinal | O que significa | Como é detectado | O que não conta |
+|---|---|---|---|
+| **Aproveitamento** | O agente citou ou usou um item que recebeu: a visita perdida, o crédito de 40, a promessa anterior | As afirmações que a extração lê nos turnos do agente, casadas com os itens do manifesto da entrega pelo mesmo predicado ou pelo mesmo objeto, mais as ações registradas na sessão sobre o objeto de um item ou que fecham uma pendência entregue | Item entregue e irrelevante para a tarefa conta como não usado, sem penalidade |
+| **Repetição** | Depois da entrega, o agente pediu um dado que já tinha naquele nível de verificação: nome, número de documento, número do pedido | As perguntas que a extração lê nos turnos do agente, casadas com os itens do manifesto pelo predicado ou pelo objeto perguntado | Pergunta de verificação exigida pela sua política; confirmação explícita de um valor entregue quando a fonte está marcada como "confirma antes de agir"; pergunta sobre item que a política reteve |
+| **Contradição** | O agente afirmou algo que um fato entregue desmente: "a visita está marcada para sexta" com o fato entregue dizendo quinta | As afirmações do agente com os fatos que, segundo a extração, elas contradizem, conferidas contra os fatos entregues; num predicado de valor único, um valor diferente do entregue também conta, com datas, valores e ids normalizados | Divergência com um fato que o contexto deixou de fora, pela política, pelo orçamento ou por falta de uso. Isso é falha de seleção, medida à parte, nunca atribuída ao agente |
+| **Transferência sem leitura** | A conversa passou para um humano ou outro agente, e quem recebeu não pediu contexto | Evento `handoff` sem comprovante da fonte de destino para aquela conversa em 10 minutos | Transferência para fonte que não está integrada. Ela aparece na cobertura |
+
+O que conta como entregue: o contexto e o `delta`, pelo manifesto e pela hora da entrega gravados no comprovante. Os turnos `live` e o que a navegação do histórico devolve não entram na medição. Só é repetição a pergunta feita depois da entrega. Um item citado só conta como aproveitado se for pertinente ao turno, então recitar o contexto inteiro não infla o número. Em agentes internos, o aproveitamento é medido pela ação registrada, e a repetição aparece como não medida.
+
+## Primeiro, a cobertura
+
+Dois contadores acompanham os sinais:
+
+- **Sessões sem contexto**: a fonte integrou `track`, mas nunca chamou `context()`.
+- **Contexto tardio**: o contexto chegou depois da primeira resposta do agente.
+
+A tarefa de um agente interno sem mensagem e que não leu contexto não conta aqui como sessão: ela não é conversa, e um agente que só registra ações, de propósito, apareceria como lacuna de cobertura. Uma tarefa que leu é medida como qualquer outra.
+
+O SDK carimba `context_injected_at` e `first_agent_turn_at` na conversa quando você usa `conversation()` e o turno `agent()`. Sem cobertura não há o que medir, e o número aparece como **não medido**, nunca como zero. Na API, uma taxa sem nada a medir vem `null`.
+
+<Note>
+Voz tem uma regra a mais. Turno do agente com confiança do reconhecimento de fala abaixo do limiar não gera pergunta nem afirmação. A primeira leva da transcrição, sem o texto do agente, fica como não medida, com o motivo `partial_transcript`, e a segunda leva mede de novo. O texto que o modelo do seu agente gerou, capturado pelo SDK, vale mais que a transcrição.
+</Note>
+
+## Como roda
+
+A medição roda no mesmo caminho da extração, sem chamada extra de modelo de linguagem. As perguntas e as afirmações do agente saem da única chamada de extração que já existe, cada uma com o predicado e o objeto de que fala (o tipo de cada pergunta, pede dado, confirma, verifica ou ambígua, é decidido pela IA da Niadra, e a dúvida vira `ambigua`, que não conta), e cada afirmação traz os fatos candidatos que ela contradiz, entregues ou não. O cruzamento com o manifesto é determinístico. Toda entrega é medida pelo manifesto dela, inclusive a de um contexto compilado na hora da leitura: depois de um código que sobe a conversa para V2, numa leitura focada num objeto, e no manifesto sombra do grupo de controle. As regras da medição têm versão (`m3` desde os encaixes por turno): junto com as versões do extrator, ela forma o `measure_version` de cada linha, e uma linha medida por regras antigas é refeita quando a sessão é extraída de novo.
+
+O resultado fica pronto logo depois da memória derivada da sessão, assim que o gravador de comprovantes confirma que guardou tudo o que foi lido até o fim dela. Uma segunda fase roda 10 minutos depois da última transferência da sessão para ver se quem a recebeu leu o contexto. Quando uma sessão é extraída de novo por uma versão nova do extrator, a medição dela é refeita e as linhas antigas saem dos agregados: a medição é dado derivado, nunca a fonte da verdade. Quando o extrator, o prompt dele ou o esquema de extração do espaço muda, um passo do espaço vê a versão nova e extrai de novo as sessões fechadas nos últimos 30 dias (nunca além da janela quente) cuja última execução boa veio de um extrator mais antigo: 100 por página, dois minutos entre páginas e no máximo 1.000 por mudança, dentro do orçamento de IA do espaço. Uma sessão cujos eventos não nomearam nenhum cliente é medida contra o perfil que as leituras do agente nela nomearam, quando é um só.
+
+## Leia os números
+
+[`GET /v1/context-use`](/api/context-use) agrupa por qualquer um de `day`, `source_id` (o padrão), `vendor`, `channel`, `view` e `experiment_group`, repetindo `group_by`, e filtra por `since` e `until` (datas), `source_id`, `channel`, `view` e `experiment_group`. Pede uma pessoa do Console com o papel `analysis` ou `vendor`, uma chave de escopo `admin`, que vê só a própria fonte, ou a chave de uma fonte de público `analyst` com o escopo `analytics`, que lê todas as fontes do espaço: o relatório soma conversas e não nomeia nenhuma, como o [Insights](/api/insights-aggregate) lê. Os relatórios de medição dos desfechos (`/v1/measure/attribution`, `interleaving`, `experiments`, `power` e `unmet-demand`) aceitam as mesmas chaves. Listar e abrir conversas (`/v1/context-use/conversations` e `/v1/context-use/{conversation_id}`), os vínculos de desfecho e a conciliação com o BI pedem uma pessoa ou uma chave `admin`, e uma chave vê ali só as conversas da própria fonte.
+
+<CodeGroup>
+```bash cURL
+curl "https://acme-prod.us-east-2.api.niadra.com/v1/context-use?group_by=vendor&group_by=channel&since=2026-09-01&until=2026-09-22" \
+  -H "Authorization: Bearer $NIADRA_TOKEN"
+```
+```python Python
+import os
+import httpx
+
+response = httpx.get(
+    "https://acme-prod.us-east-2.api.niadra.com/v1/context-use",
+    params={"group_by": ["vendor", "channel"], "since": "2026-09-01", "until": "2026-09-22"},
+    headers={"Authorization": f"Bearer {os.environ['NIADRA_TOKEN']}"},
+)
+for bucket in response.json()["buckets"]:
+    rate = bucket["usage_rate"]
+    print(bucket["vendor"], bucket["channel"], rate and (rate["value"], rate["low"], rate["high"]))
+```
+```typescript TypeScript
+const url = new URL("https://acme-prod.us-east-2.api.niadra.com/v1/context-use");
+for (const g of ["vendor", "channel"]) url.searchParams.append("group_by", g);
+url.searchParams.set("since", "2026-09-01");
+url.searchParams.set("until", "2026-09-22");
+
+const response = await fetch(url, { headers: { Authorization: `Bearer ${process.env.NIADRA_TOKEN}` } });
+const { buckets } = await response.json();
+```
+</CodeGroup>
+
+Cada grupo conta `sessions`, `deliveries`, `deliveries_used`, `questions`, `repeated`, `contradicted`, `transfers`, `transfers_unread`, `recontacts`, `late_deliveries`, `no_context` (sessões sem nenhuma leitura de contexto), `not_measured`, `selection_misses` (contradições de itens que o contexto não levava, que nunca são do agente), `trimmed_deliveries` (entregas cujo contexto deixou de fora o que aquele agente não usa) e `tokens_saved` (os tokens que essas entregas deixaram de levar, na estimativa do compilador, a mesma dos orçamentos). As taxas `usage_rate`, `repetition_rate`, `transfer_unread_rate` e `recontact_rate` vêm com `value`, os limites `low` e `high` de um intervalo de Wilson de 95% e a amostra `n`, e ficam `null` quando nada pôde ser medido, nunca zero. Para entender por que um número mudou, abra uma conversa com [Aproveitamento de uma conversa](/api/context-use-conversation): uma entrada por entrega, com os itens usados, as perguntas repetidas, as contradições, se chegou tarde e o manifesto contra o qual foi medida.
+
+O relatório traz também `review`: para cada sinal (`used`, `repeated`, `contradicted` e `selection_miss`), quantas marcações dele o seu time julgou na revisão por amostra (`judged`), quantas confirmou (`confirmed`), a concordância, com intervalo (`agreement`, `null` sem vereditos), `contract_ready` quando o limite inferior dela chega a 0,90, a contagem medida (`measured`) e a contagem corrigida pela parte das marcações que os revisores confirmaram, com o intervalo dessa parte (`calibrated`: as marcações que a revisão manteria; corrige marcações erradas, nunca as que faltaram), nas mesmas fontes do relatório, no período dele ou nos últimos 90 dias do período, quando ele for mais longo. Ao lado de cada taxa, é o número que diz quanto confiar nela. Para ser avisado quando a taxa de repetição de uma fonte passar do seu limite, use a condição `context_use.repetition_rate` de [Gatilhos e webhooks](/concepts/triggers-and-webhooks).
+
+O relatório traz ainda `trims`: por fonte e por view, os tipos de item que o contexto dela deixa de fora hoje, com as entregas medidas que sustentam cada um, desde quando, a janela e o mínimo de entregas, e se está em vigor (`active`) ou por que não (`inactive_reason`: `disabled`, `opt_out` ou `critical`).
+
+Uma pessoa com o papel `vendor` só vê as fontes nomeadas no vínculo do papel dela, então um fornecedor nunca vê os números de outro. A Niadra nunca compara fornecedores em público. O que você faz com os números é decisão sua.
+
+## Afirmações, restrições e custo por agente
+
+Com as funcionalidades de agente ligadas no espaço, o mesmo relatório ganha três seções, por fonte e agente, a partir dos [registros de turno](/concepts/turn-records):
+
+- `claims`, com a funcionalidade `claims`: as afirmações das saídas do agente por categoria e veredito do [contrato de afirmação](/concepts/claims), e quantas se apoiam em evidência (`evidenced`). É a taxa do que o agente afirma sem consultar.
+- `constraints`, com a funcionalidade `signals`: as restrições rígidas que as ferramentas do agente receberam (`sent`), os resultados lidos contra elas (`checked`), os verificáveis, os que não tinham o campo (`unverifiable`), os que violaram uma restrição que a ferramenta não disse ter relaxado (`violated`), as chamadas com relaxamento declarado ou suspeito e os itens que as listas mostraram. A medida é "enviado, verificável, violado", nunca só "enviado". Veja [Sinais e restrições](/concepts/signals#renderizar-para-uma-ferramenta).
+- `cost`, com a funcionalidade `turns`: chamadas de modelo e de ferramenta, tokens e dinheiro por turno, contra o custo por turno sem memória que a sua empresa mediu e declarou no documento `measurement`; `difference_usd` acima de zero custa mais.
+
+O que os agentes venderam, com o método de cada atribuição, fica em [Desfechos e atribuição](/concepts/outcomes).
+
+## Contexto mais enxuto por agente
+
+A medição devolve ao compilador o que cada agente usa. A unidade é o tipo do item com a categoria dele, como `fact:contract` ou `episode:technical_visit`. Para cada fonte e cada view, cada entrega medida conta, em cada unidade que levou, uma entrega e se o agente usou algum item dela. A unidade que a fonte recebeu em pelo menos `min_deliveries` entregas medidas dos últimos `window_days` dias (50 e 28 por padrão) e nunca usou sai do contexto dessa fonte naquela view. O espaço que ela ocupava fica vazio, então o contexto fica menor por exatamente essas linhas.
+
+Nunca saem, seja qual for a medição:
+
+- pendências e promessas, a linha do cliente, padrões e resumos (só sai o tipo cujo uso a medição consegue ver: fato, pelo predicado; episódio, como motivo do contato; ação e objeto, pelo objeto);
+- o que outro agente fez e que o agente não pode negar nem refazer: as ações de outras fontes das 72 horas anteriores à última mudança da memória (a mesma janela em que o esqueleto as fixa), o desfecho de uma [transferência](/concepts/coordination#transferências), de qualquer data e de qualquer fonte, e a ação ainda pendente, declarada e ainda não confirmada pelo sistema de registro, ou sobre um objeto que uma pendência aberta ainda espera. As ações mais antigas, e as da própria fonte já resolvidas, ainda podem sair;
+- itens sensíveis ou restritos;
+- o que a política libera para a finalidade daquela fonte pelo nome, numa categoria ou numa regra `allow`.
+
+O caminho de volta faz parte da regra. Quando o agente pergunta por um item que ficou de fora, fala dele ou age sobre ele, a unidade volta na medição seguinte. E uma unidade que saiu deixa de ser entregue, então sai da janela e é medida de novo quando a janela passa.
+
+O contexto de cada fonte continua determinístico: o recorte entra na chave do contexto só quando existe, o contexto da view de sempre da fonte é montado quando a memória muda, e ele vai para o cache como qualquer outro. Uma conversa em andamento mantém o contexto fixado nela quando o recorte da fonte muda; a conversa seguinte já recebe o novo. O manifesto registra a decisão: cada item que saiu aparece em `excluded` com `reason: "unused"` e `rule: "context_use"`, e o bloco `trim` traz as unidades, quantos itens saíram e `tokens_saved`. O comprovante da entrega aponta para esse manifesto, e a [simulação da política](/api/policy-simulate) mostra o mesmo recorte para a fonte simulada.
+
+Nas configurações do espaço (`settings.context_trim`): `enabled` desliga o recorte para todos, `min_deliveries` (20 a 100.000) e `window_days` (7 a 90) mudam o limiar e a janela, e `opt_out_sources` lista as fontes que recebem sempre o contexto inteiro. Fontes marcadas como críticas (`critical`) também recebem sempre o contexto inteiro.
+
+## Encaixes por canal e pesos aprendidos
+
+A medição lê também o comprovante `slots` de cada turno (os ids, os tipos, os canais e as posições dos encaixes) e julga cada item encaixado pelas mesmas regras dos quatro sinais, contra o que a mesma fonte disse, perguntou ou fez depois da leitura e até a leitura seguinte: uma afirmação sobre o mesmo predicado ou objeto, um valor fixado dito de volta (o mesmo número, com a pontuação que for) ou uma ação sobre o objeto é uso; pedir o item de novo é repetição; outro valor é contradição. Cada canal que ranqueou o item recebe o crédito, com as leituras em que rodou e as em que perdeu o prazo. Contradizer um item que o esqueleto segurou e um encaixe trouxe deixa de ser falha de seleção.
+
+[`GET /v1/context-use`](/api/context-use) responde por canal em `slot_channels`: por view e canal de recuperação (`exact`, `values`, `lexical`, `temporal`, `semantic`), os encaixes, o uso, a repetição, a contradição, a taxa de uso com o intervalo de Wilson e o peso do canal hoje; e em `retrieval_weights` os pesos de fusão do espaço, com a versão, os padrões e as últimas execuções. O detalhe de uma conversa ([`POST /v1/context-use/conversation`](/api/context-use-one-conversation)) traz, por entrega, `slots`: cada leitura que levou encaixes, com os acertos por canal, cada encaixe (id, tipo, canais, posição, uso, repetição, contradição) e o mesmo `why` do comprovante (pontuação fundida, posição, peso e contribuição por canal, a regra de uma linha derivada), em ids e números, nunca uma linha.
+
+**Os pesos se afinam uma vez por noite**, depois das 03:00 no fuso do espaço, em todo espaço, e o resultado é gravado numa versão nova (`retrieval_weights`, só acrescenta). A regra, por view:
+
+- a janela são os últimos 7 dias completos; um canal com menos de 30 encaixes medidos na janela, ou uma view com menos de dois canais assim, mantém o peso; uma janela sem veredito nenhum não muda nada;
+- um canal cuja taxa de uso fica claramente acima da taxa de todos os canais juntos (o limite inferior do intervalo de Wilson acima da taxa conjunta) sobe um degrau; um claramente abaixo, ou claramente mais contradito, desce um;
+- um degrau por noite compõe até no máximo 10% por semana, e um peso nunca sai da faixa entre a metade e o dobro do padrão dele;
+- o grupo de controle veta: quando um experimento deixa clientes sem memória, e os clientes com memória são perguntados de novo pelo que a memória tinha mais vezes do que os sem ela, ou a diferença entre os grupos estreitou desde a última vez em que os pesos se moveram, ou os grupos são pequenos demais para dizer, nada se move. Cada execução guarda a palavra do grupo (`no_experiment`, `too_small`, `holds`, `worse`, `narrowed`).
+
+Sem gradiente e sem contagem de acessos: o sinal é o veredito do agente sobre o que recebeu, e o grupo de controle guarda o resultado. A leitura funde os encaixes com os pesos da view (relidos no máximo uma vez por minuto), e o comprovante `slots` diz em `detail.weights` a versão que usou; até um espaço aprender algo, valem os padrões. Os pesos por tipo do compilador não mudam: mover esses mudaria os corpos fixados.
+
+## Guardas, respostas com lastro e o portão de intenção
+
+A medição lê também três coisas dos encaixes. Um valor fixado encaixado é **contradito** quando a resposta do agente afirma outro valor do tipo dele e nunca ele. Uma [linha de guarda](/concepts/context#linhas-de-guarda-e-o-portão-de-intenção) é **contrariada** quando o SDK a nomeia no turno do agente (`backing.guard_violations`) ou a mesma regra a encontra; no braço com guardas isso é uma contradição do valor marcada `guard` e conta em `guard_violations`; no grupo de controle, as guardas que seriam contrariadas contam à parte. Por dia, fonte, tipo de valor e braço, `GET /v1/context-use` responde em `guards` (`GuardTypeUse`: `value`, `guards`, `control`, com os encaixes e os contraditos de cada um), e é essa contagem que decide, uma vez por minuto na leitura, para quais tipos o espaço escreve guardas.
+
+A **conferência de lastro** vem do SDK: o turno de um agente traz em `backing` quantos valores a resposta afirmou, quais não têm fonte e que guardas contrariou, nunca um valor. Por fonte de agente, e por isso também por fornecedor, os grupos contam `answers_checked`, `unbacked_values` e `unbacked_per_1000`; uma resposta com valor sem lastro manda a sessão à revisão por amostra com prioridade (condição `unbacked_value`), e uma guarda nomeada pelo SDK dispara `guard.violated` na chegada do turno (uma que só a medição achou dispara quando ela roda).
+
+O **portão de intenção** é contado à parte: depois de um turno servido sem encaixes, se o agente perguntou ao cliente, antes da leitura seguinte, algo que o pacote ou a reserva tinha, pelas regras de repetição. `gated_turns` responde por view os turnos, os `asked_again` e a taxa; nenhum peso aprende com essas linhas.
+
+
+A **view aprendida** de cada leitor aparece em `view_budgets`: por fonte, modelo de destino e view, os fatores por seção (0,5 a 1,5), os orçamentos em tokens contra os da própria view e a diferença por leitura, a fração de clientes que mantém a view padrão e as últimas execuções noturnas com o veredito do experimento (`guard`) e o resultado. A medição por trás conta, por leitor e seção, as entregas, os usos e o que o agente deixou passar; nenhuma linha e nenhum cliente. Veja [a view que cada agente aprende](/concepts/context#a-view-que-cada-agente-e-cada-modelo-aprende).
+
+
+## Grupo de controle e recontato em 72 horas
+
+A medição explica; o recontato prova. Recontato é uma sessão iniciada pelo cliente até 72 horas depois do fim de outra, do mesmo perfil, na mesma categoria normalizada; é o que `recontacts` e `recontact_rate` contam. Contato ativo da sua empresa não conta.
+
+Para medir o efeito da memória, o seu espaço pode rodar um experimento: uma fração estável dos clientes, sorteada pelo HMAC do handle mais antigo de cada um, recebe a memória, e o restante forma o grupo de controle. O mesmo cliente fica no mesmo grupo em todos os canais e fornecedores. No grupo de controle, o `context()` devolve contexto vazio com `path: "holdout"` e a navegação volta vazia, enquanto a memória continua sendo construída para a comparação valer. O SDK trata `holdout` como contexto vazio, nunca como erro. Um manifesto sombra registra o que teria sido entregue, e é contra ele que a repetição do grupo de controle é contada. Fontes marcadas como críticas (`critical`) ficam fora do experimento, e uma sessão com promessa da empresa já vencida recebe o contexto e a navegação normalmente, sem o rótulo do grupo: ela é cobrada como qualquer sessão e não conta como observação do controle. Sessões do grupo de controle não são cobradas.
+
+## Revisão por amostra
+
+O seu time confere a medição por amostra. [`GET /v1/review/queue`](/api/review-queue) entrega até 50 amostras ainda sem veredito de cada vez, com os fatos que a memória extraiu da sessão, os sinais que a medição marcou nela, as pendências e promessas que a conversa deixou (`open_items`, com `owner` e `promise`) e os padrões do cliente que se apoiam nela (`traits`, com as evidências), cada um só quando a política da finalidade da amostra o deixa passar inteiro: um fato de categoria que aquela finalidade não lê fica de fora e é contado em `withheld`. Uma sessão que não deixou fato, pendência, padrão nem sinal não é sorteada, e uma amostra que ficou sem nada para julgar, porque a memória dela foi apagada, sai da fila sozinha. A amostra diz em `condition` por que a sessão foi sorteada: a taxa base, uma fonte que começou a mandar nas últimas duas semanas (`new_source`), um extrator trocado na última semana que extraiu a sessão (`new_extractor`), um padrão do cliente derivado pela primeira vez na última semana (`new_trait`), um sinal da medição ou uma categoria sensível. Quem revisa registra um veredito por item com [`POST /v1/review/{sample_id}/verdicts`](/api/review-verdicts): o `target` (`fact`, `open_item`, `signal` ou `trait`), o id dele e o veredito. O veredito é a única escrita de governança que só uma pessoa faz: pede uma pessoa do Console com o papel `review`, nunca uma chave de fonte.
+
+[`GET /v1/review/agreement`](/api/review-agreement) mostra quanto revisores e sistema concordam nos últimos `days` (90 por padrão), por tipo de item (`fact`, `open_item`, `trait`) e por sinal da medição (`signal:used`, `signal:repeated`, `signal:contradicted` e `signal:selection_miss`): é o número que diz se dá para confiar na medição. Cada veredito leva a fonte da amostra, então quem tem o papel `vendor` lê só a concordância sobre as próprias fontes, e `source_id` limita o relatório a uma fonte. A concordância entre revisores conta quando duas pessoas registram vereditos sobre o mesmo item. Um veredito nunca muda a memória sozinho: fato errado sai por uma [correção](/api/feedback), padrão errado por uma [retirada](/api/trait-retract).
+
+Cada veredito também é um teste do espaço. [`GET /v1/review/cases`](/api/review-cases) roda cada veredito do período (`days`, 90 por padrão) contra a memória e a medição de hoje: um sinal contra a marcação atual do mesmo item no mesmo contexto, um fato contra se ele ainda vale, uma pendência contra se ainda está na memória. A resposta conta os casos que passam e falham por alvo (`tallies`) e lista os que falham (`failing`, até 50), então um extrator novo ou regras novas de medição mostram na hora os casos julgados que passaram a responder de outro jeito; um fornecedor roda só os casos dos próprios agentes. E os vereditos corrigem a contagem que julgaram: o relatório de aproveitamento traz, por sinal, a contagem medida e a corrigida pela parte das marcações confirmadas (`calibrated`). No Console, a tela Revisão lista os casos de teste do período, e a tela Uso mostra a contagem que a revisão manteria ao lado da concordância.
+
+## Lacunas de conhecimento e respostas prontas
+
+A medição também diz o que a memória não sabe. Uma passagem por noite, depois das 03:00 no fuso do espaço, lê os comprovantes dos encaixes do dia (o tipo de valor que o turno do cliente pediu e se as regras escreveram a linha "sem registro") e as perguntas que os agentes fizeram nas conversas medidas do dia (um dado pedido a um cliente que a memória já conhecia e de que ela não tinha linha antes da pergunta, só pelos vínculos confirmados). Guarda por dia, assunto e categoria da conversa as vezes e um esboço HyperLogLog dos clientes, feito de hashes com sal do espaço: uma janela de 30 dias conta cada cliente uma vez, e nenhum id, valor ou texto fica guardado. Nada disso chama modelo, e nada chega ao contexto dos agentes.
+
+`GET /v1/insights/gaps?days=` (de 1 a 90, 30 por padrão) devolve três listas, com o papel `analysis` ou `admin` ou uma chave de escopo `analytics`, e deixa um comprovante de análise como as outras ferramentas da análise da base:
+
+- **Lacunas** (`gaps`): "132 clientes perguntaram a fatura em conversas de cobrança e a memória não tinha registro", com as fontes que poderiam gravar o assunto pelo mapeamento de webhooks (`mapping`) ou pelo esquema de extração (`schema`). Sem fonte, a lacuna é estrutural: nenhum sistema manda esse dado para a memória, e é por ela que vale ligar a próxima integração.
+- **Perguntas recorrentes** (`recurring`): as dez mais frequentes, com a parte das vezes que a memória respondeu (`answered_share`).
+- **Respostas prontas propostas** (`proposals`): linhas escritas por regra no idioma do espaço, para o seu time aprovar como aprova o esquema: um assunto que nenhuma fonte grava (a falta de registro não pode virar "o cliente não tem") e uma pergunta que a regra responde em nove de cada dez vezes.
+
+Um grupo com menos clientes que o tamanho mínimo da análise, ou numa categoria que a política não abre para análise, fica de fora e é contado em `withheld_groups`. `POST /v1/insights/gaps/review` guarda a decisão do time sobre uma lacuna ou uma proposta (`accepted` ou `dismissed`, com uma nota), e o Console mostra tudo na tela Lacunas e respostas prontas.
+
+## Uso
+
+O que o seu espaço consome vem de [`GET /v1/usage`](/api/usage), numa janela `since` e `until`, por `hour` ou `day`, e se quiser só para alguns valores de `metric`: `session_billable` (a conversa ou tarefa, a unidade cobrada), `context_read`, `history_call`, `event_ingested`, `extraction_run` e `extraction_tokens`, `measure_run`, `trigger_fired`, `webhook_delivered`, `export_run` e `export_bytes` (os bytes do pacote sob demanda e de cada execução da exportação contínua, contados uma vez por execução), `assistant_tokens` (os tokens de cada chamada ao assistente de configuração) e `review_sample`. Bytes exportados e tokens do assistente entram como eventos de uso na mesma transação do trabalho; o preço continua por conversa ou tarefa. Com `group_by=source`, cada linha nomeia a fonte, e você vê qual agente e qual fornecedor geraram as conversas e tarefas. Pede o papel `analysis` ou uma chave `admin`. Cada espaço responde pelo próprio uso em `GET /v1/usage`, na região dele, e a cada 15 minutos a célula manda o uso por hora de cada espaço ao plano de controle, onde [`GET /v1/usage`](/api/control/usage) da API de controle soma o tenant inteiro. [`GET /v1/usage/statement?month=YYYY-MM`](/api/control/usage-statement) da API de controle é o extrato do mês, uma linha por espaço do tenant que existiu no mês (conversas e tarefas, todas as métricas e o custo de IA), em JSON ou, com `format=csv`, em CSV; o Console baixa o extrato de qualquer um dos últimos doze meses, para os papéis `analysis` e `security`. O extrato diz o que foi usado, nunca o preço, que fica no contrato. Uma conversa ou tarefa é cobrada uma vez quando qualquer agente lê a memória nela, e conta para a fonte que a abriu. Sessões do grupo de controle não são cobradas, nem quando o agente consulta o histórico nelas.
+
+[`GET /v1/usage/budget`](/api/usage-budget) mostra, por finalidade (`extraction` e `assistant`), o gasto de IA de hoje, o teto diário do espaço, se o teto vem do contrato ou é o padrão da Niadra, e se o trabalho espera o dia seguinte, com a hora em que volta. Sem teto no contrato, o teto da extração acompanha o tráfego do espaço: é o maior entre um piso de US$ 5 por dia e três vezes a mediana do gasto diário dos últimos 7 dias (contando só os dias com gasto). Ele existe contra um laço que dispara, nunca para ditar o ritmo da memória: uma segunda-feira cheia ou uma campanha passa. Passado o teto, a extração espera o dia seguinte (UTC) e a memória das conversas chega mais tarde, sem perder nada; o webhook [`usage.budget_reached`](/concepts/triggers-and-webhooks) avisa uma vez por dia, e o problema de dados [`budget_reached`](/api/data-issues) abre ao lado dos outros, no Console. Pede o papel `analysis`.
+
+[`GET /v1/usage/prompt-cache`](/api/usage-prompt-cache) mostra o cache de prompt dos seus agentes: por dia, agente, fornecedor, provedor ou modelo, as chamadas que informaram o uso, os tokens de entrada, os lidos do cache e os gravados nele, a taxa de acerto e a economia estimada pelo preço de cada modelo. O uso chega com o turno do agente, pelo `wrap()` dos SDKs ou pelo `usage` do turno. A tabela de preços vem com a Niadra, com a data em que foi tirada, e `settings.model_prices` define preços do espaço por `provedor/modelo`; chamadas de modelos sem preço ficam fora da estimativa e são contadas à parte. Pede o papel `analysis` ou `vendor`, e um fornecedor vê só as próprias fontes.
+
+## Privacidade
+
+A medição lê o que a célula já tem, e o resultado é sobre o agente, nunca sobre o titular. Atendentes humanos são agregados por fonte e por canal, nunca pelo id de quem atendeu: a medição não guarda id de pessoa. Apagar um perfil remove as linhas de medição dele pela mesma linhagem.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Comprovantes e auditoria" href="/concepts/receipts">
+    o registro de entrega para o qual cada sinal aponta.
+  </Card>
+  <Card title="Gatilhos e webhooks" href="/concepts/triggers-and-webhooks">
+    receba um aviso quando a taxa de repetição passar do seu limite.
+  </Card>
+  <Card title="Aproveitamento do contexto" href="/api/context-use">
+    o endpoint de agregados em detalhe.
+  </Card>
+  <Card title="Agentes de voz" href="/guides/voice-agents">
+    capture os turnos para a medição ter o texto do agente.
+  </Card>
+</CardGroup>

@@ -1,0 +1,165 @@
+---
+title: "Accounts and partners"
+description: "Organizations as memory subjects, role-based links, and context with about."
+---
+
+In logistics, insurance, healthcare and B2B in general, the customer is often a company, and the person on the line acts on its behalf: the carrier's driver, the retail chain's buyer, the broker. Other organizations take part in service without being customers at all: the carrier that delivers, the clinic that treats, the repair shop that fixes. Niadra keeps memory for all of them. A subject of the memory is a person, an account or a partner.
+
+## Three kinds of subject
+
+| Kind | What it is | Example |
+|---|---|---|
+| `person` | A human being, identified by phone, e-mail, WhatsApp id, app id or a system id | Marina Souza |
+| `account` | An organization that is your customer | The retail chain behind CRM account `ACC-2201` |
+| `partner` | An organization that takes part in service without being a customer | The carrier, the clinic, the insurance broker |
+
+The kind comes from the handles, never from a separate parameter. Every handle carries a `subject_kind`, which defaults to `person` except for organization-only handle types.
+
+## Organization handles
+
+| Handle type | Strength | Notes |
+|---|---|---|
+| `org_registry_hmac` | Strong | The company registry number in its country, sent as the number itself (such as `11.222.333/0001-81`), checked and kept as a keyed HMAC, like a personal document number |
+| `system_id` with `subject_kind: account` or `partner` | Strong within its namespace | The account in your CRM, the customer code in your ERP, the carrier id in your TMS |
+| `email_domain` | Weak hint | Never merges anything on its own; webmail domains are blocked |
+| Company phone | Ambiguous by default | A switchboard connects many people to one number |
+
+Organizations never merge automatically and are never deduplicated by name similarity. Only ids link them.
+
+## A person and an organization are linked, never merged
+
+An assertion between a person handle and an organization handle becomes a **link**, never a merge. A link has a role (`buyer`, `technical_contact`, `driver`, `broker`), a validity period, an origin and a confidence. One person can hold several links at once: a driver who works for three carriers has three links.
+
+Links come from four methods: `system_import` (a CRM contact record), `co_occurrence` (an `identify` or a CSV row that carries both ids, or an event whose `subjects[]` names a person and an organization), `declared` ("I am calling on behalf of carrier X", with confidence 0.5 in the link record) and `login` (a B2B portal). An event with `subjects[]` naming a person and an organization links the two, with the role `contact`, and never merges the identities: each subject is attached on its own, and a link already active is left as it is.
+
+A person holds as many active links as their work calls for. No link is refused for their number, and none ends to make room for another: a link ends only when it is ended or reaches its own `valid_to`.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/identity/links" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "person": {"type": "phone_e164", "value": "+14155550123"},
+    "organization": {"type": "system_id", "value": "ACC-2201", "scope": "crm", "subject_kind": "account"},
+    "role": "buyer",
+    "can_see_contacts": true,
+    "method": "system_import"
+  }'
+```
+```python Python
+import os
+import uuid
+import httpx
+
+response = httpx.post(
+    "https://acme-prod.us-east-2.api.niadra.com/v1/identity/links",
+    headers={"Authorization": f"Bearer {os.environ['NIADRA_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+    json={
+        "person": {"type": "phone_e164", "value": "+14155550123"},
+        "organization": {"type": "system_id", "value": "ACC-2201", "scope": "crm", "subject_kind": "account"},
+        "role": "buyer",
+        "can_see_contacts": True,
+        "method": "system_import",
+    },
+)
+response.raise_for_status()
+```
+```typescript TypeScript
+const response = await fetch("https://acme-prod.us-east-2.api.niadra.com/v1/identity/links", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.NIADRA_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    person: { type: "phone_e164", value: "+14155550123" },
+    organization: { type: "system_id", value: "ACC-2201", scope: "crm", subject_kind: "account" },
+    role: "buyer",
+    can_see_contacts: true,
+    method: "system_import",
+  }),
+});
+```
+</CodeGroup>
+
+Link routes are governance routes: a Console person with the `security` or `integration` role, a key with the `admin` scope, or the key of a system of record that knows who works for whom (a CRM, an HR system) with the `identity:link` scope, which reaches the two link routes and nothing else of identity; all with an `Idempotency-Key` header. A link with `can_see_contacts` needs a person or the `admin` scope, and `identity:link` is never granted to a customer-facing source. The SDKs call them `link()` and `end_link()` (`endLink()` in TypeScript). A link takes `role`, an optional `valid_from` and `valid_to`, and `can_see_contacts`, which the policy reads as a context attribute. A link counts from `valid_from` (or from its creation, without one) until `valid_to`: a link whose `valid_from` is still ahead is not active yet. When the contact leaves the company, [end the link](/en/api/identity-link-end), optionally with the `valid_to` date. Past conversations keep what they were about; new reads with `about` for that pair get the person's own memory, with `about_unlinked: true`.
+
+## Memory stays tied to where it came from
+
+A conversation between Marina and your agent about the retail chain becomes an episode whose subject is Marina and whose `about` is the account. The conversation's subject decides whose memory it is, never a `verify`: a verification proves who is speaking, at which level, and anchors nothing. So the agent that serves a contact opens the conversation with the person as `subject` and the organization as `about`, and verifies the person; a conversation opened on the account keeps its memory on the account, whoever was verified in it. Business objects belong to the handle that owns them: an order placed by the retail chain lives on the account, and Marina is connected to it through her link. Because every item points back to its origin, an unmerge or an erasure lands on the right subject without rewriting anything.
+
+## Context by subject
+
+Two calls cover the two situations:
+
+- `context(subject=<account handle>)` for the agent that serves the company itself, with the `account` view.
+- `context(subject=<person handle>, about=<account handle>)` for the agent that serves the contact. The pack adds an account block with what the account has that matters to this task.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone, system_id
+
+niadra = Niadra()
+
+ctx = niadra.context(
+    subject=phone("+14155550123"),
+    about=system_id("crm", "ACC-2201", kind="account"),
+    view="chat",
+    verification="V1",
+    conversation_id="wa-8812",
+)
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+
+const ctx = await niadra.context({
+  subject: handles.phone("+14155550123"),
+  about: handles.systemId("ACC-2201", "crm", { subjectKind: "account" }),
+  view: "chat",
+  verification: "V1",
+  conversation_id: "wa-8812",
+});
+```
+</CodeGroup>
+
+`about` reads the organization only through an active link between the two subjects. Without one, the read goes on with the person's own memory, without the account block, and the answer says `about_unlinked: true`; it says the same for an organization that does not exist, so it never reveals whether one does. The SDKs log it once per conversation. The turn never runs with no memory at all because a link is missing.
+
+A link compiles the person's context about the organization when it is made, so a contact's first read with `about` finds it ready instead of compiling it. Each change of the organization's memory compiles that context again for the 20 contacts seen last. A read that finds it one compilation behind the organization's memory gets it while it compiles again, as a person's own context is until its compilation lands, and asks for that compilation; one compiled before a privacy change of the organization (an erasure, an objection) is never served. The link itself is kept by the read process, so a warm read with `about` opens no database statement to find it; a link made, ended or changed reaches warm reads within one poll of the change feed, and a link that ends on its own date stops counting at that date. Ending the link drops the context.
+
+The person's history tools reach what the account block shows, under the same link: [search](/en/api/history-search), the [timeline](/en/api/history-timeline) and [open](/en/api/history-open) take the same `about`, and the SDKs' bound tools and the MCP server (from the subject token) pass it. Without `about`, they read the person alone. A correction with the account as the subject resolves an open item one of its linked contacts noted, which the account's view shows.
+
+The `account` view gathers what the account itself accumulated: the account facts (contract, SLA, terms), open items and promises at account level, objects, the account's episodes, account patterns and the actions internal agents took on the account. The `partner` view works the same way for partners.
+
+### One contact never reads what another said
+
+Personal data of a contact is still personal data in B2B, and GDPR and LGPD make no exception for it. The account block carries what the account itself accumulated and what its contacts said: the people with an active link to any handle of the account, most recently seen first. The 20 seen last appear in detail, each recent episode named by who spoke and in which role, with their open items, and the account says how many contacts it has. Other contacts' lines stay masked for a person whose link cannot see them (`can_see_contacts`). The account's patterns sum what its contacts said, two contacts at least, and pass the policy of every category their conversations were filed under. The link keeps `can_see_contacts` and the role, which the policy reads as context attributes, and a read with `about` finds the link on any handle of the person and of the organization: a link made on the e-mail holds for a call from the phone.
+
+## Policy by subject
+
+The policy decides, by subject kind, what each reader receives. Items of a partner profile reach an agent only when its source serves the `partnership` or `logistics` purposes, the two the catalog gives that meaning; a person in the Console still reads them. And the policy lists, source by source, in `competes_with`, the competing partners that source never reads, by handle ids or by the partner's profile id, which covers the handles the partner gains later.
+
+## Erasure
+
+Forgetting a person does not erase the account. It removes the person's own memory, including what they said about the account, and their links are erased. What the account knows from system events stays, and so does the memory of the other contacts. Forgetting an account erases the account's facts, episodes, objects and patterns, and its links. Each contact keeps what came from their own conversations and loses what came from an event that also named the account, because erasure follows the lineage of the event; the rest of their personal memory only goes when the data subject asks. Both paths issue a receipt. See [Privacy, erasure and export](/en/concepts/privacy).
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Identity and verification" href="/en/concepts/identity">
+    handles, assertions and the V0 to V4 levels.
+  </Card>
+  <Card title="Context and views" href="/en/concepts/context">
+    the channel, task and subject views.
+  </Card>
+  <Card title="Create a link" href="/en/api/identity-links">
+    the request and response in detail.
+  </Card>
+  <Card title="Patterns" href="/en/concepts/patterns">
+    the signals that repeat, with evidence.
+  </Card>
+</CardGroup>

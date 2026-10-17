@@ -1,0 +1,96 @@
+---
+title: "Object memory"
+description: "What people and agents said about a case, an order or an invoice, bound to the object, delivered to everyone who takes part in it and filtered by audience, next to what the system of record says."
+---
+
+A lawyer tells the firm's internal assistant: "in this case, do not propose a settlement". The next day, the client asks the WhatsApp agent, from another vendor, whether there will be a settlement. Object memory brings that sentence to the WhatsApp agent, bound to the case, without the remark the lawyer made only to the team ("the argument is weak").
+
+Object memory is everything a person or an agent said or did about an object in conversations and tasks. Each row stays under the identifier of who said it, bound to the object by reference, and is delivered next to the object's authoritative state, with its origin visible. It never writes the object's state: an object is born and changes only through your system of record.
+
+## What is bound to an object
+
+| Form | Example | Where it lives |
+|---|---|---|
+| Observation | "the keys were handed over on 09/15" | A fact with the object. It goes to the predicate your space declares; with no predicate that fits, to the generic `observation` predicate (short text, category `object`) |
+| Instruction | "in this case, do not propose a settlement" | A stated preference with scope `object`, strength `must` or `must_not` and, optionally, the field of the type it is about (`lawsuit.settlement`) |
+| Promise, dispute, request | "I will send the statements by Friday", "the charge was disputed" | An open item with the object and a `kind`: `promise` (the default), `dispute` or `request`. It closes like any open item, by what was done |
+| Conversation | a conversation about the case | The episode keeps the objects it was about: "conversations about this case" is a history filter |
+
+An instruction exists only when someone said it. Extraction never infers one and never takes one from a question or from an agent's turn. An instruction that names no object, said in a conversation about an organization the speaker is linked to ("with this client, never discuss amounts with his wife", said by a lawyer in a conversation that names the client), is bound to that organization: it reaches every read of it, its own and a contact's read with `about`, on the account block and, as a hard entry, in the constraints block. An instruction with neither an object nor an organization is dropped and counted.
+
+Instructions need the `signals` feature on in the space.
+
+## How a conversation finds its object
+
+By rule only, in this order:
+
+1. The `object_refs` your system tags on the event. The cheapest and exact path: the assistant knows which case is on screen.
+2. An identifier of the object written in the text, with no configuration: the exact value of one of the object's text fields (the natural key or another field that is neither personal data nor restricted), such as a court case number or an order number. Only a value of 5 to 64 characters with at least 3 digits (1 is enough for the type's natural key, such as `PED-AB7CD`), that is not a date or an instant nor an amount with cents counts, written whole, between separators. The value only finds an object the customer already has, and a value two of the customer's objects share finds neither. `key.match` is optional: it declares the shape of a key, and its field is looked at first.
+3. The only open object of the type named ("the order", "the case"), when the customer has exactly one.
+4. The only object of the type dated on the day named ("yesterday's order").
+
+Otherwise the row stays on the person, as it always did. A natural key written in a conversation that matches no object of the customer is counted and shows on the Console's gaps page, by type, as an object named without a record.
+
+```json
+{
+  "type": "lawsuit",
+  "ownership": "subject",
+  "mirror_of": {"system": "court"},
+  "key": {"natural": ["case_number"]},
+  "fields": {"case_number": {"type": "string"}, "due_date": {"type": "date"}}
+}
+```
+
+## Who takes part and who reads
+
+An object's participants are its owner and every identifier an event about it named: the system of record, an agent that acted on it, and whoever spoke about it in a conversation tagged with the object. For every read, the memory of each open object of the customer being read is gathered from the owner and the participants: every open object of the customer and every object that reached a final state in the last 7 days, with no window of the newest. Per object, up to 50 participants, the owner and those with a role first; the rest are counted (`handles_unread`). Past 500 objects per customer, a guard against a runaway, the rest is counted (`objects_unread`), never dropped in silence.
+
+Every row bound to an object has an **audience**, set by rule when it is written, never by a model:
+
+| Where it came from | Audience |
+|---|---|
+| A source that talks with the customer (`customer_agent`, `human`), in a public turn | `shared` |
+| A promise, dispute, request or instruction, from any source | `shared`: they are commitments and directives about the object |
+| An observation from an internal source or an internal turn | `internal` |
+
+A `customer_agent` reader receives only what is `shared`; internal readers (`internal_agent`, `human`, `reviewer`, `analyst`) receive both. The type's field access and the space's policy only tighten: a row the policy does not open to the reader never reaches it, and nothing sensitive crosses from one participant to another.
+
+## How it reaches the agent
+
+- **On the object's line.** The pinned context and the `state` block say, for each object, its instructions with who said them (`(team)` when it was the company's staff) and, right under the line, every open item (overdue first, then by due date), the newest done items, up to 20, and the three newest observations; when there are more done items or observations, the line says how many ("mais 4 registros (consulte o histórico)"). No instruction and no open item is left off: in the pinned context each instruction is a line of its own that names its object and [opens the block](/en/concepts/context), before any data (`lawsuit [Number 1012345] · instruction: do not propose a settlement (team)`), and the items follow the object's line (`open items: promise by 10/10/2026: send the statements to the client`, `already done: file the defence (done on 07/10/2026)`). In the `state` block's JSON, each object carries `memory` with every instruction and open item and up to 20 observations. The `state` block shows 20 objects (those with an instruction or an open item first, then the open ones, then the newest) and says how many were left out ("mais N objetos deste cliente fora desta lista (consulte o histórico)", in the space's language).
+- **In the constraints block, when the read is about the object.** On a read by `object`, or a task view that names the object's type, the instructions enter the `constraints` block as hard entries, in `instructions`. An instruction about a field of the type is also in `hard`, with `scope: object`, where a tool binding applies it. Out of focus, an instruction stays on its object's line, never as a loose line.
+- **At no cost to the read.** All of it is gathered when the context is compiled. The hot read still runs no database statement.
+
+```json
+{
+  "object": {"type": "lawsuit", "namespace": "court", "id": "c-1"},
+  "view": "task:drafting",
+  "task_id": "draft-118",
+  "include": ["constraints", "state"]
+}
+```
+
+## What was said next to what is recorded
+
+A predicate may declare `observes`: the field of the type it is about. An observation of that predicate never writes the field. The line shows both values, each with its origin: `due_date 10/05 (system); said 10/02 (lawyer, 09/20)`. Only the recorded value may be claimed (`claim_safe` is always false on what was said). When the two differ, a data issue of class `divergence` opens for the system's owner.
+
+```json
+{"name": "said_due_date", "category": "object", "observes": "due_date"}
+```
+
+## Validity, correction and erasure
+
+- Observations follow the validity and decay of facts; `retract` and `correct` work on them.
+- An instruction holds until its `expires_at` and while its object is open: once the object reaches a final state, it leaves the reads seven days later and stays in the row for export and audit. A later statement replaces it; the profile's inferences route lists it with `kind: instruction` and withdraws it with `DELETE`.
+- Rows stay under who said them. Erasing a team member erases what they said; the receipt counts `object_bound_rows_erased` and lists in `objects` the objects touched, so the company records again in its own system what it needs.
+
+## Measurement
+
+Context use counts, per agent and per day, the rows bound to an object that were delivered (`object_rows`), those of objects the agent used (`object_rows_used`) and the messages that did what an instruction said not to do (`instruction_violations`): the agent that proposed a settlement on a case whose instruction says not to.
+
+## Next steps
+
+- [Object types and state](/en/concepts/object-types)
+- [Subject signals and the constraints block](/en/concepts/signals)
+- [Accounts and contacts](/en/concepts/accounts)
+- [Privacy](/en/concepts/privacy)

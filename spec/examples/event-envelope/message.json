@@ -1,0 +1,15 @@
+{
+  "type": "event",
+  "kind": "message",
+  "idempotency_key": "wamid.HBgNNTUxMTk4NzY1NDMyMRUCABIYFjNFQjBDNkQ4",
+  "channel": "whatsapp",
+  "conversation_id": "wa-8812",
+  "handles": [
+    {"type": "phone_e164", "value": "+5511987654321"},
+    {"type": "wa_bsuid", "value": "BR.2c8f61a0", "scope": "waba-104"}
+  ],
+  "speaker": {"role": "customer"},
+  "direction": "inbound",
+  "content": {"type": "text", "text": "I was charged twice for August."},
+  "occurred_at": "2026-09-22T14:02:11-03:00"
+}

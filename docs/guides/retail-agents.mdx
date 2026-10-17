@@ -1,0 +1,249 @@
+---
+title: "Agentes de varejo"
+description: "Uma loja de moda com um assistente de compras: itens compartilhados com preço e estoque frescos, o que a cliente quer e recusa, uma despedida por conversa, um orçamento de marketing e a venda atribuída ao cartão que o agente mostrou."
+---
+
+Este guia monta, com exemplos sintéticos, o que uma loja de moda liga na Niadra para um assistente de compras que trabalha no WhatsApp e no app: o estado dos itens, o que a cliente quer e recusa, o que o agente pode afirmar sobre preço e estoque, a coordenação com o agente de pós-venda e a medição do que o assistente vendeu. Cada parte é uma funcionalidade do espaço, ligada por si; nada aqui depende de tudo estar ligado.
+
+## O que o setor pede
+
+- Um item tem preço e estoque que mudam por minuto, e um agente que afirma "temos no seu tamanho" precisa de um valor de segundos atrás.
+- A cliente diz o que não quer ("nada em preto"), e uma busca que ignora isso desperdiça a conversa.
+- O mesmo carrinho passa por dois agentes e pelo checkout da loja, e o pedido chega horas depois: a venda precisa ser ligada ao cartão exato que o assistente mostrou.
+- Um agente de pós-venda e um de campanha contatam a mesma pessoa; um deles precisa esperar.
+
+## 1. Os tipos: item, pedido e o estado do assistente
+
+O item de loja é um tipo **compartilhado**: existe na Niadra enquanto alguém o vê, interage com ele ou o observa. O preço e a disponibilidade vêm ao vivo da plataforma de e-commerce; um snapshot da busca pode ser mostrado, nunca afirmado. Derive o tipo da tabela de variantes com [`niadra types derive`](/guides/derive-types) e complete o que só a loja sabe:
+
+```json
+{
+  "type": "item_variant",
+  "ownership": "shared",
+  "mirror_of": { "system": "ecommerce", "derived_by": "introspection", "fingerprint": "sha256:...", "drift": "alert" },
+  "key": { "natural": ["variant_id"] },
+  "working_set": { "enter_on": ["presented", "engaged", "watched"], "leave_after": "30d" },
+  "fields": {
+    "available": { "type": "bool", "logic": "tri", "freshness": { "class": "volatile", "max_age": "30s", "claim_max_age": "5s" }, "claim": { "allowed": true, "class": "quantity", "nature": "observed" }, "track_changes": true },
+    "price_sale": { "type": "money", "role": "price_sale", "freshness": { "class": "price", "max_age": "60s", "claim_max_age": "15s" }, "claim": { "allowed": true, "class": "money", "nature": "observed" }, "track_changes": true },
+    "price_list": { "type": "money", "role": "price_list", "freshness": { "class": "price" }, "claim": { "allowed": true, "class": "money" } },
+    "size_label": { "type": "string", "freshness": { "class": "stable" }, "attribute": { "family": "size" } },
+    "color": { "type": "enum", "freshness": { "class": "stable" }, "attribute": { "family": "color", "vocabulary": "color" } }
+  },
+  "sources": {
+    "platform_live": { "kind": "pull", "precedence": 1, "authoritative_for": ["available", "price_sale", "price_list"] },
+    "search_snapshot": { "kind": "tool_observation", "precedence": 2 }
+  },
+  "union": { "available": "first_authoritative_live", "price_sale": "first_by_precedence" },
+  "refetch": {
+    "reasons": [
+      { "name": "exposed_now", "when": "presented_in_top(3)", "budget": { "units": 1, "per": "item/60s" } },
+      { "name": "claim_pending", "when": "purpose == 'claim'", "budget": { "units": 1, "per": "turn" } }
+    ],
+    "budget": { "unit": "platform_call", "never_money": true }
+  },
+  "purposes": {
+    "display": { "on_stale": "serve_with_age" },
+    "claim": { "on_stale": "serve_with_prohibitions", "prohibitions": ["affirm_availability", "affirm_price"] },
+    "decide": { "on_stale": "serve_with_age" }
+  }
+}
+```
+
+O pedido é um tipo do **cliente** (`ownership: subject`), com as linhas, os estados de sucesso (`delivered`, `kept`) e o carimbo do token de exposição em cada linha, que a medição de desfechos lê. O estado de trabalho do assistente é um tipo com `ownership: agent`: o passo do atendimento, a oferta mostrada e uma nota do carrinho marcada `pii`, guardado inteiro e com a retenção de 30 dias que o tipo define ([Memória de trabalho](/concepts/agent-state)). Com os tipos no documento `object-types` e a funcionalidade `state` ligada, a plataforma envia o estado por [`POST /v1/objects/push`](/api/objects-push) e um [worker de resolução](/guides/resolver-worker) lê de novo o que a Niadra pede.
+
+A busca do assistente fica vinculada aos campos do item no documento `tool-bindings`, também do papel `integration`: é por ela que o SDK renderiza o bloco de restrições para a busca, mede o que cada chamada honrou e roda o contrafactual. A vinculação nunca vai no código do agente; o [perfil do SDK](/api/sdk-profile) a serve.
+
+```json
+{
+  "bindings": [
+    {
+      "tool": "search_products",
+      "args": [
+        { "attr": "item_variant.color", "param": "colors", "negation": { "param": "exclude_colors" }, "ops": ["in", "not_in"] },
+        { "attr": "item_variant.size_label", "param": "size", "ops": ["eq"] }
+      ],
+      "capabilities": { "overfetch": true }
+    }
+  ]
+}
+```
+
+## 2. O turno do assistente
+
+Cada resposta do assistente é um turno gravado: a leitura do contexto com o bloco de restrições e o estado, a busca de itens, o que a lista mostrou, a resposta.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+from niadra.exposure import exposure_token
+from niadra.turns import tool
+
+niadra = Niadra(channel="whatsapp")
+BUILD = Niadra.build(prompts={"assistant": "v7"}, model="gpt-4.1-mini")
+
+
+@tool("search_products", provenance=lambda r: [
+    {"ref": f"item_variant:store:{v['id']}", "fields": {"available": v["available"], "price_sale": v["price_sale"]},
+     "provenance": {"source": "live", "source_observed_at": v["observed_at"], "scope": "global"}} for v in r["items"]
+])
+def search_products(query: str, colors: list[str] | None = None, exclude_colors: list[str] | None = None, size: str | None = None) -> dict:
+    return platform.search(query, colors=colors, exclude_colors=exclude_colors, size=size)
+
+
+with niadra.conversation("wa-4471", subject=phone("+5511900005678"), agent_id="assistant") as conversation:
+    conversation.customer("Quero um vestido para casamento, nada em preto, tamanho 40")
+    with conversation.turn(build=BUILD) as frame:
+        context = conversation.context(include=["constraints", "state"])
+        results = search_products("vestido casamento", exclude_colors=["black"], size="40")
+        exposure_id = uuid7()
+        frame.interact({"kind": "presented", "exposure_id": exposure_id, "list_id": "wa-4471-1", "list_kind": "search_products",
+                        "delivered_at": now_iso(), "visible_k": 3,
+                        "items": [{"pos": i + 1, "ref": f"item_variant:store:{v['id']}", "shown": {"price_sale": v["price_sale"]}} for i, v in enumerate(results["items"])]})
+        cards = [{"token": exposure_token(exposure_id, i + 1), **v} for i, v in enumerate(results["items"])]
+        reply = conversation.claims.guard_text(model(prompt_with(context, cards)), context="chat")
+        conversation.agent(reply)
+        send_cards(cards)  # the app copies each card's token into the cart line
+```
+```typescript TypeScript
+import { Niadra, exposureToken, handles, uuidv7 } from "@niadra/sdk";
+
+const niadra = new Niadra();
+const BUILD = Niadra.build({ prompts: { assistant: "v7" }, model: "gpt-4.1-mini" });
+const searchProducts = Niadra.tool("search_products", (q: SearchArgs) => platform.search(q), {
+  provenance: (r) => r.items.map((v) => ({
+    ref: `item_variant:store:${v.id}`, fields: { available: v.available, price_sale: v.price_sale },
+    provenance: { source: "live", source_observed_at: v.observed_at, scope: "global" },
+  })),
+});
+
+const convo = niadra.conversation({ subject: handles.phone("+5511900005678"), channel: "whatsapp", conversation_id: "wa-4471" });
+convo.customer("Quero um vestido para casamento, nada em preto, tamanho 40", { idempotency_key: inbound.id });
+await convo.turn({ build: BUILD }, async () => {
+  const ctx = await convo.context({ include: ["constraints", "state"] });
+  const results = await searchProducts({ query: "vestido casamento", exclude_colors: ["black"], size: "40" });
+  const exposureId = uuidv7();
+  const cards = results.items.map((v, i) => ({ token: exposureToken(exposureId, i + 1), ...v }));
+  const guarded = await convo.claims.guardText(await model(promptWith(ctx, cards)), { context: "chat" });
+  convo.agent(guarded.text);
+  await sendCards(cards); // the app copies each card's token into the cart line
+});
+```
+</CodeGroup>
+
+"Nada em preto" e "tamanho 40" viram, pelos [sinais](/concepts/signals), uma restrição rígida e um atributo declarados; no turno seguinte, o bloco de restrições já os traz, renderizados para `search_products` pela vinculação (`exclude_colors: ["black"]`, `size: "40"`), e a Niadra mede, chamada a chamada, se a busca honrou o que recebeu. Em TypeScript, as interações de exposição vão como itens do lote (a aba cURL da página de [sinais](/concepts/signals#interações)).
+
+## 3. O contrato de afirmação
+
+O assistente afirma preços, promoções e disponibilidade. O contrato de varejo confere cada número contra o que a busca devolveu, no processo do agente, sem modelo:
+
+```json
+{
+  "version": "2026-09-29.1",
+  "languages": ["pt", "en"],
+  "categories": [
+    {
+      "id": "price",
+      "detect": { "classes": ["money"], "roles": { "price_list": ["de", "antes", "was"], "price_sale": ["por", "sai por", "com desconto", "now"], "shipping": ["frete", "shipping"] } },
+      "evidence": { "value": { "same_role": true, "fresh_for": "claim" } },
+      "natures": { "computed": "check", "quoted": "verbatim", "model": "warn" },
+      "actions": { "default": "warn", "contexts": { "chat": "rewrite_if_unequivocal" } }
+    },
+    {
+      "id": "availability_denial",
+      "detect": { "terms": ["não temos em estoque", "está esgotado", "não tem no seu tamanho", "out of stock", "sold out"] },
+      "evidence": { "tool_any": ["search_products", "check_stock"] },
+      "actions": { "default": "warn" }
+    },
+    {
+      "id": "action_promise",
+      "detect": { "terms": ["separei", "reservei", "já enviei o link", "I reserved"] },
+      "evidence": { "tool_any": ["reserve_item", "send_link"] },
+      "actions": { "default": "warn" }
+    }
+  ],
+  "negative_corpus": { "version": "2026-09-29", "phrases": ["Quer que eu separe por cor ou por tamanho?", "Esse vestido veste bem quem usa 38 ou 40.", "Separamos as peças por coleção no site."] },
+  "outputs": { "immutable": ["order_confirmation"], "mutable": ["chat"] }
+}
+```
+
+"De R$ 299,90 por R$ 199,90": os dois números têm papel (`price_list` e `price_sale`, pelos termos "de" e "por"), e cada um é conferido contra o valor do mesmo papel que a busca mostrou, dentro dos 15 segundos de `claim_max_age`. Um preço que ficou velho no chat é reescrito só quando é inequívoco (uma cópia literal do campo, com o valor fresco no turno); "está esgotado" sem uma busca no turno é `no_evidence`, marcado. "Separei o 40 para você" sem uma chamada de `reserve_item` é uma promessa sem ação. "Quer que eu separe por cor?" nunca dispara: está no corpus negativo, que o `niadra contract test` do CI mantém. Veja [Afirmações](/concepts/claims).
+
+## 4. Coordenação: uma despedida, um orçamento
+
+Dois agentes falam com a mesma cliente: o assistente, na conversa, e o de campanha, que manda uma oferta dias depois. O documento `coordination` da loja declara a finalidade `marketing` com orçamento de 2 contatos por 7 dias e token exigido, o canal `whatsapp` com janela de 24 horas e modelo pago fora dela, e o gateway de WhatsApp da loja. A despedida da conversa é um efeito com chave, então sai uma vez, seja qual for o agente que a tenta:
+
+<CodeGroup>
+```python Python
+key = f"farewell:{conversation.conversation_id}"
+decision = conversation.check("farewell", purpose="service", effect_key=key)
+if decision.decision == "allow" and decision.effect and decision.effect.state == "none":
+    conversation.agent("Qualquer coisa, é só chamar. Boas compras!")
+    conversation.declare.effect(key, "done")
+
+# Days later, the campaign agent
+if niadra.may_contact(customer, "marketing", channel="whatsapp"):
+    decision = conversation.check("new_collection", purpose="marketing", channel="whatsapp")
+    if decision.decision == "allow":
+        gateway.send(offer, token=decision.contact_token)
+        conversation.declare.contact_made(decision, purpose="marketing", channel="whatsapp")
+```
+```typescript TypeScript
+const key = `farewell:${convo.id}`;
+const decision = await convo.check("farewell", { purpose: "service", effectKey: key });
+if (decision.decision === "allow" && decision.effect?.state === "none") {
+  convo.agent("Qualquer coisa, é só chamar. Boas compras!");
+  convo.declare.effect(key, "done");
+}
+
+// Days later, the campaign agent
+if (await niadra.mayContact(customer, "marketing", { channel: "whatsapp" })) {
+  const offer = await convo.check("new_collection", { purpose: "marketing", channel: "whatsapp" });
+  if (offer.decision === "allow") {
+    await gateway.send(message, { token: offer.contact_token });
+    convo.declare.contactMade(offer, { purpose: "marketing", channel: "whatsapp" });
+  }
+}
+```
+</CodeGroup>
+
+O gateway de WhatsApp da loja confere o token sem falar com a Niadra e deixa a oferta sair uma vez ([Gateways](/guides/gateways)). A terceira oferta na semana recebe `deny` com `budget_exhausted` e a hora em que a próxima libera; uma cliente que pediu para não receber ofertas está na [lista de supressão](/concepts/coordination#a-lista-de-supressão), que o agente de campanha honra até com a Niadra fora do alcance.
+
+## 5. A venda, pedido por pedido
+
+O pedido chega da plataforma como evento de sistema, com o token de exposição que o app copiou em cada linha do carrinho. O documento `measurement` declara o desfecho:
+
+```json
+{
+  "revenue": { "basis": "net_of_discount", "coupons": "prorated_by_line", "shipping": "excluded", "currency": "BRL" },
+  "outcomes": [{
+    "name": "purchase", "object_type": "order", "success_states": ["delivered", "kept"], "revenue_field": "total",
+    "lines": { "field": "lines", "line_id": "line_id", "item": "ref", "value": "value", "stamp": "exposure_token", "failed_states": ["returned", "cancelled"], "size": "size_label", "return_reason": "return_reason" },
+    "final_after": "30d"
+  }],
+  "attribution": { "methods": ["line", "order", "identity"], "click_window_days": 7, "view_window_days": 1 }
+}
+```
+
+Uma linha com token válido é atribuída ao cartão exato, de forma determinística (`line`); uma sem token, ao mesmo item com que a cliente interagiu na janela de 7 dias (`identity`, provável, com a confiança do método ao lado do valor). Uma linha devolvida por tamanho vira um atributo inferido, que só se aplica quando a cliente pede "o meu tamanho". [`GET /v1/measure/attribution`](/api/measure-attribution) soma por dia, agente e método, e [`POST /v1/measure/reconcile`](/api/measure-reconcile) confere o total contra o CSV do BI da loja. Antes de rodar um experimento sobre o bloco de restrições, `niadra counterfactual --tool search_products --element hard` diz, dos turnos gravados, se a busca muda de fato o que devolve quando o bloco entra. Veja [Desfechos e atribuição](/concepts/outcomes).
+
+## O que fica desligado
+
+Tudo acima vem ligado, e nada pede configuração para começar: os tipos e as operações a Niadra lê do que os sistemas mandam. O que o time ajusta, quando quer, é o que só ele sabe: o contrato de afirmações, o gateway da coordenação ou a definição de receita da medição. Uma loja que não quer uma funcionalidade a desliga no documento `features`.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Tipos de objeto e estado" href="/concepts/object-types">
+    o item compartilhado, o conjunto de trabalho e as releituras.
+  </Card>
+  <Card title="Sinais e restrições" href="/concepts/signals">
+    "nada em preto" nas ferramentas do agente.
+  </Card>
+  <Card title="Agentes de WhatsApp" href="/guides/whatsapp-agents">
+    a conversa em si: turnos, verificação e transferência.
+  </Card>
+  <Card title="Desfechos e atribuição" href="/concepts/outcomes">
+    do cartão ao pedido, e o contrafactual.
+  </Card>
+</CardGroup>

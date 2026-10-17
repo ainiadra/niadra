@@ -1,0 +1,1 @@
+{"idempotency_key": "k9", "channel": "chat", "handles": [{"type": "email", "value": "m@example.com"}], "speaker": {"role": "customer"}, "content": {"text": "Is it the 24th?"}, "occurred_at": "2026-09-22T14:02:11Z", "backing": {"checked": 1}}

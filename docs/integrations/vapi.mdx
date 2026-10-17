@@ -1,0 +1,116 @@
+---
+title: "Vapi"
+description: "Um só URL de servidor para o assistente da Vapi: contexto no assistant-request, ferramentas, transbordo e o relatório de fim de chamada."
+---
+
+A Vapi manda todas as mensagens de servidor para um URL, e um tratador só responde as que importam: `assistant-request` (o contexto), `tool-calls` (o kit do histórico), `transfer-destination-request` e `handoff-destination-request` (o transbordo) e `end-of-call-report` (os turnos e o fim da conversa).
+
+## Instalar
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[vapi]'   # no framework dependency
+```
+```sh TypeScript
+npm install @niadra/sdk   # @niadra/sdk/vapi needs no Vapi package
+```
+</CodeGroup>
+
+A integração em TypeScript está no `@niadra/sdk` no npm.
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | No `assistant-request`, começa a primeira leitura de quem liga (`begin()`, depois do atestado quando você o passa), a espera dentro de `context_voice_start` (1,5 s; o assistente ainda não está respondendo) e responde o assistente. Com um assistente transitório (`assistant=`), o contexto entra em `model.messages` logo depois das mensagens de sistema dele; com um assistente salvo (`assistant_id=`), vai em `assistantOverrides.variableValues.niadra_context`, para um prompt que diz `{{niadra_context}}` depois das instruções |
+| Turnos | O `end-of-call-report` registra cada mensagem do usuário e do assistente como turno no momento dela e encerra a conversa. As chaves de idempotência vêm da ligação, então um relatório reentregue não grava nada duas vezes |
+| Ferramentas | `tool_definitions(url)` (Python) e `vapiTools()` (TypeScript) geram as ferramentas do histórico como ferramentas de função da Vapi, palavra por palavra como o kit; `tool-calls` roda cada uma para o cliente da ligação, nunca para um argumento do modelo |
+| Verificação | O `assistant-request` chama `verify()` quando você passa o atestado da operadora |
+| Transbordo | `transfer-destination-request` e `handoff-destination-request` registram a transferência (para uma pessoa, ou para outro assistente de um squad) e respondem o destino que a sua função `destination=` (Python) ou `transfer` (TypeScript) devolve; uma ligação encaminhada no relatório final também vira `handoff` |
+
+O id da conversa na Niadra é o id da ligação na Vapi e o sujeito é o número do cliente; passe `subject=` para clientes identificados de outro jeito.
+
+## Exemplo mínimo
+
+<CodeGroup>
+```python Python
+"""The server URL of a Vapi assistant. Run: uvicorn vapi_server:app"""
+
+import os
+
+from fastapi import FastAPI, Request, Response
+
+from niadra import AsyncNiadra
+from niadra.integrations.vapi import VapiServer, tool_definitions
+
+niadra = AsyncNiadra(channel="voice")
+vapi = VapiServer(
+    niadra, secret=os.environ["VAPI_SERVER_SECRET"], assistant_id=os.environ["VAPI_ASSISTANT_ID"]
+)
+app = FastAPI()
+TOOLS = tool_definitions("https://agent.example.com/vapi")  # add them to the assistant's model.tools
+
+
+@app.post("/vapi")
+async def server(request: Request) -> Response:
+    result = await vapi.handle(await request.body(), request.headers)
+    return Response(result.text(), result.status, media_type=result.content_type)
+```
+```typescript TypeScript
+// Vapi's server URL on Hono. Set the assistant's (or phone number's) server URL to
+// https://api.acme.com/vapi with the secret below, and use {{niadra_context}} in the system prompt.
+import { Hono } from "hono";
+import { Niadra } from "@niadra/sdk";
+import { vapi, vapiTools } from "@niadra/sdk/vapi";
+
+const niadra = new Niadra();
+const secret = process.env.VAPI_SERVER_SECRET ?? "";
+
+const handle = vapi({
+  niadra,
+  secret,
+  // A saved assistant; the context arrives in its variables.
+  assistant: "YOUR_ASSISTANT_ID",
+  // A number to transfer to when the assistant asks for a person.
+  transfer: () => ({ destination: { type: "number", number: "+551130000000", message: "Transferring you now." } }),
+});
+
+export const app = new Hono();
+
+app.post("/vapi", async (c) => {
+  const { status, body } = await handle(await c.req.json(), c.req.raw.headers);
+  return c.json(body, status as 200);
+});
+
+// The tools to add to the assistant in Vapi, with the SDK's descriptions.
+if (process.argv.includes("--print-tools")) {
+  console.log(JSON.stringify(vapiTools({ url: "https://api.acme.com/vapi", secret }), null, 2));
+}
+
+export default app;
+```
+</CodeGroup>
+
+O mesmo código está em `examples/vapi_server.py` e `examples/vapi-hono.ts`.
+
+## Memória do agente
+
+Com `agent_memory=True`, as notas do próprio agente vêm primeiro na mesma mensagem de sistema do assistente transitório, ou na variável `niadra_agent_memory` de um assistente salvo. Veja [Memória do agente](/concepts/agent-memory).
+
+## Limites
+
+- Pedidos sem o segredo do servidor (`x-vapi-secret`, ou `Authorization: Bearer` em TypeScript) respondem 401: eles leriam dado do cliente.
+- A Niadra lenta ou fora não derruba a ligação: o assistente começa sem o contexto e uma ferramenta responde que o histórico está indisponível.
+- O atestado da operadora não vem na mensagem da Vapi; sem ele, a leitura é V0.
+- Testado com cargas gravadas no formato público e o segredo de teste; nenhuma conta da Vapi é necessária.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Agentes de voz" href="/guides/voice-agents">
+    o que a ligação prova e o que a política libera.
+  </Card>
+  <Card title="ElevenLabs" href="/integrations/elevenlabs">
+    o mesmo desenho, em três webhooks.
+  </Card>
+</CardGroup>

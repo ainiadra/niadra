@@ -1,0 +1,107 @@
+---
+title: "Integrações"
+description: "Adaptadores prontos para os frameworks de voz e de agentes, os SDKs de modelo, os canais e as plataformas de automação, em Python e em TypeScript."
+---
+
+A memória da Niadra se monta a partir dos eventos de todo canal, plataforma e sistema da empresa, e qualquer agente, de qualquer fornecedor, a lê. Os adaptadores são a porta de cada plataforma de voz, canal, framework de agentes e SDK de modelo para essa memória: por eles o agente manda o que aconteceu e recebe o contexto antes de agir, sem trocar de modelo, de prompt nem de fornecedor.
+
+Toda integração liga as mesmas cinco coisas nos pontos de extensão do próprio framework, sempre no mesmo desenho, para quem aprendeu uma saber todas:
+
+| Primitiva | O que o adaptador faz |
+|---|---|
+| Contexto | Lê `context()` dentro do orçamento (300 ms; na voz, o corpo fixado vem da memória do SDK na hora e o turno espera 200 ms no máximo pelos encaixes das palavras dele; a primeira leitura da ligação começa com `begin()` e é esperada até 1,5 s) e coloca o contexto logo depois das instruções do agente e o `turn_block` (as falas de outros canais e o delta) no fim. As instruções ficam primeiro, então continuam o prefixo que o provedor guarda em cache |
+| Turnos | Cada fala do cliente vira `customer()`, cada resposta do modelo vira `agent()` com o uso que o provedor informou, e o fim da conversa vira `end()`; a fila do SDK entrega em segundo plano |
+| Ferramentas | As três do histórico (`search_customer_history`, `get_customer_timeline`, `open_history_item`) no formato de ferramenta do framework, com o cliente amarrado fora do alcance do modelo |
+| Verificação | O que a plataforma prova (o atestado STIR/SHAKEN da operadora, o login, o OTP) vai a `verify()` antes do primeiro contexto |
+| Transbordo | Quando o framework transfere para outro agente ou para uma pessoa, `handoff()`, e o próximo agente abre a mesma conversa |
+
+Nenhuma delas derruba o agente: a Niadra lenta ou fora quer dizer sem contexto, nunca erro. Com a [memória do agente](/concepts/agent-memory) ligada no espaço, `agent_memory=True` (Python) ou `agentMemory: true` (TypeScript) põe as notas do próprio agente antes do contexto do cliente e acrescenta `search_agent_memory` (e `remember`) às ferramentas.
+
+Em Python, cada integração é um extra opcional: `pip install 'niadra[livekit]'`. A instalação base continua com duas dependências (`httpx` e `pydantic`), e o framework só é importado dentro do adaptador. Em TypeScript, cada integração é um subcaminho do pacote (`import { ... } from "@niadra/sdk/livekit"`), com o framework como peer dependency opcional. As integrações em TypeScript estão no `@niadra/sdk` no npm, com os subcaminhos.
+
+## A lista
+
+| Integração | Python (extra) | TypeScript (subcaminho) | Como se liga |
+|---|---|---|---|
+| [LiveKit Agents](/integrations/livekit) | `livekit` | `livekit` | `NiadraAgent` e o mixin `NiadraMemory`: `llm_node` e `on_user_turn_completed`, eventos da sessão |
+| [Pipecat](/integrations/pipecat) | `pipecat` | | `NiadraMemoryProcessor` entre o agregador do usuário e o LLM |
+| [ElevenLabs Agents Platform](/integrations/elevenlabs) | `elevenlabs` | `elevenlabs` | Webhooks de início, ferramentas de servidor e pós-chamada |
+| [Vapi](/integrations/vapi) | `vapi` | `vapi` | Um URL de servidor: `assistant-request`, `tool-calls`, transbordo e `end-of-call-report` |
+| [Retell AI](/integrations/retell) | `retell` | `retell` | Webhook de entrada assinado (variáveis dinâmicas), custom functions, eventos da ligação; em TypeScript, o websocket do LLM próprio |
+| [WhatsApp Cloud API](/integrations/whatsapp) | `whatsapp` | `whatsapp` | Webhook assinado da Meta em turnos; a resposta pelo id que a Meta devolve |
+| [Twilio](/integrations/twilio) | `twilio` | `twilio` | Voz com `StirVerstat` como prova, SMS e WhatsApp pela Twilio |
+| [OpenAI Agents SDK](/integrations/openai-agents) | `openai-agents` | `openai-agents` | `call_model_input_filter`, `RunHooks` e function tools; em JavaScript, `Session` e instruções dinâmicas |
+| [LangChain](/integrations/langchain) | `langchain` | `langchain` | Um runnable de contexto, um callback handler e `StructuredTool`s; LangGraph.js por `withNiadraContext()` |
+| [LangGraph](/integrations/langgraph) | `langgraph` | | `NiadraMiddleware` para `create_agent`, `pre_model_hook` |
+| [Vercel AI SDK](/integrations/ai-sdk) | | `ai-sdk` | Middleware para `wrapLanguageModel` e o kit como ferramentas |
+| [Mastra](/integrations/mastra) | | `mastra` | Um processador para a chamada ao modelo e o kit como ferramentas |
+| [Google ADK](/integrations/google-adk) | `google-adk` | `google-adk` | Callbacks `before_model` e `after_model`, `BaseTool`s; em TypeScript, `niadraAdk()` |
+| [Strands Agents](/integrations/strands) | `strands` | `strands` | Um `HookProvider` e ferramentas; em TypeScript, `NiadraPlugin` (Node 22+) |
+| [Pydantic AI](/integrations/pydantic-ai) | `pydantic-ai` | | Uma capability: instruções dinâmicas e toolset |
+| [LlamaIndex](/integrations/llamaindex) | `llamaindex` | `llamaindex` | `NiadraMemory` e ferramentas; em TypeScript, uma `Memory`, um bloco de memória e `FunctionTool`s |
+| [CrewAI](/integrations/crewai) | `crewai` (Python 3.11+) | | Callbacks de kickoff (`{niadra_context}`) e ferramentas |
+| [Agno](/integrations/agno) | `agno` | | Instruções dinâmicas, `Function`s e hooks de run |
+| [Microsoft Agent Framework](/integrations/agent-framework) | `agent-framework` | | `NiadraContextProvider` |
+| [Semantic Kernel](/integrations/semantic-kernel) | `semantic-kernel` | | `NiadraKernel`: thread do agente, filtros de prompt e o plugin `niadra` |
+| [Haystack](/integrations/haystack) | `haystack` (3.2+) | | Componentes `NiadraContext` e `NiadraReply`, `NiadraAgentHooks` e `Tool`s |
+| [CAMEL-AI](/integrations/camel) | `camel` | | `NiadraMemory` (uma `AgentMemory`) e `NiadraToolkit` |
+| [DSPy](/integrations/dspy) | `dspy` | | `niadra_adapter()`, `NiadraModule` e `dspy.Tool`s |
+| [AG2](/integrations/ag2) | `ag2` | | `NiadraAG2`: middleware e ferramentas |
+| [Genkit](/integrations/genkit) | | `genkit` | Um model middleware para `generate({ use })` e ferramentas do Genkit |
+| [VoltAgent](/integrations/voltagent) | | `voltagent` | Hooks `onPrepareModelMessages`, `onEnd` e `onHandoff`, e ferramentas |
+| [Cloudflare Agents](/integrations/cloudflare-agents) | | `cloudflare-agents` | `niadraAgent()`: o middleware do AI SDK com `ctx.waitUntil()`, ferramentas, `prepare()` e `record()` |
+| [OpenAI e Azure OpenAI](/integrations/openai) | `openai` | no pacote principal | `wrap()` de `chat.completions` |
+| [Anthropic](/integrations/anthropic) | `anthropic` | `anthropic` | `wrap()` de `messages.create` e `messages.stream` |
+| [Amazon Bedrock](/integrations/bedrock) | `bedrock` | `bedrock` | `wrap()` de `converse` e `converse_stream` |
+| [Google GenAI](/integrations/google-genai) | `google-genai` | `google-genai` | `wrap()` de `generate_content` e do stream dele |
+| [LiteLLM](/integrations/litellm) | `litellm` | | `completion()`, `acompletion()` e `NiadraLogger` |
+| [n8n](/integrations/n8n) | | pacote `n8n-nodes-niadra` | Um nó de comunidade com seis operações |
+| [Flowise](/integrations/flowise) | | pacote `flowise-nodes-niadra` | Um nó de memória e um de ferramentas |
+| [Langflow](/integrations/langflow) | arquivo em `integrations-extras/langflow` | | Três componentes: contexto, resposta e busca |
+| [Dify](/integrations/dify) | plugin em `integrations-extras/dify` | | Um provedor de ferramentas: contexto, resposta, histórico e memória do agente |
+
+Fora da lista: Zapier e Make (exigem conta de desenvolvedor e revisão da plataforma; use o módulo HTTP com [`POST /v1/context`](/api/context)) e as ferramentas de observabilidade (a [ingestão por OpenTelemetry](/guides/opentelemetry) já cobre). Qualquer framework sem adaptador usa o SDK direto: `conversation.context()`, `customer()`, `agent()` e `tools()`.
+
+## Clientes MCP e assistentes de código
+
+O [servidor MCP do espaço](/guides/mcp) liga a qualquer cliente que fale Streamable HTTP com cabeçalhos próprios: [Claude Code](/integrations/mcp/claude-code), [Claude Desktop](/integrations/mcp/claude-desktop), [Cursor](/integrations/mcp/cursor) e [VS Code](/integrations/mcp/vscode). Para o assistente de código fazer a integração por você, há a [skill `niadra`](/integrations/coding-assistants).
+
+## Testar sem conta paga
+
+Todos os frameworks da lista são de código aberto e instalam sem conta. Os testes de cada adaptador rodam na CI dos SDKs contra os tipos reais do framework, com o modelo, o STT e o TTS substituídos por fakes, e a Niadra no emulador `niadra-mock`; as plataformas fechadas (ElevenLabs, Vapi, Retell, Meta, Twilio) são testadas com cargas gravadas no formato público e assinaturas calculadas no próprio teste. Cada adaptador tem um exemplo executável em `examples/` nos repositórios dos SDKs, o mesmo código que estas páginas mostram.
+
+## Vindo de outra memória
+
+Para quem chega de uma memória por busca vetorial, o nome de cada coisa aqui; o guia [Vindo da Mem0](/guides/from-mem0) traz a tabela chamada a chamada:
+
+| Lá | Aqui |
+|---|---|
+| `add()` a cada mensagem | `customer()` e `agent()` na conversa, ou `track()`; a extração roda no fim da sessão, não a cada mensagem |
+| `search()` antes de cada resposta | `context()`, fixado por conversa, e a busca só quando o contexto não responde |
+| Feedback numa memória | [`POST /v1/feedback`](/api/feedback): retirar ou corrigir um fato, resolver uma pendência |
+| Categorias próprias | Predicados de extração por espaço e por fonte |
+| Importação direta | [`POST /v1/ingest/files`](/api/ingest-files), CSV ou JSONL |
+| Exportação por esquema | Exportação contínua em Parquet e [`POST /v1/export`](/api/export) |
+| Conversa em grupo | `subjects` com papel, num evento com mais de um sujeito |
+| Cliente assíncrono | `AsyncNiadra`; o SDK de TypeScript é assíncrono por natureza |
+| Multilíngue | Extração, contexto e busca em qualquer idioma; os resumos e as pendências no idioma do cliente, os rótulos do contexto no idioma do espaço; tempo relativo na busca em português, inglês e espanhol |
+| Data de expiração | `valid_until` no evento e na nota do agente |
+| Memória procedural | [Memória do agente](/concepts/agent-memory): explícita, revisada, sem dado pessoal |
+| `user_id`, `agent_id`, `run_id` | O handle do cliente (telefone, e-mail, `wa_id`, id do app), a fonte (o agente, com fornecedor e chave) e a conversa ou tarefa |
+| `get_all()`, `history()` de uma memória | A linha do tempo (`timeline()`) e as `versions` de um item aberto |
+| Filtros por metadados na busca | `filters`: período, `when`, canal, categoria, tipo de item, desfecho e objeto |
+| `delete()` e `delete_all()` | Nenhuma ferramenta de apagar ao alcance do modelo: o apagamento é [`POST /v1/forget`](/api/forget), por uma pessoa ou uma chave `admin`, com comprovante |
+| `infer=False` (guardar sem extrair) | Evento de sistema: dado estruturado que entra sem modelo de IA e muda o estado do objeto |
+| Memória em grafo | Objetos, vínculos, contas e parceiros: um grafo tipado, sem ligação por coocorrência |
+| Cliente do MCP hospedado | O [servidor MCP do espaço](/guides/mcp), com o cliente amarrado pelo `subject_token` |
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Início rápido" href="/quickstart">
+    a chave, o espaço de sandbox e o primeiro contexto.
+  </Card>
+  <Card title="Memória do agente" href="/concepts/agent-memory">
+    as notas de trabalho do próprio agente, em todo adaptador.
+  </Card>
+</CardGroup>

@@ -1,0 +1,17 @@
+{
+  "salt_id": "ss_0199a3b0",
+  "reset": false,
+  "items": [
+    {
+      "id": "0199a1d0-7700-7a10-8b20-000000000003",
+      "key": "artBgq3okzeNZ3ZtbJSsKtr1JqULKXhkJeIg-433n-s",
+      "purpose": "any",
+      "channel": "voice",
+      "since": "2026-10-09T18:02:00Z",
+      "until": null,
+      "window": {"from": "00:00", "to": "09:00", "tz": "America/Sao_Paulo", "days": null},
+      "removed": false
+    }
+  ],
+  "next_cursor": "c_0199a3b0_3"
+}

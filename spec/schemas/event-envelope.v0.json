@@ -1,0 +1,1168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/event-envelope.v0.json",
+  "title": "Niadra Event Envelope v0",
+  "description": "One thing that happened between a company and a subject: a message, a system event or an agent action. See spec/event-envelope.md.",
+  "$defs": {
+    "ActionInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "description": "Canonical operation, e.g. `credit`, `reschedule`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Operation",
+          "type": "string"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "maxLength": 200000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the agent did or delivered, in its words, kept whole: as long as an event's text.",
+          "title": "Result"
+        },
+        "purpose": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Purpose"
+        },
+        "closes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Closes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "corrects_action_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Corrects Action Id"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "title": "ActionInfo",
+      "type": "object"
+    },
+    "Backing": {
+      "additionalProperties": false,
+      "description": "What the SDK's backing check found in an agent's turn: every number, date, code and amount the turn states, looked up in the pack, the system records, the customer's own words and the tool results the agent recorded. Kinds and counts, never a value.",
+      "properties": {
+        "checked": {
+          "description": "Values the check read in the turn.",
+          "maximum": 500,
+          "minimum": 0,
+          "title": "Checked",
+          "type": "integer"
+        },
+        "unbacked_values": {
+          "description": "The values with no source, in the order said.",
+          "items": {
+            "$ref": "#/$defs/UnbackedValue"
+          },
+          "maxItems": 100,
+          "title": "Unbacked Values",
+          "type": "array"
+        },
+        "guard_violations": {
+          "description": "Short ids (`PackSlot.id`) of the guard lines the turn went against: a value of the guarded kind other than the guarded one.",
+          "items": {
+            "pattern": "^[0-9a-f]{8}$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Guard Violations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "checked"
+      ],
+      "title": "Backing",
+      "type": "object"
+    },
+    "Closes": {
+      "additionalProperties": false,
+      "description": "The open item an action fulfils: by id, or by object and canonical operation.",
+      "properties": {
+        "item_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An open item's id.",
+          "title": "Item Id"
+        },
+        "object": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ObjectRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Operation"
+        }
+      },
+      "title": "Closes",
+      "type": "object",
+      "oneOf": [
+        {
+          "required": [
+            "item_id"
+          ],
+          "properties": {
+            "item_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "object",
+            "operation"
+          ],
+          "properties": {
+            "object": {
+              "type": "object"
+            },
+            "operation": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "Content": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "default": "text",
+          "enum": [
+            "text",
+            "audio",
+            "image",
+            "file"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "maxLength": 200000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "media_ref": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Reference returned by /v1/media/uploads.",
+          "title": "Media Ref"
+        },
+        "media_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Media Sha256"
+        },
+        "transcript": {
+          "anyOf": [
+            {
+              "maxLength": 200000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transcript"
+        },
+        "stt_confidence": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stt Confidence"
+        }
+      },
+      "title": "Content",
+      "type": "object"
+    },
+    "ContextStamp": {
+      "additionalProperties": false,
+      "description": "Which context an agent's prompt carried and when it went in: the SDK sets it on the agent's turn, so measurement can tell a late context from an unused one.",
+      "properties": {
+        "etag": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Etag"
+        },
+        "injected_at": {
+          "format": "date-time",
+          "title": "Injected At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "injected_at"
+      ],
+      "title": "ContextStamp",
+      "type": "object"
+    },
+    "EventKind": {
+      "enum": [
+        "message",
+        "system_event",
+        "action"
+      ],
+      "title": "EventKind",
+      "type": "string"
+    },
+    "Handle": {
+      "additionalProperties": false,
+      "description": "An identifier of a subject in some channel or system: a phone, an e-mail, a CRM id.",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/HandleType"
+        },
+        "value": {
+          "maxLength": 320,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Namespace for scoped identifiers: the WhatsApp Business account for `wa_bsuid`, the system for `system_id`, the country for `gov_id_hmac`.",
+          "title": "Scope"
+        },
+        "subject_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubjectKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Defaults to `person`, except for organization-only handle types."
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "title": "Handle",
+      "type": "object"
+    },
+    "HandleType": {
+      "enum": [
+        "phone_e164",
+        "wa_id",
+        "wa_jid",
+        "wa_lid",
+        "wa_bsuid",
+        "email",
+        "gov_id_hmac",
+        "app_user_id",
+        "system_id",
+        "org_registry_hmac",
+        "email_domain",
+        "anon_id"
+      ],
+      "title": "HandleType",
+      "type": "string"
+    },
+    "ModelUsage": {
+      "additionalProperties": false,
+      "description": "What the model provider reported for the call that produced an agent's turn: the SDK reads it from the response of every call `wrap()` sees, or takes it from the caller. Optional; only the agent's own turns carry it.",
+      "properties": {
+        "provider": {
+          "description": "Who served the call, lowercase: `openai`, `anthropic`, a router or a cloud.",
+          "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$",
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "description": "The model the provider says answered, e.g. `gpt-4.1-2025-04-14`.",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,127}$",
+          "title": "Model",
+          "type": "string"
+        },
+        "prompt_tokens": {
+          "description": "Every input token, cached ones included.",
+          "maximum": 100000000,
+          "minimum": 0,
+          "title": "Prompt Tokens",
+          "type": "integer"
+        },
+        "cached_tokens": {
+          "default": 0,
+          "description": "Input tokens read from the provider's cache.",
+          "minimum": 0,
+          "title": "Cached Tokens",
+          "type": "integer"
+        },
+        "cache_write_tokens": {
+          "default": 0,
+          "description": "Input tokens written to the cache (Anthropic's cache creation).",
+          "minimum": 0,
+          "title": "Cache Write Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "prompt_tokens"
+      ],
+      "title": "ModelUsage",
+      "type": "object"
+    },
+    "ObjectRef": {
+      "additionalProperties": false,
+      "description": "A business object in a system of record, e.g. `invoice` / `erp` / `0823`.",
+      "properties": {
+        "type": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Type",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "namespace",
+        "id"
+      ],
+      "title": "ObjectRef",
+      "type": "object"
+    },
+    "Speaker": {
+      "enum": [
+        "customer",
+        "ai_agent",
+        "human_agent",
+        "system"
+      ],
+      "title": "Speaker",
+      "type": "string"
+    },
+    "SpeakerRef": {
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "$ref": "#/$defs/Speaker"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Agent or attendant id inside the source.",
+          "title": "Id"
+        }
+      },
+      "required": [
+        "role"
+      ],
+      "title": "SpeakerRef",
+      "type": "object"
+    },
+    "Subject": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/SubjectKind"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "handles": {
+          "items": {
+            "$ref": "#/$defs/Handle"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Handles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "handles"
+      ],
+      "title": "Subject",
+      "type": "object"
+    },
+    "SubjectKind": {
+      "enum": [
+        "person",
+        "account",
+        "partner",
+        "staff"
+      ],
+      "title": "SubjectKind",
+      "type": "string"
+    },
+    "UnbackedValue": {
+      "additionalProperties": false,
+      "description": "A value the agent's turn states that nothing it had backs: the kind only, never the value.",
+      "properties": {
+        "kind": {
+          "description": "`amount` (with a currency or a money word), `date`, `number` (three or more digits) or `code` (letters and three or more digits).",
+          "enum": [
+            "amount",
+            "date",
+            "number",
+            "code"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "UnbackedValue",
+      "type": "object"
+    },
+    "Verification": {
+      "description": "Session verification levels. `no_customer` sits outside the V0-V4 scale.",
+      "enum": [
+        "V0",
+        "V1",
+        "V2",
+        "V3",
+        "V4",
+        "no_customer"
+      ],
+      "title": "Verification",
+      "type": "string"
+    },
+    "Visibility": {
+      "enum": [
+        "public",
+        "internal"
+      ],
+      "title": "Visibility",
+      "type": "string"
+    },
+    "VoiceInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "ani": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ani"
+        },
+        "dnis": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dnis"
+        },
+        "trunk": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trunk"
+        },
+        "network_attestation": {
+          "anyOf": [
+            {
+              "enum": [
+                "A",
+                "B",
+                "C"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Network Attestation"
+        },
+        "answered_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Answered At"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ended At"
+        },
+        "end_reason": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Reason"
+        },
+        "recording_ref": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recording Ref"
+        },
+        "turn_offset_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Turn Offset Ms"
+        }
+      },
+      "title": "VoiceInfo",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "event",
+      "default": "event",
+      "title": "Type",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/EventKind",
+      "default": "message"
+    },
+    "idempotency_key": {
+      "description": "Provider message id, or a UUIDv7 minted by the SDK.",
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "channel": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Channel",
+      "type": "string"
+    },
+    "conversation_id": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Conversation Id"
+    },
+    "conversation_aliases": {
+      "items": {
+        "maxLength": 512,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 8,
+      "title": "Conversation Aliases",
+      "type": "array"
+    },
+    "task_id": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Id"
+    },
+    "handles": {
+      "items": {
+        "$ref": "#/$defs/Handle"
+      },
+      "maxItems": 16,
+      "title": "Handles",
+      "type": "array"
+    },
+    "subjects": {
+      "items": {
+        "$ref": "#/$defs/Subject"
+      },
+      "maxItems": 8,
+      "title": "Subjects",
+      "type": "array"
+    },
+    "object_refs": {
+      "items": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "maxItems": 16,
+      "title": "Object Refs",
+      "type": "array"
+    },
+    "speaker": {
+      "$ref": "#/$defs/SpeakerRef"
+    },
+    "direction": {
+      "anyOf": [
+        {
+          "enum": [
+            "inbound",
+            "outbound"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Direction"
+    },
+    "content": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Content"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "visibility": {
+      "$ref": "#/$defs/Visibility",
+      "default": "public"
+    },
+    "verification_hint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Verification"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "canonical_type": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "System events only, e.g. `invoice.credited`.",
+      "title": "Canonical Type"
+    },
+    "fields": {
+      "additionalProperties": true,
+      "description": "Structured fields of a system event.",
+      "title": "Fields",
+      "type": "object"
+    },
+    "action": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ActionInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "corrects_event_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Corrects Event Id"
+    },
+    "voice": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VoiceInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "context_stamp": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContextStamp"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "usage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ModelUsage"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The model call behind an `ai_agent` message: tokens and prompt cache."
+    },
+    "backing": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Backing"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "An agent's message: which of the values it states have no source, and which guards it went against, as the SDK's backing check found them."
+    },
+    "valid_until": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Until when what this event states holds, e.g. an offer valid until a date: after it, the facts it gave leave the context and the search (`show_expired` still finds them).",
+      "title": "Valid Until"
+    }
+  },
+  "required": [
+    "idempotency_key",
+    "channel",
+    "speaker",
+    "occurred_at"
+  ],
+  "type": "object",
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "action"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "not": {
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "action"
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "action": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "system_event"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "canonical_type"
+        ],
+        "properties": {
+          "canonical_type": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "not": {
+              "required": [
+                "kind"
+              ]
+            }
+          },
+          {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "message"
+              }
+            }
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "object",
+            "anyOf": [
+              {
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": [
+                  "transcript"
+                ],
+                "properties": {
+                  "transcript": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": [
+                  "media_ref"
+                ],
+                "properties": {
+                  "media_ref": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "anyOf": [
+        {
+          "required": [
+            "handles"
+          ],
+          "properties": {
+            "handles": {
+              "type": "array",
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "subjects"
+          ],
+          "properties": {
+            "subjects": {
+              "type": "array",
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "object_refs"
+          ],
+          "properties": {
+            "object_refs": {
+              "type": "array",
+              "minItems": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "if": {
+        "required": [
+          "backing"
+        ],
+        "properties": {
+          "backing": {
+            "type": "object"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "kind": {
+            "const": "message"
+          },
+          "speaker": {
+            "properties": {
+              "role": {
+                "enum": [
+                  "ai_agent",
+                  "human_agent"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

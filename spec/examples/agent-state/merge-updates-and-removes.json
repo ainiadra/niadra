@@ -1,0 +1,18 @@
+{
+  "scope": {
+    "kind": "conversation",
+    "id": "c-8812"
+  },
+  "agent": "closing",
+  "mode": "merge_by_key",
+  "if_version": 3,
+  "body": {
+    "offer": {
+      "plan": "familia-plus",
+      "status": "accepted"
+    },
+    "pending_question": {
+      "$delete": true
+    }
+  }
+}

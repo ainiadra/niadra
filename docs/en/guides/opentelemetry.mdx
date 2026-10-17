@@ -1,0 +1,192 @@
+---
+title: "OpenTelemetry ingestion"
+description: "Send the gen_ai.* traces your agent already emits to the Niadra OTLP endpoint."
+---
+
+If your agent already emits OpenTelemetry traces with the `gen_ai.*` attributes, it can write to Niadra without new calls in the conversation path: point an OTLP exporter at Niadra and every model call becomes the messages of the conversation, with who spoke and when. This is the fastest way to start building memory from an agent you do not want to touch, and a common way to capture a vendor platform that exports traces but has no Niadra integration.
+
+Reading still happens through `context()`, the history tools or MCP. OpenTelemetry covers the write side.
+
+## The endpoint
+
+Niadra accepts OTLP over HTTP, with the body as JSON (`Content-Type: application/json`) or protobuf (`application/x-protobuf`), gzipped or not:
+
+```text
+POST https://acme-prod.us-east-2.api.niadra.com/v1/otel/v1/traces
+```
+
+Authenticate with the source key in `Authorization: Bearer`, the same key your agent would use for the SDK, with the `track` scope. The answer is the standard OTLP one: each rejected message counts once in `partialSuccess.rejectedSpans`, with its position and reason in `errorMessage`.
+
+## The levels
+
+What the spans produce depends on what they carry. With the `turns` feature on in the space, each turn of the spans also becomes a [turn record](/en/concepts/turn-records):
+
+| Level | What the agent sends | What it produces |
+|---|---|---|
+| Bronze | The `gen_ai` spans of model and tool calls, as the agent's instrumentation emits them | The conversation's messages and a turn record with `fidelity: bronze` and `completeness: unknown`: tools, model, tokens, latency and cost per turn, and regression by indicator. Never replay or attribution |
+| Silver | Bronze, plus `niadra.exposure` and `niadra.pack.hash` | Also what the person was shown: a `presented` interaction with the method `otel` |
+| Gold | Not OpenTelemetry: the SDK intercepts the agent's calls in its process | Everything the turn record carries, replay included |
+
+A bronze record keeps the digests of what it read, not the values: its mode is `hash_only`, unless the space's recording says otherwise for the source. A value the exporter cut, by an attribute length limit or by dropped attributes, marks its call `truncated: true`.
+
+## What Niadra reads from a span
+
+The `gen_ai` semantic conventions are still changing, and several generations of attributes live side by side in the libraries in use today. Niadra reads them in cascade, so you do not have to pin a library version for us:
+
+| What Niadra needs | Where it looks, in order |
+|---|---|
+| The messages | `gen_ai.input.messages` and `gen_ai.output.messages` (current); then `gen_ai.prompt` and `gen_ai.completion` as JSON; then the indexed `gen_ai.prompt.{n}.role`/`content` and `gen_ai.completion.{n}.role`/`content`; then OpenInference `llm.input_messages.{n}.message.*` and `llm.output_messages.{n}.message.*` |
+| Who spoke | The message role: `user` and `human` become the customer, `assistant` and `model` the AI agent. System, developer and tool messages are left out of the conversation |
+| The conversation | `gen_ai.conversation.id`, then `session.id`, then the trace id |
+| When | The span start time for input messages, the end time for output messages |
+
+From a tool call (`gen_ai.operation.name` equal to `execute_tool`), Niadra reads `gen_ai.tool.name`, `gen_ai.tool.call.id` (or the span id) and, when the instrumentation captures content, the arguments and the result, which become a `kind: tool` call of the record with the span's duration. From a model call, the model (`gen_ai.response.model`, or `gen_ai.request.model`), `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`, the cached-token count when the instrumentation reports one, and the input and output messages.
+
+A few things OpenTelemetry has no attribute for, so you set them yourself, on the span or on the resource:
+
+| Attribute | Example | Why |
+|---|---|---|
+| `niadra.channel` | `whatsapp` | There is no OpenTelemetry attribute for the customer channel. Without it, the source default applies |
+| `niadra.handle.<type>` | `niadra.handle.app_user_id = "u-48213"` | The customer the conversation is about, one attribute per handle type. `enduser.id` also works and becomes an `app_user_id` |
+| `niadra.turn.id` | a UUIDv7 | The turn's id, on every span of the turn. Without it, the spans of one trace are one turn, named `otel-<trace id>` |
+| `niadra.pack.hash` | the hash the context read returned | The pack the turn read, so the record pins Niadra's own pin |
+| `niadra.build.prompt.<name>`, `niadra.build.model`, `niadra.build.corpus_digest`, `niadra.build.assembler`, `niadra.build.tool_schema.<tool>` | `niadra.build.prompt.core = "v16"` | The build's pins, as the SDK would pin them; the resource's `service.version` names the agent's code version |
+
+A span or span event named `niadra.exposure`, emitted when a list reaches the person (not when the tool returns it), carries `niadra.exposure.id`, `niadra.exposure.list`, `niadra.exposure.page`, `niadra.exposure.offset`, `niadra.exposure.visible_k` and `niadra.exposure.items` (JSON with `pos`, `ref` and `shown`), and becomes a `presented` interaction of the customer's [signals](/en/concepts/signals).
+
+Every span repeats the conversation so far, so each message gets the idempotency key of its position in the conversation: a re-exported history deduplicates instead of duplicating. The spans of one turn may arrive in more than one export: Niadra merges them into the same record (a later export adds the calls and exposures the record lacked and widens its start and end), and an export that adds nothing counts as a duplicate. The SDK may copy `niadra.turn.id` and `niadra.pack.hash` from OpenTelemetry baggage to the spans of the turn, so they reach spans your code never touches; baggage travels in the headers of every outgoing call, including calls to third parties, so only those two values may go in it, never a handle, an exposure or any value that names a person.
+
+<Warning>
+Span attributes can end up in every backend your collector exports to. Prefer an internal id (`app_user_id` or `enduser.id`) over a phone number or an e-mail, and send the Niadra attributes only on the pipeline that goes to Niadra. Personal data never travels in a URL.
+</Warning>
+
+## Steps
+
+### 1. Point an exporter at Niadra
+
+Add an OTLP/HTTP exporter next to the one you already have, as JSON or protobuf: the Node.js and Python exporters work as they are, straight to Niadra or through an OpenTelemetry Collector, when you prefer to keep a pipeline for Niadra alone.
+
+<CodeGroup>
+```yaml Collector
+exporters:
+  otlphttp/niadra:
+    traces_endpoint: https://acme-prod.us-east-2.api.niadra.com/v1/otel/v1/traces
+    encoding: json
+    headers:
+      Authorization: "Bearer ${env:NIADRA_API_KEY}"
+
+service:
+  pipelines:
+    traces/niadra:
+      receivers: [otlp]
+      exporters: [otlphttp/niadra]
+```
+```python Python
+# The Python exporter sends protobuf, which Niadra takes as it is.
+import os
+
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+exporter = OTLPSpanExporter(
+    endpoint="https://acme-prod.us-east-2.api.niadra.com/v1/otel/v1/traces",
+    headers={"Authorization": f"Bearer {os.environ['NIADRA_API_KEY']}"},
+)
+provider = TracerProvider()
+provider.add_span_processor(BatchSpanProcessor(exporter))
+trace.set_tracer_provider(provider)
+```
+```typescript TypeScript
+import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"; // JSON over HTTP
+
+const niadraExporter = new OTLPTraceExporter({
+  url: "https://acme-prod.us-east-2.api.niadra.com/v1/otel/v1/traces",
+  headers: { Authorization: `Bearer ${process.env.NIADRA_API_KEY}` },
+});
+
+const provider = new NodeTracerProvider({
+  spanProcessors: [new BatchSpanProcessor(niadraExporter)],
+});
+provider.register();
+```
+```sh Shell
+# Zero-code instrumentation in Node.js, straight to Niadra
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="https://acme-prod.us-east-2.api.niadra.com/v1/otel/v1/traces"
+export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Bearer ${NIADRA_API_KEY}"
+export OTEL_EXPORTER_OTLP_TRACES_PROTOCOL="http/protobuf"  # or http/json
+```
+</CodeGroup>
+
+### 2. Set the channel and the customer
+
+Set the Niadra attributes on the span that carries the messages, or once on the resource for a process that serves one channel. Keep `gen_ai.conversation.id` stable for the whole conversation: it becomes the `conversation_id`.
+
+<CodeGroup>
+```python Python
+tracer = trace.get_tracer("support-agent")
+
+with tracer.start_as_current_span("chat wa-8812") as span:
+    span.set_attribute("gen_ai.conversation.id", "wa-8812")
+    span.set_attribute("niadra.channel", "whatsapp")
+    span.set_attribute("niadra.handle.app_user_id", "u-48213")
+    reply = client.chat.completions.create(model=MODEL, messages=messages)
+```
+```typescript TypeScript
+import { trace } from "@opentelemetry/api";
+
+const tracer = trace.getTracer("support-agent");
+
+await tracer.startActiveSpan("chat wa-8812", async (span) => {
+  span.setAttributes({
+    "gen_ai.conversation.id": "wa-8812",
+    "niadra.channel": "whatsapp",
+    "niadra.handle.app_user_id": "u-48213",
+  });
+  const reply = await client.chat.completions.create({ model: MODEL, messages });
+  span.end();
+  return reply;
+});
+```
+</CodeGroup>
+
+Attributes are read from the span itself and from its resource. When your model-client instrumentation writes the messages on a child span, set the Niadra attributes on the resource, or copy them to that span with a span processor.
+
+### 3. Turn on content capture
+
+Most `gen_ai` instrumentations leave message content out by default. Niadra needs it to build memory, so enable content capture in the instrumentation you use (for many Python instrumentations, `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`). If you prefer to keep content out of your other backends, run a second pipeline for Niadra only.
+
+### 4. Confirm the events arrived
+
+A span becomes messages with the same guarantees as a batch: the raw content is stored before the answer and events are ordered by the time they happened. Check the coverage of the source, on the Systems screen of the Console or with [`GET /v1/sources/coverage`](/en/api/sources-coverage), as a person with the `integration` role or with an `admin` key: what arrived (`received`) and what was rejected (`rejected`), day by day.
+
+<CodeGroup>
+```bash cURL
+curl "https://acme-prod.us-east-2.api.niadra.com/v1/sources/coverage?days=1" \
+  -H "Authorization: Bearer $NIADRA_TOKEN"
+```
+</CodeGroup>
+
+## When to use the SDK instead
+
+OpenTelemetry records what the model saw and said. The SDK adds what traces do not carry: the context read before the answer and the `context_stamp` of each agent turn, verification with `verify()`, links between handles with `identify()`, agent actions with `closes`, handoffs and the end of the conversation. Those feed the [context use](/en/concepts/context-use) measurement. A common path is to start with OpenTelemetry to build memory from day one, then add `context()` and the SDK writes to the agents that answer customers.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Events and the batch" href="/en/concepts/events">
+    what an event is and how it is deduplicated.
+  </Card>
+  <Card title="Quickstart" href="/en/quickstart">
+    reading context with the SDK.
+  </Card>
+  <Card title="Receive OTLP traces" href="/en/api/otel-traces">
+    the endpoint reference.
+  </Card>
+  <Card title="Webhooks from your systems" href="/en/guides/system-webhooks">
+    events from CRM, ERP and help desk.
+  </Card>
+</CardGroup>

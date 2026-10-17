@@ -1,0 +1,16 @@
+# The broker's operator (rabbitmq/cluster-operator), as released, with our resources: scripts/on-ops.sh
+# applies it with `kubectl apply --server-side -k`, so every deploy writes these values again and no
+# later command owns the field. The release asks for 500Mi and 200m, request = limit; on 25/09/2026 the
+# operator held 24 MiB of working set, peak 58, and 2m of CPU.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - https://github.com/rabbitmq/cluster-operator/releases/download/v2.23.0/cluster-operator.yml
+patches:
+  - target: {kind: Deployment, name: rabbitmq-cluster-operator, namespace: rabbitmq-system}
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: {cpu: 20m, memory: 48Mi}
+          limits: {cpu: 200m, memory: 192Mi}

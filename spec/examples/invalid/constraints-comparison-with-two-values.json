@@ -1,0 +1,5 @@
+{"version": "cv_8f2c41d9a07b",
+ "hard": [{"id": "h1", "attr": "item_variant.price_sale", "op": "lte", "values": [300, 400], "source": "stated",
+           "scope": "turn", "origin": {"kind": "stated"}}],
+  "text": "<restrições>\n- exigido: price sale de no máximo 300\n</restrições>"
+}

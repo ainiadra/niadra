@@ -1,0 +1,101 @@
+---
+title: "LlamaIndex"
+description: "The customer's memory as the LlamaIndex agent's memory, plus the history tools."
+---
+
+`NiadraMemory` wraps the chat memory your agent already keeps (a `ChatMemoryBuffer` by default) and places the pack on every read; `history_tools()` hands over the kit as LlamaIndex tools. In TypeScript, `NiadraMemory` is a LlamaIndex.TS `Memory` and `niadraTools()` gives the kit as `FunctionTool`s.
+
+## Install
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[llamaindex]'   # llama-index-core 0.14.25 or newer, below 0.15
+```
+```sh TypeScript
+npm install @niadra/sdk @llamaindex/core   # @llamaindex/core 0.6.23 or newer, below 0.7, as an optional peer dependency
+```
+</CodeGroup>
+
+The TypeScript integration is in `@niadra/sdk` on npm.
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | `get()` returns the pack as a system message first, which the agent places right after its system prompt, then your chat history, then the `turn_block`. Only the history is stored; the Niadra messages are made fresh on every read |
+| Turns | Every message the agent puts into memory is recorded: the user's as the customer's turn and the assistant's text as the agent's |
+| Tools | `history_tools()`: the history tools as LlamaIndex tools whose parameters are the kit's schemas, bound to the customer |
+| Verification | `conversation.verify()` before the run |
+| Handoff | `conversation.handoff()` where your flow transfers |
+
+## Minimal example
+
+```python
+"""A LlamaIndex FunctionAgent with the customer's memory and the history tools."""
+
+import asyncio
+
+from llama_index.core.agent.workflow import FunctionAgent
+from llama_index.llms.openai import OpenAI
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.llamaindex import NiadraMemory, history_tools
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    conversation = niadra.conversation("thread-81", subject=phone("+5511912345678"))
+    agent = FunctionAgent(
+        llm=OpenAI(model="gpt-4.1"), system_prompt="You are Acme's agent.", tools=history_tools(conversation)
+    )
+    print(await agent.run("Where is my replacement lid?", memory=NiadraMemory(conversation)))
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+
+The same code is in `examples/llamaindex_agent.py`.
+
+## In TypeScript
+
+`NiadraMemory` is a LlamaIndex.TS `Memory` (it takes the same messages and options as `createMemory()`), so it serves agents (`agent({ memory })`, `multiAgent`) and chat engines alike. In `getLLM()`, which every model call goes through, it records the customer's newest message once and returns a copy of the messages with the pack after the leading system messages and the `turn_block` at the end of the last user message; the stored history keeps only what was said. `add()` records the final answer as the agent's turn and a `handOff` between agents as a handoff. For a memory you build yourself with other blocks, `NiadraMemoryBlock` gives the same context as a fixed block (priority 0): a block can only sit before the history, so the `turn_block` follows the pack in the same message, and answers are not recorded this way. `niadraTools(convo)` returns `FunctionTool`s with the kit's JSON Schemas, bound to the customer.
+
+```typescript
+import { agent } from "@llamaindex/workflow";
+import { openai } from "@llamaindex/openai";
+import { Niadra, handles } from "@niadra/sdk";
+import { NiadraMemory, niadraTools } from "@niadra/sdk/llamaindex";
+
+const niadra = new Niadra();
+const convo = niadra.conversation({ subject: handles.appUserId(user.id), channel: "web_chat", conversation_id: chatId });
+const support = agent({
+  llm: openai({ model: "gpt-4.1" }),
+  systemPrompt: "You are Acme's support agent.",
+  tools: niadraTools(convo),
+  memory: new NiadraMemory(convo),
+});
+const result = await support.run("Where is my replacement?");
+```
+
+## Agent memory
+
+`NiadraMemory(conversation, agent_memory=True)` puts the agent's own notes before the customer's context, and `history_tools(conversation, agent_memory=...)` adds the two tools. See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- The shape (a primary memory wrapped, a system message placed on `get()`, writes passed on in `put()`) follows the `Mem0Memory` of LlamaIndex's Mem0 integration (MIT License); no code was copied. The reading is Niadra's: one pinned pack per conversation instead of a search per message.
+- Nothing here fails the run: without a pack, `get()` returns your history alone.
+- Tested against `llama-index-core` 0.14.25 with the model replaced by a fake and Niadra on the emulator; in TypeScript, against `@llamaindex/core` 0.6.23 and `@llamaindex/workflow` 1.1.25, with real agents over a scripted LLM.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="History navigation" href="/en/concepts/history">
+    the three tools the agent receives.
+  </Card>
+  <Card title="Context and views" href="/en/concepts/context">
+    what goes into the pack and why.
+  </Card>
+</CardGroup>

@@ -1,0 +1,68 @@
+---
+title: "Genkit"
+description: "A memória do cliente numa chamada generate() do Genkit: um model middleware para use e o kit como ferramentas do Genkit."
+---
+
+`niadraMiddleware(session)` é um model middleware para `generate({ use })` do Genkit (Firebase Genkit para JavaScript), e `niadraTools(session)` devolve o kit como ferramentas do Genkit. Só em TypeScript.
+
+## Instalar
+
+```sh
+npm install @niadra/sdk genkit   # genkit 1.42 ou mais novo, abaixo da 2, como peer dependency opcional
+```
+
+A integração está no `@niadra/sdk` no npm.
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | O middleware roda em volta de cada chamada ao modelo da requisição, inclusive os passos do laço de ferramentas: o contexto (depois das notas do agente, com `agentMemory`) entra como uma parte de texto da sua mensagem de sistema (uma nova, se não há; vários provedores leem uma mensagem de sistema só) e o `turn_block` como parte de texto da última mensagem do usuário |
+| Turnos | A mensagem mais nova do usuário é registrada uma vez; a resposta é o turno do agente, com o uso do Genkit (`inputTokens` e `cachedContentTokens`) quando você diz o `model` na opção, porque um model middleware não vê o nome do modelo. Passos que só pedem ferramentas não registram nada |
+| Ferramentas | `niadraTools(session)`: ferramentas do Genkit não registradas (cada requisição leva as amarradas ao próprio cliente), com os esquemas JSON do kit |
+| Verificação | `verify` na opção do middleware, registrado uma vez antes do primeiro contexto |
+| Transbordo | `session.handoff()` onde o seu fluxo transfere |
+
+## Exemplo mínimo
+
+```typescript
+import { genkit } from "genkit";
+import { googleAI } from "@genkit-ai/google-genai";
+import { Niadra, handles } from "@niadra/sdk";
+import { niadraMiddleware, niadraTools } from "@niadra/sdk/genkit";
+
+const niadra = new Niadra();
+const ai = genkit({ plugins: [googleAI()] });
+
+const convo = niadra.conversation({ subject: handles.appUserId(user.id), channel: "web_chat", conversation_id: chatId });
+const { text } = await ai.generate({
+  model: googleAI.model("gemini-2.5-flash"),
+  system: "You are Acme's support agent.",
+  messages: history,
+  prompt: "Where is my replacement?",
+  tools: niadraTools(convo),
+  use: [niadraMiddleware(convo, { model: "googleai/gemini-2.5-flash" })],
+});
+```
+
+## Memória do agente
+
+`niadraMiddleware(convo, { agentMemory: true })` e `niadraTools(convo, { agentMemory: true })` põem as notas do próprio agente antes do contexto do cliente e acrescentam as duas ferramentas. Veja [Memória do agente](/concepts/agent-memory).
+
+## Limites
+
+- O middleware aceita uma conversa, uma tarefa ou uma função que encontra a de cada chamada; quando ela devolve `null`, a chamada passa sem mudança.
+- Sem `model` na opção, o turno do agente é registrado sem uso.
+- Nada aqui para a chamada: com a Niadra lenta ou fora, a requisição vai ao modelo como veio.
+- Testado contra `genkit` 1.42.0 com o modelo de teste do próprio Genkit, laço de ferramentas incluído, e a Niadra no emulador.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Google GenAI" href="/integrations/google-genai">
+    o wrap do cliente, para quem chama o Gemini sem o Genkit.
+  </Card>
+  <Card title="Navegação do histórico" href="/concepts/history">
+    as três ferramentas que o agente recebe.
+  </Card>
+</CardGroup>

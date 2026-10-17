@@ -1,0 +1,66 @@
+---
+title: "CAMEL-AI"
+description: "The customer's memory as the AgentMemory of a CAMEL ChatAgent, and the history kit as a toolkit."
+---
+
+`NiadraMemory(conversation)` is an `AgentMemory` around the agent's own chat memory; `memory.attach(agent)` makes it the agent's memory, and `memory.tools` (or `NiadraToolkit(conversation).get_tools()`) gives the kit as `FunctionTool`s. Python only.
+
+## Install
+
+```sh
+pip install 'niadra[camel]'   # camel-ai 0.2.90 or newer, below 0.3
+```
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | `get_context()` returns the pack (after the agent's own notes, with `agent_memory=`) right after the system message, then the chat history, then the `turn_block`. Only the history is stored; the Niadra messages are made fresh on every read |
+| Turns | Every record the agent writes is recorded: the user's message as the customer's turn and the assistant's text as the agent's; tool calls and results are not turns |
+| Tools | `memory.tools` and `NiadraToolkit(conversation).get_tools()`: CAMEL `FunctionTool`s whose OpenAI schema is the kit's definition, word for word, bound to the customer; the toolkit serves a workforce or a role-playing session |
+| Verification | `conversation.verify()` before `attach()` |
+| Handoff | `transferred_to_agent()` and `transferred_to_human()` record a transfer, for a workforce that hands the conversation over or an escalation to a person |
+
+## Minimal example
+
+```python
+"""A CAMEL ChatAgent with the customer's memory as its agent memory and the history tools."""
+
+from camel.agents import ChatAgent
+from camel.models import ModelFactory
+from camel.types import ModelPlatformType, ModelType
+
+from niadra import Niadra, phone
+from niadra.integrations.camel import NiadraMemory
+
+niadra = Niadra(channel="chat")
+memory = NiadraMemory(niadra.conversation("thread-81", subject=phone("+5511912345678")))
+model = ModelFactory.create(model_platform=ModelPlatformType.OPENAI, model_type=ModelType.GPT_4_1)
+agent = memory.attach(ChatAgent(system_message="You are Acme's agent.", model=model, tools=memory.tools))
+print(agent.step("Where is my replacement lid?").msgs[0].content)
+niadra.close()
+```
+
+The same code is in `examples/camel_agent.py`.
+
+## Agent memory
+
+`NiadraMemory(conversation, agent_memory=True)` puts the agent's own notes before the customer's context and adds the two tools. See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- CAMEL reads an agent's memory synchronously, even in `astep`: the context comes with a conversation of the sync client (`Niadra`). With `AsyncNiadra`, the agent gets the tools and the turns and runs without the pack. The read has the SDK's own time budget: 300 ms for chat; on voice, the pinned body comes from the SDK's memory and the turn waits 200 ms at most for the slots.
+- The `camel` extra does not install together with `google-genai`, `google-adk`, `pipecat`, `livekit` and `openai-agents`: `camel-ai` pins `pydantic` to 2.12.0 or older, and those extras want a newer one. Use separate environments.
+- Nothing here stops the agent: with Niadra slow or down, it runs without the pack and a tool answers that the history is unavailable.
+- Tested against `camel-ai` 0.2.90 with the model replaced by a fake and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="History navigation" href="/en/concepts/history">
+    the three tools the agent receives.
+  </Card>
+  <Card title="Agent memory" href="/en/concepts/agent-memory">
+    the agent's own working notes.
+  </Card>
+</CardGroup>

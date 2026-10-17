@@ -1,0 +1,105 @@
+{
+  "run_id": "0192f5c6-0000-7d00-8b00-0000000000a1",
+  "status": "done",
+  "verdict": "failed",
+  "mode": "hermetic_turn",
+  "vary": [
+    "prompts"
+  ],
+  "build": {
+    "pins": {
+      "prompts": {
+        "core": "v17",
+        "rules": "v17"
+      },
+      "corpus_digest": "sha256:d5e4ce66468167f7bc993f495a3db17c5f788c88977d9c2a4419bdb97ea00ab4",
+      "model": "provider/model-2026-08",
+      "assembler": "3.2.0",
+      "tool_schemas": {
+        "quote": "sha256:6213299056e8c500b806edd0bd8c58bda33c540fc9a4d05f5091e2623b9c2bd6"
+      },
+      "niadra": {
+        "compiler": "compiler-1.15",
+        "pack_hash": "pk_7f3a91c2"
+      }
+    },
+    "sdk": "niadra-python/0.7.0",
+    "adapter": "openai_agents/1"
+  },
+  "summary": {
+    "scenarios": [
+      {
+        "scenario_id": "0192f5c5-0000-7c00-8a00-000000005ce1",
+        "verdict": "flaky",
+        "completed": 4,
+        "infrastructure_errors": 1,
+        "pin_mismatches": 0,
+        "needs_paraphrase": true,
+        "assertions": [
+          {
+            "id": "network-refused",
+            "passed": 4,
+            "failed": 0,
+            "not_checked": 0,
+            "baseline_passed": 4,
+            "baseline_failed": 0,
+            "drop": 0.0,
+            "p_value": 1.0,
+            "regression": false,
+            "flaky": false
+          },
+          {
+            "id": "t1.budget",
+            "passed": 4,
+            "failed": 0,
+            "not_checked": 0,
+            "baseline_passed": 4,
+            "baseline_failed": 0,
+            "drop": 0.0,
+            "p_value": 1.0,
+            "regression": false,
+            "flaky": false
+          },
+          {
+            "id": "t1.claims_match_state",
+            "passed": 3,
+            "failed": 1,
+            "not_checked": 0,
+            "baseline_passed": 4,
+            "baseline_failed": 0,
+            "drop": 0.25,
+            "p_value": 0.5,
+            "regression": false,
+            "flaky": true
+          },
+          {
+            "id": "t1.claims_traced",
+            "passed": 4,
+            "failed": 0,
+            "not_checked": 0,
+            "baseline_passed": 4,
+            "baseline_failed": 0,
+            "drop": 0.0,
+            "p_value": 1.0,
+            "regression": false,
+            "flaky": false
+          },
+          {
+            "id": "t1.tool_called.quote",
+            "passed": 4,
+            "failed": 0,
+            "not_checked": 0,
+            "baseline_passed": 4,
+            "baseline_failed": 0,
+            "drop": 0.0,
+            "p_value": 1.0,
+            "regression": false,
+            "flaky": false
+          }
+        ],
+        "baseline_run_id": null
+      }
+    ]
+  },
+  "created_at": "2026-09-30T10:12:00Z"
+}

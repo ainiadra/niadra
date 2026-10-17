@@ -1,0 +1,925 @@
+{
+  "version": "1",
+  "types": [
+    {
+      "type": "item_variant",
+      "ownership": "shared",
+      "mirror_of": {
+        "system": "plataforma_de_ecommerce",
+        "derived_by": "declaration",
+        "drift": "alert"
+      },
+      "key": {
+        "natural": [
+          "variant_id"
+        ]
+      },
+      "working_set": {
+        "enter_on": [
+          "presented",
+          "engaged",
+          "related",
+          "watched",
+          "committed"
+        ],
+        "leave_after": "30d"
+      },
+      "relations": {
+        "product": {
+          "type": "product",
+          "via": "product_id"
+        },
+        "looks": {
+          "type": "look",
+          "via": "item_ref",
+          "many": true
+        }
+      },
+      "fields": {
+        "available": {
+          "type": "bool",
+          "logic": "tri",
+          "freshness": {
+            "class": "volatile",
+            "max_age": "30s",
+            "claim_max_age": "5s"
+          },
+          "claim": {
+            "allowed": true,
+            "class": "quantity",
+            "nature": "observed"
+          },
+          "track_changes": true
+        },
+        "stock_qty": {
+          "type": "number",
+          "freshness": {
+            "class": "volatile"
+          },
+          "claim": {
+            "allowed": false
+          }
+        },
+        "price_sale": {
+          "type": "money",
+          "role": "price_sale",
+          "freshness": {
+            "class": "price",
+            "max_age": "60s",
+            "claim_max_age": "15s"
+          },
+          "claim": {
+            "allowed": true,
+            "class": "money",
+            "nature": "observed"
+          },
+          "track_changes": true
+        },
+        "price_list": {
+          "type": "money",
+          "role": "price_list",
+          "freshness": {
+            "class": "price",
+            "max_age": "60s"
+          },
+          "claim": {
+            "allowed": true,
+            "class": "money"
+          }
+        },
+        "size_label": {
+          "type": "string",
+          "freshness": {
+            "class": "stable"
+          },
+          "attribute": {
+            "family": "size"
+          }
+        },
+        "size_system": {
+          "type": "enum",
+          "freshness": {
+            "class": "stable"
+          }
+        },
+        "color": {
+          "type": "enum",
+          "logic": "tri",
+          "freshness": {
+            "class": "stable",
+            "max_age": "24h"
+          },
+          "attribute": {
+            "family": "color",
+            "vocabulary": "color"
+          }
+        }
+      },
+      "sources": {
+        "platform_live": {
+          "kind": "pull",
+          "precedence": 1,
+          "authoritative_for": [
+            "available",
+            "price_sale",
+            "price_list"
+          ]
+        },
+        "search_snapshot": {
+          "kind": "tool_observation",
+          "precedence": 2,
+          "scope": "global"
+        },
+        "enrichment": {
+          "kind": "batch",
+          "precedence": 1,
+          "authoritative_for": [
+            "color"
+          ]
+        },
+        "checkout_quote": {
+          "kind": "quote",
+          "precedence": 0,
+          "scope": "context"
+        }
+      },
+      "union": {
+        "available": "first_authoritative_live",
+        "price_sale": "first_by_precedence",
+        "color": "first_by_precedence"
+      },
+      "states": [
+        "scheduled",
+        "active",
+        "paused",
+        "discontinued"
+      ],
+      "lifecycle": {
+        "transitions": [
+          {
+            "from": "scheduled",
+            "to": "active",
+            "by": [
+              "source",
+              "clock"
+            ]
+          },
+          {
+            "from": "active",
+            "to": "paused",
+            "by": [
+              "source"
+            ]
+          },
+          {
+            "from": "*",
+            "to": "discontinued",
+            "by": [
+              "source"
+            ]
+          }
+        ]
+      },
+      "timers": {
+        "launch_at": {
+          "due": "launch_at",
+          "on_fire": [
+            "transition(scheduled->active)",
+            "notify"
+          ]
+        },
+        "promo_end_at": {
+          "due": "promo_end_at",
+          "on_fire": [
+            "refresh(price_sale)"
+          ]
+        }
+      },
+      "refetch": {
+        "reasons": [
+          {
+            "name": "never_observed",
+            "when": "observer(available) == none",
+            "budget": {
+              "units": 1,
+              "per": "item/1h"
+            }
+          },
+          {
+            "name": "exposed_now",
+            "when": "presented_in_top(3)",
+            "budget": {
+              "units": 1,
+              "per": "item/60s"
+            }
+          },
+          {
+            "name": "claim_pending",
+            "when": "purpose == 'claim'",
+            "budget": {
+              "units": 1,
+              "per": "turn"
+            }
+          },
+          {
+            "name": "interest_alert",
+            "when": "watch_count > 0",
+            "budget": {
+              "units": 1,
+              "per": "item/5min"
+            }
+          },
+          {
+            "name": "promo_boundary",
+            "when": "promo_end_at - now() < 10min",
+            "budget": {
+              "units": 1,
+              "per": "item"
+            }
+          },
+          {
+            "name": "floor_expired",
+            "when": "age(available) > 90s",
+            "budget": {
+              "units": 1,
+              "per": "item/1h"
+            }
+          }
+        ],
+        "budget": {
+          "unit": "platform_call",
+          "never_money": true
+        }
+      },
+      "purposes": {
+        "display": {
+          "on_stale": "serve_with_age"
+        },
+        "claim": {
+          "on_stale": "serve_with_prohibitions",
+          "prohibitions": [
+            "affirm_availability",
+            "affirm_price"
+          ]
+        },
+        "decide": {
+          "on_stale": "serve_with_age"
+        }
+      },
+      "readings": {
+        "display.available": {
+          "expr": "available == yes or (available == unobserved and state == 'active')",
+          "purposes": [
+            "display"
+          ]
+        },
+        "claim.available": {
+          "expr": "available == yes and age(available) <= 5s",
+          "purposes": [
+            "claim"
+          ]
+        },
+        "checkout.buyable": {
+          "expr": "quote(checkout_quote).available == yes",
+          "purposes": [
+            "decide"
+          ]
+        },
+        "alert.back": {
+          "expr": "was(available == no) and available == yes",
+          "purposes": [
+            "display"
+          ]
+        }
+      },
+      "retention": {
+        "observations": "45d",
+        "projection": "while_in_working_set"
+      }
+    },
+    {
+      "type": "product",
+      "ownership": "shared",
+      "mirror_of": {
+        "system": "plataforma_de_ecommerce",
+        "derived_by": "declaration",
+        "drift": "alert"
+      },
+      "key": {
+        "natural": [
+          "product_id"
+        ]
+      },
+      "working_set": {
+        "enter_on": [
+          "presented",
+          "engaged",
+          "related",
+          "watched"
+        ],
+        "leave_after": "30d"
+      },
+      "relations": {
+        "variants": {
+          "type": "item_variant",
+          "via": "variant_ids[*]",
+          "many": true
+        }
+      },
+      "fields": {
+        "name": {
+          "type": "string",
+          "freshness": {
+            "class": "stable"
+          }
+        },
+        "brand": {
+          "type": "string",
+          "freshness": {
+            "class": "stable"
+          },
+          "attribute": {
+            "family": "brand"
+          }
+        },
+        "category": {
+          "type": "enum",
+          "freshness": {
+            "class": "stable"
+          },
+          "attribute": {
+            "family": "category",
+            "vocabulary": "category"
+          }
+        },
+        "best_offer_price": {
+          "type": "money",
+          "role": "price_sale",
+          "freshness": {
+            "class": "price",
+            "max_age": "60s",
+            "claim_max_age": "15s"
+          },
+          "claim": {
+            "allowed": true,
+            "class": "money",
+            "nature": "observed"
+          }
+        }
+      },
+      "derived_fields": {
+        "variants_available": {
+          "agg": "count",
+          "over": "variants",
+          "where": "available == yes"
+        }
+      },
+      "sources": {
+        "platform_live": {
+          "kind": "pull",
+          "precedence": 1,
+          "authoritative_for": [
+            "*"
+          ]
+        },
+        "catalog_feed": {
+          "kind": "batch",
+          "precedence": 2,
+          "sanity": {
+            "min_items": 50
+          }
+        }
+      },
+      "union": {
+        "*": "first_by_precedence"
+      },
+      "states": [
+        "active",
+        "discontinued"
+      ],
+      "lifecycle": {
+        "transitions": [
+          {
+            "from": "active",
+            "to": "discontinued",
+            "by": [
+              "source"
+            ]
+          }
+        ]
+      },
+      "purposes": {
+        "claim": {
+          "on_stale": "serve_with_prohibitions",
+          "prohibitions": [
+            "affirm_price"
+          ]
+        }
+      },
+      "retention": {
+        "projection": "while_in_working_set"
+      }
+    },
+    {
+      "type": "look",
+      "ownership": "shared",
+      "mirror_of": {
+        "system": "plataforma_de_ecommerce",
+        "derived_by": "declaration",
+        "drift": "alert"
+      },
+      "key": {
+        "natural": [
+          "look_id"
+        ]
+      },
+      "working_set": {
+        "enter_on": [
+          "presented",
+          "engaged",
+          "related"
+        ],
+        "leave_after": "30d"
+      },
+      "relations": {
+        "pieces": {
+          "type": "item_variant",
+          "via": "pieces[*].variant_id",
+          "many": true,
+          "status_field": "status",
+          "required_field": "required"
+        }
+      },
+      "fields": {
+        "name": {
+          "type": "string",
+          "freshness": {
+            "class": "stable"
+          }
+        },
+        "occasion": {
+          "type": "enum",
+          "freshness": {
+            "class": "stable"
+          },
+          "attribute": {
+            "family": "occasion"
+          }
+        }
+      },
+      "derived_fields": {
+        "all_pieces_available": {
+          "agg": "all",
+          "over": "pieces",
+          "where": "available == yes"
+        },
+        "pieces_count": {
+          "agg": "count",
+          "over": "pieces"
+        }
+      },
+      "sources": {
+        "editorial": {
+          "kind": "batch",
+          "precedence": 1,
+          "authoritative_for": [
+            "*"
+          ]
+        }
+      },
+      "retention": {
+        "projection": "while_in_working_set"
+      }
+    },
+    {
+      "type": "order",
+      "ownership": "subject",
+      "mirror_of": {
+        "system": "order_management",
+        "derived_by": "declaration",
+        "drift": "alert"
+      },
+      "key": {
+        "natural": [
+          "order_id"
+        ]
+      },
+      "time": {
+        "placed_at": {
+          "origin": "source"
+        },
+        "delivered_at": {
+          "origin": "source"
+        },
+        "timers_on": "delivered_at"
+      },
+      "fields": {
+        "total": {
+          "type": "money",
+          "role": "order_total",
+          "freshness": {
+            "class": "stable"
+          },
+          "claim": {
+            "allowed": true,
+            "class": "money",
+            "nature": "observed"
+          }
+        },
+        "delivery_estimate": {
+          "type": "date",
+          "freshness": {
+            "class": "semi",
+            "max_age": "12h"
+          },
+          "claim": {
+            "allowed": true,
+            "class": "date",
+            "nature": "observed"
+          }
+        },
+        "tracking_code": {
+          "type": "string",
+          "freshness": {
+            "class": "stable"
+          }
+        }
+      },
+      "sources": {
+        "order_management": {
+          "kind": "push",
+          "precedence": 1,
+          "authoritative_for": [
+            "*"
+          ]
+        },
+        "carrier": {
+          "kind": "pull",
+          "precedence": 2,
+          "authoritative_for": [
+            "delivery_estimate"
+          ],
+          "cost": "paid"
+        }
+      },
+      "union": {
+        "delivery_estimate": "first_authoritative_live"
+      },
+      "states": [
+        "placed",
+        "paid",
+        "shipped",
+        "delivered",
+        "kept",
+        "returned",
+        "cancelled"
+      ],
+      "lifecycle": {
+        "transitions": [
+          {
+            "from": "placed",
+            "to": "paid",
+            "by": [
+              "source"
+            ]
+          },
+          {
+            "from": "paid",
+            "to": "shipped",
+            "by": [
+              "source"
+            ]
+          },
+          {
+            "from": "shipped",
+            "to": "delivered",
+            "by": [
+              "source"
+            ]
+          },
+          {
+            "from": "delivered",
+            "to": "kept",
+            "by": [
+              "clock"
+            ]
+          },
+          {
+            "from": "delivered",
+            "to": "returned",
+            "by": [
+              "source"
+            ]
+          },
+          {
+            "from": "*",
+            "to": "cancelled",
+            "by": [
+              "source",
+              "human"
+            ]
+          }
+        ],
+        "forbidden": [
+          {
+            "from": "kept",
+            "to": "shipped"
+          }
+        ],
+        "latches": [
+          "paid",
+          "delivered"
+        ],
+        "outcome": {
+          "provisional": [
+            "delivered"
+          ],
+          "final": [
+            "kept",
+            "returned",
+            "cancelled"
+          ],
+          "expired_without_outcome": {
+            "after": "60d"
+          },
+          "vocabularies": [
+            {
+              "source": "order_management",
+              "map": {
+                "DLV": "delivered",
+                "RET": "returned",
+                "CAN": "cancelled"
+              },
+              "precedence": 1
+            }
+          ]
+        }
+      },
+      "timers": {
+        "exchange_window": {
+          "due": "delivered_at + 30d",
+          "once_per": "order",
+          "on_fire": [
+            "transition(delivered->kept)"
+          ]
+        }
+      },
+      "refetch": {
+        "reasons": [
+          {
+            "name": "delivery_pending",
+            "when": "state == 'shipped' and age(delivery_estimate) > 12h",
+            "budget": {
+              "units": 1,
+              "per": "object/12h"
+            }
+          }
+        ],
+        "never": [
+          "no_news"
+        ],
+        "budget": {
+          "unit": "carrier_call",
+          "never_money": true
+        }
+      },
+      "purposes": {
+        "claim": {
+          "on_stale": "serve_with_prohibitions",
+          "prohibitions": [
+            "affirm_delivery_date"
+          ]
+        }
+      },
+      "retention": {
+        "projection": "400d"
+      }
+    },
+    {
+      "type": "exchange",
+      "ownership": "subject",
+      "mirror_of": {
+        "system": "order_management",
+        "derived_by": "declaration",
+        "drift": "alert"
+      },
+      "key": {
+        "natural": [
+          "exchange_id"
+        ]
+      },
+      "relations": {
+        "order": {
+          "type": "order",
+          "via": "order_id"
+        }
+      },
+      "fields": {
+        "reason": {
+          "type": "enum",
+          "freshness": {
+            "class": "stable"
+          }
+        },
+        "refund_amount": {
+          "type": "money",
+          "role": "refund_amount",
+          "freshness": {
+            "class": "stable"
+          },
+          "claim": {
+            "allowed": true,
+            "class": "money",
+            "nature": "observed"
+          }
+        }
+      },
+      "sources": {
+        "order_management": {
+          "kind": "push",
+          "precedence": 1,
+          "authoritative_for": [
+            "*"
+          ]
+        }
+      },
+      "states": [
+        "requested",
+        "approved",
+        "received",
+        "refunded",
+        "rejected"
+      ],
+      "lifecycle": {
+        "transitions": [
+          {
+            "from": "requested",
+            "to": "approved",
+            "by": [
+              "source",
+              "human"
+            ]
+          },
+          {
+            "from": "requested",
+            "to": "rejected",
+            "by": [
+              "source",
+              "human"
+            ]
+          },
+          {
+            "from": "approved",
+            "to": "received",
+            "by": [
+              "source"
+            ]
+          },
+          {
+            "from": "received",
+            "to": "refunded",
+            "by": [
+              "source"
+            ],
+            "evidence": "required"
+          }
+        ],
+        "latches": [
+          "refunded"
+        ],
+        "outcome": {
+          "final": [
+            "refunded",
+            "rejected"
+          ],
+          "expired_without_outcome": {
+            "after": "15d"
+          }
+        }
+      },
+      "retention": {
+        "projection": "400d"
+      }
+    },
+    {
+      "type": "cart_quote",
+      "ownership": "subject",
+      "nature": "derived",
+      "mirror_of": {
+        "system": "plataforma_de_ecommerce",
+        "derived_by": "declaration",
+        "drift": "alert"
+      },
+      "inputs": [
+        "cart.items",
+        "cart.postal_code",
+        "turn.coupon"
+      ],
+      "fields": {
+        "shipping_price": {
+          "type": "money",
+          "role": "shipping_price",
+          "claim": {
+            "allowed": true,
+            "class": "money",
+            "nature": "computed"
+          }
+        },
+        "delivery_days": {
+          "type": "number",
+          "role": "delivery_days",
+          "claim": {
+            "allowed": true,
+            "class": "count",
+            "nature": "computed"
+          }
+        },
+        "total": {
+          "type": "money",
+          "role": "cart_total",
+          "claim": {
+            "allowed": true,
+            "class": "money",
+            "nature": "computed"
+          }
+        }
+      },
+      "sources": {
+        "checkout_api": {
+          "kind": "pull",
+          "precedence": 1,
+          "authoritative_for": [
+            "*"
+          ]
+        }
+      },
+      "refetch": {
+        "reasons": [
+          {
+            "name": "input_changed",
+            "when": "derived_status == 'expired_by_input'",
+            "priority": "high",
+            "budget": {
+              "units": "unlimited"
+            }
+          },
+          {
+            "name": "time_expired",
+            "when": "age(total) > 30min",
+            "budget": {
+              "units": 1,
+              "per": "session"
+            }
+          }
+        ],
+        "budget": {
+          "unit": "checkout_call",
+          "never_money": true
+        }
+      },
+      "purposes": {
+        "claim": {
+          "on_stale": "serve_with_prohibitions",
+          "prohibitions": [
+            "affirm_price",
+            "affirm_delivery_date"
+          ]
+        },
+        "decide": {
+          "on_stale": "structured_refusal",
+          "reason": "stale_quote",
+          "action": "requote"
+        }
+      },
+      "retention": {
+        "projection": "7d"
+      }
+    },
+    {
+      "type": "shopping_assistant_state",
+      "ownership": "agent",
+      "agent_state": {
+        "scope": "conversation",
+        "write": "merge_by_key"
+      },
+      "fields": {
+        "step": {
+          "type": "enum"
+        },
+        "shortlist": {
+          "type": "list"
+        },
+        "size_hint": {
+          "type": "string"
+        },
+        "recipient_name": {
+          "type": "string",
+          "pii": true
+        }
+      },
+      "retention": {
+        "state": "30d"
+      }
+    }
+  ]
+}

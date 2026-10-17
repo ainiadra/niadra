@@ -1,0 +1,50 @@
+---
+title: "Cursor"
+description: "O servidor MCP do seu espaço no Cursor, com a chave e o subject token lidos de variáveis de ambiente no mcp.json."
+---
+
+O Cursor liga a servidores MCP por Streamable HTTP e aceita cabeçalhos no `mcp.json`, com variáveis de ambiente interpoladas por `${env:NOME}`. Use uma chave do espaço de **sandbox** (`nia_sk_test_...`), nunca uma chave `live`.
+
+## O que a conexão precisa
+
+| Cabeçalho | Valor | De onde vem |
+|---|---|---|
+| `Authorization` | `Bearer` e a chave da fonte | O Console, em **Agentes e chaves**, no espaço de sandbox |
+| `Niadra-Subject-Token` | Um token assinado que amarra a conexão a um cliente de teste | [`POST /v1/subject-tokens`](/api/subject-tokens), com a mesma chave; vale 15 minutos |
+
+## Ligar
+
+Em `.cursor/mcp.json` no projeto (ou `~/.cursor/mcp.json` para todos os projetos):
+
+```json
+{
+  "mcpServers": {
+    "niadra": {
+      "url": "https://acme-sandbox.us-east-2.api.niadra.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:NIADRA_API_KEY}",
+        "Niadra-Subject-Token": "${env:NIADRA_SUBJECT_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Exporte `NIADRA_API_KEY` e `NIADRA_SUBJECT_TOKEN` no ambiente de onde o Cursor é aberto, e ligue o servidor em Cursor Settings > MCP. As ferramentas ficam disponíveis ao agente do Cursor; com a memória dos agentes ligada no espaço, `search_agent_memory` (e `remember`, com o escopo `agent_memory:write`) aparecem ao lado das ferramentas do cliente (oito; sete numa fonte voltada ao cliente, sem `resolve_identity`).
+
+## Limites
+
+- O token vale 15 minutos: quando vence, as ferramentas do cliente respondem `unauthenticated`. Emita outro, atualize a variável e recarregue o servidor. As duas ferramentas da memória do agente funcionam sem token.
+- O cliente é o do token, sempre. O servidor só responde `POST`.
+- Cada chamada de ferramenta deixa um comprovante no espaço.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="MCP com qualquer LLM" href="/guides/mcp">
+    as ferramentas, o token e o que cada uma exige.
+  </Card>
+  <Card title="Assistentes de código" href="/integrations/coding-assistants">
+    a skill que ensina o Cursor a ligar um repositório à Niadra.
+  </Card>
+</CardGroup>

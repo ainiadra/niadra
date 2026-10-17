@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/tool-binding.v0.json",
+  "title": "Niadra Tool Binding v0",
+  "description": "One tool bound to the fields of a space's object types: the arguments that carry them, where its results carry objects, and what the tool can do. See spec/object-type.md, section 9.",
+  "$defs": {
+    "BoundArg": {
+      "additionalProperties": false,
+      "description": "One argument of the tool and the field it carries. `in` and `eq` render to `param`, `not_in` and `ne` to the negation's, and a comparison or `between` only when `ops` lists it.",
+      "properties": {
+        "attr": {
+          "description": "The field, as `type.field`.",
+          "pattern": "^[a-z][a-z0-9_]{0,39}\\.[a-z][a-z0-9_]{0,63}$",
+          "title": "Attr",
+          "type": "string"
+        },
+        "param": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$",
+          "title": "Param",
+          "type": "string"
+        },
+        "transform": {
+          "anyOf": [
+            {
+              "enum": [
+                "lower",
+                "upper"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The case text is sent in.",
+          "title": "Transform"
+        },
+        "negation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Negation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ops": {
+          "items": {
+            "enum": [
+              "in",
+              "not_in",
+              "eq",
+              "ne",
+              "lt",
+              "lte",
+              "gt",
+              "gte",
+              "between"
+            ],
+            "type": "string"
+          },
+          "maxItems": 9,
+          "title": "Ops",
+          "type": "array"
+        }
+      },
+      "required": [
+        "attr",
+        "param"
+      ],
+      "title": "BoundArg",
+      "type": "object"
+    },
+    "Negation": {
+      "additionalProperties": false,
+      "properties": {
+        "param": {
+          "description": "The argument that takes the values the field must not have.",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$",
+          "title": "Param",
+          "type": "string"
+        }
+      },
+      "required": [
+        "param"
+      ],
+      "title": "Negation",
+      "type": "object"
+    },
+    "ResultObjects": {
+      "additionalProperties": false,
+      "description": "Where a result carries objects of a type, and which key of each item holds which field.",
+      "properties": {
+        "path": {
+          "default": "$",
+          "maxLength": 256,
+          "pattern": "^\\$?(\\.?[A-Za-z_][A-Za-z0-9_-]*(\\[\\*\\])?)*$",
+          "title": "Path",
+          "type": "string"
+        },
+        "type": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}$",
+          "title": "Type",
+          "type": "string"
+        },
+        "namespace": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$",
+          "title": "Namespace",
+          "type": "string"
+        },
+        "id": {
+          "default": "id",
+          "description": "The key of the item that holds the object's id.",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "fields": {
+          "maxProperties": 100,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,63}$": {
+              "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,63}$",
+              "type": "string"
+            }
+          },
+          "title": "Fields",
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "namespace"
+      ],
+      "title": "ResultObjects",
+      "type": "object"
+    },
+    "ToolCapabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "overfetch": {
+          "default": false,
+          "description": "The tool returns more than asked: the SDK filters the residual from it.",
+          "title": "Overfetch",
+          "type": "boolean"
+        },
+        "relax_flag": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "pattern": "^\\$?(\\.?[A-Za-z_][A-Za-z0-9_-]*(\\[\\*\\])?)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where the result says the tool relaxed what it was asked.",
+          "title": "Relax Flag"
+        },
+        "dry_run_param": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The argument that makes a call change nothing, for a counterfactual.",
+          "title": "Dry Run Param"
+        },
+        "mask_output": {
+          "default": false,
+          "description": "The SDK masks the fields the key may not read in the tool's output.",
+          "title": "Mask Output",
+          "type": "boolean"
+        }
+      },
+      "title": "ToolCapabilities",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "tool": {
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:/-]{0,63}$",
+      "title": "Tool",
+      "type": "string"
+    },
+    "args": {
+      "items": {
+        "$ref": "#/$defs/BoundArg"
+      },
+      "maxItems": 50,
+      "title": "Args",
+      "type": "array"
+    },
+    "results": {
+      "items": {
+        "$ref": "#/$defs/ResultObjects"
+      },
+      "maxItems": 10,
+      "title": "Results",
+      "type": "array"
+    },
+    "capabilities": {
+      "$ref": "#/$defs/ToolCapabilities"
+    }
+  },
+  "required": [
+    "tool"
+  ],
+  "type": "object"
+}

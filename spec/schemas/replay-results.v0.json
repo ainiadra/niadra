@@ -1,0 +1,406 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/replay-results.v0.json",
+  "title": "Niadra Replay Results v0",
+  "description": "What a replay runner reports after running scenarios N times: one entry per execution of a case, with its assertion outcomes. See spec/replay.md.",
+  "$defs": {
+    "AssertionOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "tool_called",
+            "tool_not_called",
+            "hard_respected",
+            "no_denial_with_results",
+            "claims_traced",
+            "claims_match_state",
+            "no_promise_without_action",
+            "expected_in_topk",
+            "handoff_when",
+            "effect_once",
+            "budget",
+            "lexicon",
+            "tools_offered_match"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "pass",
+            "fail",
+            "not_checked"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "outcome"
+      ],
+      "title": "AssertionOutcome",
+      "type": "object"
+    },
+    "ReplayResult": {
+      "additionalProperties": false,
+      "description": "One execution of one case. `infrastructure_error` (the agent raised, a blob could not be fetched or did not match its digest, a timeout) is counted apart and never fails an assertion; `pin_mismatch` is a case the runner stopped at its pin check.",
+      "properties": {
+        "scenario_id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "turn_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "case_id": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Case Id"
+        },
+        "run": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Run",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "pin_mismatch",
+            "infrastructure_error"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "paraphrase": {
+          "default": false,
+          "description": "The run's input was a paraphrase of the recorded one.",
+          "title": "Paraphrase",
+          "type": "boolean"
+        },
+        "assertions": {
+          "items": {
+            "$ref": "#/$defs/AssertionOutcome"
+          },
+          "maxItems": 50,
+          "title": "Assertions",
+          "type": "array"
+        },
+        "divergent_calls": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Divergent Calls",
+          "type": "integer"
+        },
+        "latency_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latency Ms"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "turn_id",
+        "run",
+        "status"
+      ],
+      "title": "ReplayResult",
+      "type": "object"
+    },
+    "TurnBuild": {
+      "additionalProperties": false,
+      "properties": {
+        "pins": {
+          "$ref": "#/$defs/TurnPins"
+        },
+        "sdk": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "E.g. `niadra-python/0.7.0`.",
+          "title": "Sdk"
+        },
+        "adapter": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The framework adapter and its version, if any.",
+          "title": "Adapter"
+        }
+      },
+      "title": "TurnBuild",
+      "type": "object"
+    },
+    "TurnCompilerPins": {
+      "additionalProperties": false,
+      "properties": {
+        "compiler": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The context compiler's version, from the pack.",
+          "title": "Compiler"
+        },
+        "pack_hash": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The hash of the pack this turn read.",
+          "title": "Pack Hash"
+        }
+      },
+      "title": "TurnCompilerPins",
+      "type": "object"
+    },
+    "TurnPins": {
+      "additionalProperties": false,
+      "description": "What must be the same for a replay to reproduce this turn. The recording document says which are required; a turn without one of them is kept, marked not replayable.",
+      "properties": {
+        "prompts": {
+          "additionalProperties": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "description": "Prompt name -> version, e.g. `core` -> `v16`.",
+          "maxProperties": 50,
+          "propertyNames": {
+            "maxLength": 256,
+            "minLength": 1
+          },
+          "title": "Prompts",
+          "type": "object"
+        },
+        "corpus_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Digest of the files the agent consults, computed in the SDK; never the files.",
+          "title": "Corpus Digest"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The exact model the agent called.",
+          "title": "Model"
+        },
+        "assembler": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The version of the company's context assembler.",
+          "title": "Assembler"
+        },
+        "tool_schemas": {
+          "additionalProperties": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "description": "Tool name -> hash of its schema.",
+          "maxProperties": 200,
+          "propertyNames": {
+            "maxLength": 256,
+            "minLength": 1
+          },
+          "title": "Tool Schemas",
+          "type": "object"
+        },
+        "niadra": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TurnCompilerPins"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "TurnPins",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "scenario_ids": {
+      "items": {
+        "maxLength": 512,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 200,
+      "minItems": 1,
+      "title": "Scenario Ids",
+      "type": "array"
+    },
+    "build": {
+      "$ref": "#/$defs/TurnBuild"
+    },
+    "mode": {
+      "default": "hermetic_turn",
+      "enum": [
+        "hermetic_turn",
+        "hermetic_conversation",
+        "era_memory"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "runs": {
+      "anyOf": [
+        {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Runs"
+    },
+    "vary": {
+      "items": {
+        "enum": [
+          "prompts",
+          "corpus_digest",
+          "model",
+          "assembler",
+          "tool_schemas"
+        ],
+        "type": "string"
+      },
+      "maxItems": 5,
+      "title": "Vary",
+      "type": "array"
+    },
+    "results": {
+      "items": {
+        "$ref": "#/$defs/ReplayResult"
+      },
+      "maxItems": 5000,
+      "minItems": 1,
+      "title": "Results",
+      "type": "array"
+    }
+  },
+  "required": [
+    "scenario_ids",
+    "build",
+    "results"
+  ],
+  "type": "object"
+}

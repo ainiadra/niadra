@@ -1,0 +1,90 @@
+---
+title: "The Niadra API"
+description: "Base address, authentication, and the route groups of the data API and the control API."
+---
+
+Niadra has two HTTP APIs. The **data API** belongs to each space: your agents and systems write events, read context and navigate the history there, and your governance team erases, exports, audits and measures. The **control API** manages tenants, projects, sources, keys, people and versioned configuration, and never holds customer content. The SDKs cover the agent side of the data API; every route of both APIs has its own page in this reference.
+
+## Base address
+
+Each space has a stable address that carries its region and never names the infrastructure behind it:
+
+```text
+https://<space>.<region>.api.niadra.com
+```
+
+The SDK derives it from the key (`nia_sk_<live|test>_<region>_<space>_<key_id>_<secret>`). While a space moves between cells, the old one answers `421 wrong_cell` and the SDK retries on a fresh connection. The control API lives at `https://control.api.niadra.com`.
+
+## Authentication
+
+Every route takes `Authorization: Bearer <credential>`. What the credential must be depends on the route:
+
+| Kind of route | Credential | Example |
+| --- | --- | --- |
+| Agent and system routes | A source key with the scope of the route: `track`, `act`, `context`, `search`, `identify`, `agent_memory`, `agent_memory:write`, `replay`, `coordinate`, `state:push`, `agent_state`, `identity:link` | [`POST /v1/context`](/en/api/context) needs `context` |
+| Governance routes | A Console person token with one of the roles of the route, or a source key with the `admin` scope | [`POST /v1/forget`](/en/api/forget) needs `security` |
+| Base-wide analysis | A source key with the `analytics` scope (analyst sources only), or a person with `analysis`; a reveal also needs `admin` on the key, or `security` on the person | [`POST /v1/insights/aggregate`](/en/api/insights-aggregate) |
+| Measurement reports | The governance credentials, or the same analyst key with `analytics`, which reads the report summed over every source; any other key sees its own source only | [`GET /v1/context-use`](/en/api/context-use) |
+| Webhook entry | The method declared in the mapping of the source: bearer, HMAC signature or URL token | [`POST /v1/ingest/webhook/{source_id}`](/en/api/ingest-webhook) |
+| Control API | The token of a person, from [`POST /v1/auth/login`](/en/api/control/login), valid 15 minutes | [`GET /v1/users/me`](/en/api/control/me) |
+
+The Console roles are `admin`, `security`, `integration`, `review`, `analysis` and `vendor`. `admin` passes every role check. A `vendor` person only sees the sources named in their role binding. A key without the scope a route needs gets `403 scope_missing`; a person without the role gets `403 forbidden`. The routes of the [agent features](/en/concepts/spaces-and-keys#space-features) answer `404` in a space that did not turn their feature on. Each reference page says what its route accepts.
+
+## Route groups
+
+| Group | What it covers |
+| --- | --- |
+| Write | [batch](/en/api/batch), [media uploads](/en/api/media-uploads), [file imports](/en/api/ingest-files) and [their status](/en/api/ingest-file), [system webhooks](/en/api/ingest-webhook) and [their challenge](/en/api/ingest-webhook-challenge), [OTLP traces](/en/api/otel-traces), [feedback](/en/api/feedback) |
+| Context | [by handle or by profile id](/en/api/context), [by profile id in the URL](/en/api/context-by-profile), [subject tokens](/en/api/subject-tokens), [MCP server](/en/api/mcp) |
+| History | [search](/en/api/history-search), [timeline by handle or by profile](/en/api/history-timeline), [timeline by profile in the URL](/en/api/history-timeline-by-profile), [open an item](/en/api/history-open), [open an item by URL](/en/api/history-item), [tool definitions](/en/api/history-tools) |
+| Agent memory | [block](/en/api/agent-memory-block), [search](/en/api/agent-memory-search), [tools](/en/api/agent-memory-tools), [save](/en/api/agent-memory-notes-create) and [list](/en/api/agent-memory-notes) notes, [versions](/en/api/agent-memory-note-versions), [erase](/en/api/agent-memory-notes-erase), [export](/en/api/agent-memory-export), [distill](/en/api/agent-memory-distill), [proposals](/en/api/agent-memory-proposals) |
+| Objects | [state](/en/api/object) and [timeline](/en/api/object-timeline) of an order, ticket or invoice |
+| Identity and profiles | [assertions](/en/api/identity-assertions), [create](/en/api/identity-assertions-create), [retract](/en/api/identity-assertion-retract), [merge](/en/api/identity-merge), [unmerge](/en/api/identity-unmerge), [block a handle](/en/api/identity-handles-block), [links](/en/api/identity-links), [suggestions](/en/api/identity-suggestions), [profile search](/en/api/profiles-search), [profile](/en/api/profile), [memory](/en/api/profile-memory), [objects](/en/api/profile-objects) |
+| Privacy and audit | [forget](/en/api/forget), [correct](/en/api/corrections), [erasure list](/en/api/forget-list), [export](/en/api/export), [export runs](/en/api/export-runs), [receipt search](/en/api/receipts-search), [receipts by URL](/en/api/receipts), [chain verification](/en/api/receipts-verify), [lineage](/en/api/lineage-receipt), [policy simulation](/en/api/policy-simulate), [secrets](/en/api/secrets), [stuck work](/en/api/dead-tasks) and [replay](/en/api/dead-tasks-replay) |
+| Sources | [coverage](/en/api/sources-coverage), [cut a source in the cell](/en/api/source-revoke) |
+| Patterns, measurement and usage | [retract a pattern](/en/api/trait-retract), [dry-run a rule](/en/api/traits-dry-run), [opt out](/en/api/traits-opt-out), [context use](/en/api/context-use), [measured conversations](/en/api/context-use-conversations), [of one conversation](/en/api/context-use-one-conversation), [usage](/en/api/usage), [AI spend ceiling](/en/api/usage-budget) |
+| Review and assistant | [review queue](/en/api/review-queue), [verdicts](/en/api/review-verdicts), [agreement](/en/api/review-agreement), [configuration assistant](/en/api/assist) |
+| Triggers and webhooks | [dry-run a trigger](/en/api/triggers-dry-run), [firings](/en/api/trigger-firings), [deliveries](/en/api/webhook-deliveries), [redeliver](/en/api/webhook-redeliver) |
+| Turn records and replay | [record](/en/api/turns), [promote](/en/api/turns-promote), [read](/en/api/turn) and [search](/en/api/turns-search) turns, [the day's index](/en/api/turns-index), [replay case](/en/api/replay-cases), [scenarios](/en/api/scenarios-create), [runs](/en/api/scenario-runs-create), [change log](/en/api/changes), [data issues](/en/api/data-issues), [notifications feed](/en/api/notifications). The `turns` feature, and `notifications` for the feed |
+| Typed state | [SDK profile](/en/api/sdk-profile), [push](/en/api/objects-push), [snapshot](/en/api/objects-snapshot), [now view](/en/api/state-view), [read](/en/api/state-read) and [verify](/en/api/state-verify) typed objects, [refresh requests](/en/api/state-refresh-requests), [release content](/en/api/content-release). The `state` feature |
+| Working memory | [write](/en/api/agent-state-write) and [read](/en/api/agent-state-read) an agent's working state, [a customer's](/en/api/profile-agent-state). The `agent_state` feature |
+| Signals and constraints | [constraints block](/en/api/constraints), [inferences](/en/api/profile-inferences), [review requests](/en/api/review-requests-create), [legal holds](/en/api/legal-holds-create). The `signals` and `legal_holds` features |
+| Coordination | [check](/en/api/coordination-check), [declare](/en/api/coordination-declare), [claim](/en/api/coordination-claims), [effects](/en/api/coordination-effects), [handoffs](/en/api/handoffs-create), [suppression list](/en/api/suppressions), [contact token keys](/en/api/contact-keys), [shadow reports](/en/api/coordination-reports). The `coordination` feature |
+| Outcomes and experiments | [outcomes](/en/api/measure-outcomes), [attribution](/en/api/measure-attribution), [BI reconciliation](/en/api/measure-reconcile), [interleaving](/en/api/measure-interleaving), [experiments](/en/api/measure-experiments), [power](/en/api/measure-power), [counterfactual](/en/api/measure-counterfactual-runs-create), [unmet demand](/en/api/measure-unmet-demand). The `measurement` feature |
+| Base-wide analysis | [schema](/en/api/insights-schema), [overview](/en/api/insights-overview), [aggregate](/en/api/insights-aggregate), [find profiles](/en/api/insights-profiles), [search](/en/api/insights-search), [reveal](/en/api/insights-reveal), [analysis MCP](/en/api/mcp-insights) |
+| Control API | [access](/en/api/control/login), [people and roles](/en/api/control/me), [projects](/en/api/control/projects), [sources and keys](/en/api/control/sources), [configuration](/en/api/control/config-types), [usage](/en/api/control/usage), [platform operations](/en/api/control/cells) |
+
+## Conventions in one table
+
+| Topic | Rule |
+| --- | --- |
+| Version | In the path (`/v1`). New fields and routes never change it; removing or changing the meaning of a field is `/v2`, with 12 months of coexistence and the `Deprecation` and `Sunset` headers from the announcement on ([versioning policy](/en/security/api-versioning)) |
+| Personal data | Phones, e-mails, documents and free text go in the body, never in the URL. That is why context, search and timeline by handle are `POST`. Every read that takes a conversation id has a `POST` form, recommended, with the id in the body: `POST /v1/context` and `POST /v1/history/timeline` with `profile_id`, `POST /v1/history/open`, `POST /v1/receipts/search` and `POST /v1/context-use/conversation`; the `GET` forms stay |
+| Idempotency | Events carry `idempotency_key`; identity writes, `POST /v1/forget`, source revocation and the writes of coordination, replay and legal holds require the `Idempotency-Key` header |
+| Errors | `application/problem+json` with a stable `code`; the batch answers `200`, or `207` when some items were rejected |
+| Pagination | Opaque `cursor` and `limit` (up to 200 on lists, 100 on timelines) |
+| Cache | ETag on the context; by handle, send `known_etag` in the body; by profile, `If-None-Match` returns `304` |
+| Tracing | `traceparent` is accepted and returned; every answer carries `request_id` |
+
+The details are in [Limits and conventions](/en/conventions) and [Errors](/en/errors).
+
+## Contract
+
+The reference is generated from the OpenAPI 3.1 contract that the server exports from its own code. Enum values and field names are English ASCII and never change meaning within `/v1`.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Read context" href="/en/api/context">
+    The call every agent makes before it acts.
+  </Card>
+  <Card title="Send a batch" href="/en/api/batch">
+    Messages, system events and actions.
+  </Card>
+  <Card title="Errors" href="/en/errors">
+    The code catalog and what to do with each code.
+  </Card>
+  <Card title="Limits and conventions" href="/en/conventions">
+    Sizes, rates, idempotency and caching.
+  </Card>
+</CardGroup>

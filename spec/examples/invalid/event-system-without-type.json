@@ -1,0 +1,1 @@
+{"kind": "system_event", "idempotency_key": "k4", "channel": "erp", "object_refs": [{"type": "invoice", "namespace": "erp", "id": "0823"}], "speaker": {"role": "system"}, "occurred_at": "2026-09-22T14:06:31Z"}

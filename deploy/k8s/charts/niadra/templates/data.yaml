@@ -1,0 +1,170 @@
+{{- if eq .Values.part "base" }}
+# The broker, run by its operator (rabbitmq/cluster-operator); the default user comes from our
+# secret. With three machines, three nodes: quorum queues replicate across them, so losing a machine
+# loses nothing. 4.2 or newer: the operator's startup probe calls a health check added in 4.2.
+apiVersion: rabbitmq.com/v1beta1
+kind: RabbitmqCluster
+metadata:
+  name: niadra-rabbitmq
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.rabbitmq.replicas }}
+  image: rabbitmq:4.2-management
+  persistence:
+    storage: {{ .Values.rabbitmq.storage }}
+  resources:
+    # The operator sizes the broker's memory from the limit and asks for request = limit.
+    requests: {cpu: {{ .Values.rabbitmq.resources.cpu }}, memory: {{ .Values.rabbitmq.resources.memory }}}
+    limits: {memory: {{ .Values.rabbitmq.resources.memory }}}
+  secretBackend:
+    externalSecret:
+      name: niadra-rabbitmq-user
+  rabbitmq:
+    additionalPlugins: [rabbitmq_prometheus]
+    additionalConfig: |
+      default_queue_type = quorum
+      vm_memory_high_watermark.relative = 0.7
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels: {app.kubernetes.io/name: niadra-rabbitmq}
+---
+# Two Valkey stores, no persistence and no replica: what they hold is rebuilt from PostgreSQL.
+# - `valkey`, the cache (packs, pins, generations, watermarks): `allkeys-lru`, so a full cache evicts
+#   the least used entries instead of refusing every write. A missing entry is read from the database
+#   (T1) and written back, so an eviction costs a read, never a wrong answer. On 27/09/2026 it filled
+#   under `noeviction` (128 MB, 94% packs) and every cache write failed.
+# - `valkey-state`, what changes what an agent sees when lost: the hot layer (live turns not compiled
+#   yet), source-key revocations, rate windows and daily limits. `noeviction`: nothing there is ever
+#   evicted; if it fills, writes fail loudly (the hot layer marks itself degraded, reads declare `live`
+#   incomplete) and the alert `StateStoreFailing` fires. The server finds it at NIADRA_STATE_REDIS_URL.
+# A restart of either loses its contents; a restore bumps the cache epoch and rebuilds the hot layer
+# (server, app/backups.py).
+{{- range $store := list
+      (dict "name" "valkey" "policy" "allkeys-lru" "values" .Values.valkey)
+      (dict "name" "valkey-state" "policy" "noeviction" "values" .Values.valkeyState) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $store.name }}
+  labels: {{- include "niadra.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {{- include "niadra.selector" $store.name | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "niadra.selector" $store.name | nindent 8 }}
+    spec:
+      securityContext: {runAsUser: 999, runAsGroup: 999, fsGroup: 999}
+      containers:
+        - name: valkey
+          image: valkey/valkey:8.1-alpine
+          args: [--maxmemory, {{ $store.values.maxMemory }}, --maxmemory-policy, {{ $store.policy }}, --save, "", --appendonly, "no"]
+          ports: [{name: redis, containerPort: 6379}]
+          readinessProbe:
+            exec: {command: [valkey-cli, ping]}
+            periodSeconds: 5
+          {{- include "niadra.resources" $store.values.resources | nindent 10 }}
+          {{- include "niadra.securityContext" $ | nindent 10 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $store.name }}
+  labels: {{- include "niadra.labels" $ | nindent 4 }}
+spec:
+  selector: {{- include "niadra.selector" $store.name | nindent 4 }}
+  ports: [{name: redis, port: 6379, targetPort: redis}]
+{{- end }}
+---
+# The pooler between the cell and the database (values `pgbouncer`). Stateless: a second replica
+# only needs `pgbouncer.replicas: 2`. In the base part, so it is up before the app's setup hook runs.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pgbouncer
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+data:
+  pgbouncer.ini: |
+    {{- include "niadra.pgbouncerIni" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.pgbouncer.replicas }}
+  selector:
+    matchLabels: {{- include "niadra.selector" "pgbouncer" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "niadra.selector" "pgbouncer" | nindent 8 }}
+      annotations:
+        # A changed configuration rolls the pods; PgBouncer reads it only at start.
+        checksum/config: {{ include "niadra.pgbouncerIni" . | sha256sum }}
+    spec:
+      # The image names its user (pgbouncer, 998:996); runAsNonRoot needs the numbers to check it.
+      securityContext: {runAsUser: 998, runAsGroup: 996}
+      {{- include "niadra.spread" "pgbouncer" | nindent 6 }}
+      # The userlist is written from the roles' secrets at start, into memory, never to the node's disk.
+      # The passwords are hex, so they need no quoting inside the file.
+      initContainers:
+        - name: userlist
+          image: {{ .Values.pgbouncer.image }}
+          command:
+            - sh
+            - -c
+            - >-
+              umask 077 &&
+              printf '"%s" "%s"\n' niadra_app "$APP" niadra_worker "$APP" niadra_system "$SYSTEM" niadra_owner "$OWNER"
+              > /etc/pgbouncer/auth/userlist.txt
+          env:
+            - name: APP
+              valueFrom: {secretKeyRef: {name: niadra-cell, key: NIADRA_DB_APP_PASSWORD}}
+            - name: SYSTEM
+              valueFrom: {secretKeyRef: {name: niadra-cell, key: NIADRA_DB_SYSTEM_PASSWORD}}
+            - name: OWNER
+              valueFrom: {secretKeyRef: {name: niadra-owner, key: NIADRA_DB_OWNER_PASSWORD}}
+          volumeMounts: [{name: auth, mountPath: /etc/pgbouncer/auth}]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 32Mi}
+          {{- include "niadra.securityContext" . | nindent 10 }}
+      containers:
+        - name: pgbouncer
+          image: {{ .Values.pgbouncer.image }}
+          # The image's entrypoint is pgbouncer itself; its argument is the configuration file.
+          args: [/etc/pgbouncer/config/pgbouncer.ini]
+          ports: [{name: postgres, containerPort: {{ .Values.pgbouncer.port }}}]
+          readinessProbe:
+            tcpSocket: {port: postgres}
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: {port: postgres}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 4
+          volumeMounts:
+            - {name: config, mountPath: /etc/pgbouncer/config, readOnly: true}
+            - {name: auth, mountPath: /etc/pgbouncer/auth, readOnly: true}
+          {{- include "niadra.resources" .Values.pgbouncer.resources | nindent 10 }}
+          {{- include "niadra.securityContext" . | nindent 10 }}
+      volumes:
+        - {name: config, configMap: {name: pgbouncer}}
+        - {name: auth, emptyDir: {medium: Memory, sizeLimit: 1Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgbouncer
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "niadra.selector" "pgbouncer" | nindent 4 }}
+  ports: [{name: postgres, port: {{ .Values.pgbouncer.port }}, targetPort: postgres}]
+{{- end }}

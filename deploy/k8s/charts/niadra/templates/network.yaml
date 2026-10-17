@@ -1,0 +1,49 @@
+{{- if eq .Values.part "base" }}
+# Nothing reaches the namespace except the ingress controller, the metrics scraper, the autoscaler
+# (queue depth) and the pods of the namespace itself.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# Every pod but PgBouncer: policies add up, so the pooler is left out here and gets its own below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-known-callers
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: app.kubernetes.io/name, operator: NotIn, values: [pgbouncer]}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: keda}}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: rabbitmq-system}}
+---
+# The database, through PgBouncer, only for the cell's own processes: the pods labelled
+# `niadra.com/db-client` (APIs and control, workers, loops, setup, backups, the sandbox tenant job).
+# The site, the models server, the cache and the broker never get a database connection.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pgbouncer-db-clients
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "niadra.selector" "pgbouncer" | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {niadra.com/db-client: "true"}}
+      ports:
+        - {protocol: TCP, port: {{ .Values.pgbouncer.port }}}
+{{- end }}

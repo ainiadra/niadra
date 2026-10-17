@@ -1,0 +1,245 @@
+---
+title: "Agentes de WhatsApp"
+description: "wa_id, BSUID e telefone, conversas que duram meses, OTP no mesmo canal e mídia por referência."
+---
+
+O WhatsApp é onde o cliente escreve primeiro, e onde uma conversa pode durar meses. Este guia liga um agente de WhatsApp à Niadra: quais identificadores enviar, como tornar inofensivo o reenvio de webhook, como uma conversa de meses vira sessões, como um OTP no mesmo canal eleva o nível de verificação e como áudios e anexos viajam por referência.
+
+O exemplo é a mensagem da Marina Souza às 14h02: "O técnico não apareceu. Vou ligar para vocês." Cinco minutos depois ela liga, e o agente de voz já sabe o que ela escreveu.
+
+## Identificadores no WhatsApp
+
+A WhatsApp Cloud API informa vários ids para a mesma pessoa, e a Niadra guarda cada um como um tipo de handle próprio. Envie no mesmo evento todos os ids que você recebe: handles que chegam juntos no mesmo evento são ligados quando são fortes, não bloqueados e sem conflito.
+
+| Tipo de handle | O que é | Escopo |
+|---|---|---|
+| `wa_id` | O id do contato no WhatsApp, o telefone só com dígitos | nenhum |
+| `phone_e164` | O telefone em E.164, como o seu CRM ou a sua plataforma de voz conhece | nenhum |
+| `wa_bsuid` | O id do usuário por conta comercial | A sua conta do WhatsApp Business, em `scope` |
+| `wa_jid`, `wa_lid` | Ids usados por algumas integrações de WhatsApp | nenhum |
+
+Com os nomes de usuário do WhatsApp, o remetente pode deixar de ser um telefone e virar um BSUID. A ligação entre BSUID e telefone nunca é presumida: ela exige uma asserção explícita, como o cliente digitar o número, um OTP ou o seu próprio cadastro. O nome de usuário é atributo de exibição e nunca identifica ninguém.
+
+<Warning>
+Um BSUID só é único dentro de uma conta comercial. Envie sempre com a conta em `scope` (as funções de handle do SDK recebem a conta como argumento).
+</Warning>
+
+## Passo a passo
+
+### 1. Registre cada mensagem recebida com o id do WhatsApp
+
+Use o id da mensagem no provedor (`wamid`) como `idempotency_key`. A WhatsApp Cloud API reenvia webhooks por dias, e a Niadra deduplica por essa chave no banco: uma entrega repetida conta como duplicada e nunca é gravada duas vezes. Os eventos são ordenados por `occurred_at`, a hora em que a mensagem foi enviada, nunca pela chegada; assim, uma ressincronização que reenvia mensagens antigas coloca cada uma no lugar certo.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone, system_id, whatsapp, whatsapp_bsuid
+
+niadra = Niadra(channel="whatsapp")
+
+def on_message(msg):
+    niadra.track({
+        "conversation_id": "wa-8812",
+        "idempotency_key": msg["id"],  # wamid.HBgL...
+        "handles": [
+            whatsapp(msg["from"]),  # 14155550123
+            whatsapp_bsuid(msg["user_id"], "waba-301"),
+        ],
+        "speaker": {"role": "customer"},
+        "verification_hint": "V1",  # it came from that number
+        "content": {"text": msg["text"]["body"]},
+        "occurred_at": msg["timestamp_iso"],
+    })
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+
+function onMessage(msg: WhatsAppMessage) {
+  niadra.track({
+    channel: "whatsapp",
+    conversation_id: "wa-8812",
+    idempotency_key: msg.id, // wamid.HBgL...
+    handles: [handles.waId(msg.from), handles.waBsuid(msg.userId, "waba-301")],
+    speaker: "customer",
+    verification_hint: "V1", // it came from that number
+    text: msg.text.body,
+    occurred_at: msg.timestampIso,
+  });
+}
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/batch" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [{
+      "type": "event",
+      "kind": "message",
+      "idempotency_key": "wamid.HBgLMTQxNTU1NTAxMjMVAgASGBQzQUQ",
+      "channel": "whatsapp",
+      "conversation_id": "wa-8812",
+      "handles": [
+        { "type": "wa_id", "value": "14155550123" },
+        { "type": "wa_bsuid", "value": "US.1098341", "scope": "waba-301" }
+      ],
+      "speaker": { "role": "customer" },
+      "direction": "inbound",
+      "verification_hint": "V1",
+      "content": { "type": "text", "text": "The technician never showed up. I am calling you." },
+      "occurred_at": "2026-09-22T17:02:11Z"
+    }]
+  }'
+```
+</CodeGroup>
+
+O `track()` volta na hora. O SDK põe o evento numa fila: uma mensagem da conversa sai na hora; os outros eventos saem em lotes de até 15 ou a cada segundo. A API só responde depois de gravar o lote, mascarado e cifrado, e a mensagem entra na camada ao vivo junto com a resposta (no primeiro contato de um número que a memória ainda não conhece, logo depois): quando a Marina liga às 14h07, o agente de voz recebe essa mensagem em `live`.
+
+### 2. Ligue o id do WhatsApp ao telefone que o resto da empresa conhece
+
+O agente de voz procura a Marina pelo `phone_e164`; o seu CRM conhece a Marina pelo id dele. Quando você sabe que os três são da mesma pessoa, diga isso com `identify()`. A chamada sai na hora: um id novo entra no perfil na mesma resposta, e dois perfis que já existiam se unem antes da resposta.
+
+<CodeGroup>
+```python Python
+niadra.identify(
+    [whatsapp("14155550123"), phone("+14155550123"), system_id("crm", "48213")],
+    method="system_import",
+)
+```
+```typescript TypeScript
+await niadra.identify({
+  handles: [handles.waId("14155550123"), handles.phone("+14155550123"), handles.systemId("48213", "crm")],
+  method: "system_import",
+});
+```
+</CodeGroup>
+
+Cada ligação é uma asserção com método e evidência. Uma ligação errada pode ser retirada, e a memória acompanha cada handle até a origem. Veja [Identidade e verificação](/concepts/identity).
+
+### 3. Trate a conversa como conversa e deixe a Niadra dividir as sessões
+
+O seu `conversation_id` é a conversa do WhatsApp, que pode durar meses. A Niadra divide essa conversa em sessões: no WhatsApp, turnos com menos de cerca de 20 minutos entre si são a mesma sessão (ajustável por canal). A sessão vira memória depois de 3 minutos sem turnos, e uma resposta do cliente dentro da janela a reabre e a extrai de novo; a cada reabertura a espera dobra (3, 6, 12 minutos), nunca além da janela do canal. Cada sessão vira memória por conta própria (uma regra decide no fim dela se vai ao modelo: um cumprimento não vai, uma troca curta que fixa um número de pedido ou um CEP vai), e a cobrança conta uma conversa por janela de atividade, não por mensagem.
+
+Leia o contexto antes de cada resposta, no nível que a conversa provou: o turno do cliente com `verification_hint: "V1"` prova V1, porque chegou daquele número, e `flush()` garante que ele chegou antes da primeira leitura. Dentro da sessão o contexto fica fixado: voltam os mesmos bytes, e o provedor do modelo mantém o início do prompt em cache. O SDK também guarda o contexto por conversa.
+
+<CodeGroup>
+```python Python
+niadra.flush()  # the customer's turn, and the V1 it proves, land before the first read
+with niadra.conversation("wa-8812", subject=whatsapp("14155550123"), view="chat", verification="V1") as conversation:
+    ctx = conversation.context()
+    reply = llm.reply(system=[AGENT_INSTRUCTIONS, ctx.system_block], messages=history, suffix=ctx.turn_block)
+    conversation.agent(reply)
+```
+```typescript TypeScript
+await niadra.flush(); // the customer's turn, and the V1 it proves, land before the first read
+const conversation = niadra.conversation({
+  subject: handles.waId("14155550123"),
+  channel: "whatsapp",
+  conversation_id: "wa-8812",
+  verification: "V1",
+});
+const ctx = await conversation.context();
+const reply = await llm.reply({ system: [AGENT_INSTRUCTIONS, ctx.text], messages: history, suffix: ctx.suffix });
+conversation.agent(reply);
+```
+</CodeGroup>
+
+### 4. Eleve o nível de verificação com um OTP no WhatsApp
+
+Uma mensagem vinda de um número de WhatsApp é plausível pelo canal. Dados da conta, documentos e pagamentos costumam exigir mais. Envie um código de uso único pelo WhatsApp; quando o cliente digitar o código certo, registre um `verify` com método `otp_whatsapp` e nível V3. O nível vale só para esta conversa, e o OTP no WhatsApp também prova a posse daquele número.
+
+<CodeGroup>
+```python Python
+niadra.verify(
+    "otp_whatsapp",
+    "V3",
+    handle=whatsapp("14155550123"),
+    conversation_id="wa-8812",
+)
+ctx = conversation.context(verification="V3")
+```
+```typescript TypeScript
+await conversation.verify({ method: "otp_whatsapp", level: "V3" });
+const ctx = await conversation.context(); // fixado de novo no nível novo
+```
+</CodeGroup>
+
+O `verify` sai na hora e descarta o contexto guardado daquela conversa. A leitura seguinte volta com os itens que a política libera em V3; antes disso, o contexto informava em `withheld` quantos itens estavam retidos, e o agente sabia que valia pedir a verificação. Um nível acima do teto da sua fonte volta como erro do item, `verification_not_allowed`.
+
+### 5. Envie áudios e anexos por referência
+
+Mídia nunca viaja dentro de um evento. Reserve um upload com o `subject` dono do arquivo, envie os bytes com `PUT` para a URL pré-assinada com **exatamente** os `upload_headers` da resposta (o armazenamento recusa qualquer outro) e depois mande o evento com `media_ref` e o SHA-256. Os SDKs fazem os dois primeiros passos em `upload_media()` e `uploadMedia()`. Para mensagens de voz, mande a sua transcrição em `transcript`, com `stt_confidence`.
+
+<CodeGroup>
+```python Python
+media = niadra.upload_media(voice_note_bytes, "audio/ogg", subject=whatsapp("14155550123"))
+
+if media:
+    niadra.track({
+        "conversation_id": "wa-8812",
+        "idempotency_key": "wamid.HBgLMTQxNTU1NTAxMjMVAgASGBQ0QkE",
+        "handles": [whatsapp("14155550123")],
+        "speaker": {"role": "customer"},
+        "content": {
+            "type": "audio",
+            "media_ref": media.media_ref,
+            "media_sha256": media.media_sha256,
+            "transcript": "He was supposed to come between eight and noon.",
+            "stt_confidence": 0.93,
+        },
+    })
+```
+```typescript TypeScript
+const { data: media } = await niadra.uploadMedia({
+  data: voiceNote,
+  content_type: "audio/ogg",
+  subject: handles.waId("14155550123"),
+});
+
+if (media) {
+  conversation.track({
+    idempotency_key: "wamid.HBgLMTQxNTU1NTAxMjMVAgASGBQ0QkE",
+    speaker: "customer",
+    content: {
+      type: "audio",
+      media_ref: media.media_ref,
+      media_sha256: media.media_sha256,
+      transcript: "He was supposed to come between eight and noon.",
+      stt_confidence: 0.93,
+    },
+  });
+}
+```
+```bash cURL
+# 1. Reserve the upload; the answer carries upload_url and upload_headers
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/media/uploads" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "content_type": "audio/ogg", "size_bytes": 48213, "sha256": "a3f1c2d4e5b6978812ab34cd56ef7890a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "subject": { "type": "wa_id", "value": "14155550123" } }'
+
+# 2. PUT the bytes with exactly the headers of upload_headers
+curl -X PUT "$UPLOAD_URL" -H "Content-Type: audio/ogg" -H "x-amz-checksum-sha256: <value from upload_headers>" --data-binary @note.ogg
+```
+</CodeGroup>
+
+### 6. Registre as respostas do agente e as transferências
+
+Registre as mensagens enviadas com `conversation.agent()` (com o id da mensagem no WhatsApp como `idempotency_key`, quando houver), as mensagens de atendente com `human_agent()` em Python ou `human()` em TypeScript, e notas internas com `visibility="internal"`: o cliente nunca viu essas notas, e o contexto as marca assim. Quando a conversa passa para uma pessoa, registre a transferência, para a medição saber se o destino leu o contexto.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Eventos e o lote" href="/concepts/events">
+    idempotência, ordem e erro por item.
+  </Card>
+  <Card title="Identidade e verificação" href="/concepts/identity">
+    asserções, uniões e os níveis.
+  </Card>
+  <Card title="Agentes de voz" href="/guides/voice-agents">
+    a ligação das 14h07.
+  </Card>
+  <Card title="Enviar um lote" href="/api/batch">
+    a requisição e a resposta completas.
+  </Card>
+</CardGroup>

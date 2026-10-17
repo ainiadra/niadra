@@ -1,0 +1,188 @@
+---
+title: "Context use"
+description: "Measurement per agent and per vendor: use, repetition, contradiction and handoff without reading."
+---
+
+A memory that is delivered and never used is worth nothing. Niadra measures whether each agent used the context it received, per agent, per vendor and per channel. Only the memory can do this: it holds both sides of the account, the pack that was delivered and the conversation that came next. The measurement looks at what the agent did with the context. It never grades a vendor and never suggests a prompt. What it changes in the product is each agent's context: a kind of item an agent never uses stops being sent to it (see [A leaner context per agent](#a-leaner-context-per-agent)).
+
+## The four signals
+
+| Signal | What it means | How it is detected | What does not count |
+|---|---|---|---|
+| **Use** | The agent cited or relied on an item it received: the missed visit, the $40 credit, the earlier promise | The claims the extraction reads in the agent's turns, matched with the items of the delivery manifest by the same predicate or the same object, plus the actions recorded in the session on an item's object or closing a delivered open item | An item that was delivered and was irrelevant to the task counts as not used, with no penalty |
+| **Repetition** | After the delivery, the agent asked for data it already had at that verification level: name, document number, order number | The questions the extraction reads in the agent's turns, matched with the items of the manifest by the predicate or the object asked about | A verification question your policy requires; an explicit confirmation of a delivered value when the source is marked "confirms before acting"; a question about an item the policy withheld |
+| **Contradiction** | The agent said something a delivered fact disproves: "the visit is booked for Friday" when the delivered fact says Thursday | The agent's claims with the facts that, according to the extraction, they contradict, checked against the delivered facts; on a single-valued predicate, a value different from the delivered one also counts, with dates, amounts and ids normalized | A divergence with a fact the pack left out, by policy, by budget or for lack of use. That is a selection miss, measured apart, never attributed to the agent |
+| **Handoff without reading** | The conversation went to a human or another agent, and the receiver never asked for context | A `handoff` event with no receipt from the target source for that conversation within 10 minutes | A handoff to a source that is not integrated. It shows up in coverage instead |
+
+What counts as delivered: the pack and the `delta`, by the manifest and the delivery time recorded in the receipt. The `live` turns and what history navigation returns are not measured. Only a question asked after the delivery is a repetition. A cited item counts as used only when it is pertinent to the turn, so reciting the whole pack does not inflate the number. For internal agents, use is measured by the recorded action, and repetition is reported as not measured.
+
+## Coverage comes first
+
+Two counters sit next to the signals:
+
+- **Sessions without context**: the source integrated `track` but never called `context()`.
+- **Late context**: the context arrived after the agent's first answer.
+
+An internal agent's task with no message that read no context is not a session here: it is no conversation, and an agent that only records actions, by design, would otherwise show as a coverage gap. A task that read is measured as any other.
+
+The SDK stamps `context_injected_at` and `first_agent_turn_at` on the conversation for you when you use `conversation()` and its `agent()` turn. Without coverage there is nothing to measure, and the number appears as **not measured**, never as zero. In the API a rate with nothing to measure is `null`.
+
+<Note>
+Voice has one more rule. An agent turn whose speech recognition confidence is below the threshold produces no question and no claim. A first transcript pass without the agent's text is marked not measured, with the reason `partial_transcript`, and the second pass measures again. The text your agent's model generated, captured by the SDK, is worth more than the transcript.
+</Note>
+
+## How it runs
+
+The measurement runs on the same path as extraction, with no extra language model call. The questions and claims of the agent come out of the single extraction call that already exists, each with the predicate and the object it is about (the kind of each question, asks data, confirms, verifies or ambiguous, is decided by Niadra's AI, and doubt becomes `ambiguous`, which does not count), and each claim names the candidate facts it contradicts, delivered or not. Matching them against the manifest is deterministic. Every delivery is measured by its own manifest, including a pack compiled at read time: after a code raises the conversation to V2, in a read focused on an object, and in the control group's shadow manifest. The measurement rules carry a version (`m3` since the per-turn slots): together with the extractor versions it forms each row's `measure_version`, and a row measured by older rules is redone when the session is extracted again.
+
+Results are ready right after the session's derived memory, once the receipt writer confirms it stored everything read until the session ended. A second phase runs 10 minutes after the session's last handoff to check whether its receiver read the context. When a session is extracted again by a new extractor version, its measurement is redone and the old rows leave the aggregates: the measurement is derived data, never the source of truth. When the extractor, its prompt or the space's extraction schema changes, a step of the space sees the new version and extracts again the sessions closed in the last 30 days (never past the hot window) whose last good run came from an older extractor: 100 per page, two minutes between pages and at most 1,000 per change, within the space's AI budget. A session whose events named no customer is measured against the profile the agent's reads in it named, when it is one.
+
+## Read the numbers
+
+[`GET /v1/context-use`](/en/api/context-use) groups by any of `day`, `source_id` (the default), `vendor`, `channel`, `view` and `experiment_group`, repeating `group_by`, and filters by `since` and `until` (dates), `source_id`, `channel`, `view` and `experiment_group`. It takes a Console person with the `analysis` or `vendor` role, a key with the `admin` scope, which sees its own source only, or the key of an `analyst` source with the `analytics` scope, which reads every source of the space: the report sums conversations and names none, as [Insights](/en/api/insights-aggregate) reads. The measurement reports of outcomes (`/v1/measure/attribution`, `interleaving`, `experiments`, `power` and `unmet-demand`) take the same keys. Listing and opening conversations (`/v1/context-use/conversations` and `/v1/context-use/{conversation_id}`), the outcome links and the BI reconciliation take a person or an `admin` key, and a key sees only its own source's conversations there.
+
+<CodeGroup>
+```bash cURL
+curl "https://acme-prod.us-east-2.api.niadra.com/v1/context-use?group_by=vendor&group_by=channel&since=2026-09-01&until=2026-09-22" \
+  -H "Authorization: Bearer $NIADRA_TOKEN"
+```
+```python Python
+import os
+import httpx
+
+response = httpx.get(
+    "https://acme-prod.us-east-2.api.niadra.com/v1/context-use",
+    params={"group_by": ["vendor", "channel"], "since": "2026-09-01", "until": "2026-09-22"},
+    headers={"Authorization": f"Bearer {os.environ['NIADRA_TOKEN']}"},
+)
+for bucket in response.json()["buckets"]:
+    rate = bucket["usage_rate"]
+    print(bucket["vendor"], bucket["channel"], rate and (rate["value"], rate["low"], rate["high"]))
+```
+```typescript TypeScript
+const url = new URL("https://acme-prod.us-east-2.api.niadra.com/v1/context-use");
+for (const g of ["vendor", "channel"]) url.searchParams.append("group_by", g);
+url.searchParams.set("since", "2026-09-01");
+url.searchParams.set("until", "2026-09-22");
+
+const response = await fetch(url, { headers: { Authorization: `Bearer ${process.env.NIADRA_TOKEN}` } });
+const { buckets } = await response.json();
+```
+</CodeGroup>
+
+Each bucket counts `sessions`, `deliveries`, `deliveries_used`, `questions`, `repeated`, `contradicted`, `transfers`, `transfers_unread`, `recontacts`, `late_deliveries`, `no_context` (sessions without any context read), `not_measured`, `selection_misses` (contradictions of items the pack did not carry, which are never the agent's), `trimmed_deliveries` (deliveries whose pack left out what that agent does not use) and `tokens_saved` (the tokens those deliveries did not carry, by the compiler's estimate, the one its budgets use). The rates `usage_rate`, `repetition_rate`, `transfer_unread_rate` and `recontact_rate` come with `value`, the bounds `low` and `high` of a 95% Wilson interval and the sample `n`, and are `null` when nothing could be measured, never zero. To see why a number moved, open one conversation with [Context use of a conversation](/en/api/context-use-conversation): one entry per delivery, with the items used, the repeated questions, the contradictions, whether it came late and the manifest it was measured against.
+
+The report also carries `review`: for each signal (`used`, `repeated`, `contradicted` and `selection_miss`), how many of its marks your team judged in sampled review (`judged`), how many it confirmed (`confirmed`), the agreement, with its interval (`agreement`, `null` without verdicts), `contract_ready` when its lower bound reaches 0.90, the measured count (`measured`) and the count corrected by the share of marks reviewers confirmed, with that share's interval (`calibrated`: the marks review would keep; it corrects wrong marks only, never missed ones), on the same sources as the report, over its period or over the last 90 days of it when it is longer. Next to each rate, it is the number that tells you how far to trust it. To be notified when a source's repetition rate crosses your threshold, use the `context_use.repetition_rate` condition of [Triggers and webhooks](/en/concepts/triggers-and-webhooks).
+
+The report also carries `trims`: per source and view, the kinds of item its pack leaves out today, with the measured deliveries behind each one, since when, the window and the minimum of deliveries, and whether it is in force (`active`) or why not (`inactive_reason`: `disabled`, `opt_out` or `critical`).
+
+A person with the `vendor` role only sees the sources named in their role binding, so one vendor never sees the numbers of another. Niadra never compares vendors in public. What you do with the numbers is up to you.
+
+## Claims, constraints and cost per agent
+
+With the agent features on in the space, the same report gains three sections, per source and agent, from the [turn records](/en/concepts/turn-records):
+
+- `claims`, with the `claims` feature: the claims of the agent's outputs by category and verdict of the [claim contract](/en/concepts/claims), and how many stand on evidence (`evidenced`). It is the rate of what the agent states without consulting.
+- `constraints`, with the `signals` feature: the hard constraints the agent's tools were sent (`sent`), the results read against them (`checked`), the verifiable ones, the ones that lacked the field (`unverifiable`), the ones that broke a constraint the tool did not say it relaxed (`violated`), the calls with a declared or suspected relaxation and the items the lists showed. The measure is "sent, verifiable, violated", never only "sent". See [Signals and constraints](/en/concepts/signals#rendering-for-one-tool).
+- `cost`, with the `turns` feature: model and tool calls, tokens and money per turn, against the cost per turn with memory off your company measured and declared in the `measurement` document; `difference_usd` above zero costs more.
+
+What the agents sold, with the method of each attribution, is in [Outcomes and attribution](/en/concepts/outcomes).
+
+## A leaner context per agent
+
+The measurement feeds back to the compiler what each agent uses. The unit is the item's kind with its category, like `fact:contract` or `episode:technical_visit`. For each source and each view, every measured delivery counts, in each unit it carried, one delivery and whether the agent used an item of it. A unit the source received in at least `min_deliveries` measured deliveries of the last `window_days` days (50 and 28 by default) and never used leaves that source's pack in that view. The room it took stays empty, so the pack is smaller by exactly those lines.
+
+These never leave, whatever the measurement says:
+
+- open items and promises, the customer line, patterns and summaries (only a kind whose use the measurement can see leaves: a fact, by its predicate; an episode, as the reason of contact; an action and an object, by the object);
+- what another agent did, which the agent must never deny or redo: other sources' actions of the 72 hours before the latest memory change (the same window the skeleton pins them for), a [handoff](/en/concepts/coordination#handoffs)'s outcome, of any date and from any source, and an action still pending, declared and not yet confirmed by the system of record, or on an object an open item still waits on. Older actions, and the source's own once settled, can still leave;
+- sensitive or restricted items;
+- what the policy releases to that source's purpose by name, in a category or an `allow` rule.
+
+The way back is part of the rule. When the agent asks about an item that was left out, mentions it or acts on it, the unit comes back at the next measurement. And a unit that left is no longer delivered, so it leaves the window and is measured again once the window has passed.
+
+Each source's pack stays deterministic: the trim enters the pack key only when there is one, the pack of the source's usual view is compiled when the memory changes, and it is cached like any other. A conversation in progress keeps the pack pinned to it when the source's trim changes; the next conversation gets the new one. The manifest records the decision: each item left out appears in `excluded` with `reason: "unused"` and `rule: "context_use"`, and the `trim` block carries the units, how many items left and `tokens_saved`. The delivery receipt points at that manifest, and the [policy simulation](/en/api/policy-simulate) shows the same trim for the simulated source.
+
+In the space settings (`settings.context_trim`): `enabled` turns trimming off for everyone, `min_deliveries` (20 to 100,000) and `window_days` (7 to 90) change the threshold and the window, and `opt_out_sources` lists the sources that always receive the whole pack. Sources marked as critical (`critical`) always receive the whole pack too.
+
+## Slots by channel and learned weights
+
+The measurement also reads each turn's `slots` receipt (the ids, kinds, channels and positions of the slots) and judges every slotted item by the same rules as the four signals, against what the same source said, asked or did after the read and up to its next one: a statement on the same predicate or object, a settled value said back (the same number however punctuated) or an action on the object is use; asking for it again is repetition; another value is contradiction. Each channel that ranked the item gets the credit, with the reads it ran in and the ones it missed its deadline in. Contradicting an item the skeleton held back and a slot carried is no longer a selection miss.
+
+[`GET /v1/context-use`](/en/api/context-use) answers by channel in `slot_channels`: per view and retrieval channel (`exact`, `values`, `lexical`, `temporal`, `semantic`), the slots, the use, the repetition, the contradiction, the use rate with its Wilson interval and the channel's weight today; and in `retrieval_weights` the space's fusion weights, with their version, the defaults and the last runs. The detail of one conversation ([`POST /v1/context-use/conversation`](/en/api/context-use-one-conversation)) carries, per delivery, `slots`: every read that carried slots, with the hits per channel, each slot (id, kind, channels, position, use, repetition, contradiction) and the same `why` as the receipt (fused score, position, weight and contribution per channel, the rule of a derived line), as ids and numbers, never a line.
+
+**The weights tune themselves once a night**, after 03:00 in the space's time zone, in every space, and the result is written as a new version (`retrieval_weights`, append-only). The rule, per view:
+
+- the window is the last 7 complete days; a channel with fewer than 30 measured slots in the window, or a view with fewer than two such channels, keeps its weight; a window without any verdict changes nothing;
+- a channel whose use rate is clearly above the rate of all channels together (the lower bound of its Wilson interval above the pooled rate) goes up one step; one clearly below, or clearly more contradicted, goes down one;
+- one step a night compounds to at most 10% a week, and a weight never leaves the band between half and double its default;
+- the control group vetoes: when an experiment holds customers out of memory, and the customers with memory are asked again for what memory had more often than the held-out ones, or the gap between the groups narrowed since the weights last moved, or the groups are too small to tell, nothing moves. Every run keeps the group's say (`no_experiment`, `too_small`, `holds`, `worse`, `narrowed`).
+
+No gradient and no access counts: the signal is the agent's verdict on what it got, and the control group guards the outcome. The read fuses the slots with the view's weights (reread at most once a minute), and the `slots` receipt says in `detail.weights` the version it used; until a space learns something, the defaults hold. The compiler's type weights do not move: moving those would change the pinned bodies.
+
+## Guards, backed answers and the intent gate
+
+The measurement also reads three things of the slots. A slotted settled value is **contradicted** when the answer of the agent states another value of its kind and never it. A [guard line](/en/concepts/context#guard-lines-and-the-intent-gate) is **violated** when the SDK names it on the turn of the agent (`backing.guard_violations`) or the same rule finds it; in the arm with guards that is a contradiction of the value marked `guard` and counts in `guard_violations`; in the control group, the guards that would have been violated count apart. Per day, source, value type and arm, `GET /v1/context-use` answers in `guards` (`GuardTypeUse`: `value`, `guards`, `control`, with the slots and the contradicted of each), and that count is what decides, once a minute on the read path, which kinds the space writes guards for.
+
+The **backing check** comes from the SDK: the turn of an agent carries in `backing` how many values the answer stated, which have no source and which guards it went against, never a value. Per agent source, and so per vendor too, the buckets count `answers_checked`, `unbacked_values` and `unbacked_per_1000`; an answer with an unbacked value sends the session to the sampled review boosted (condition `unbacked_value`), and a guard the SDK names fires `guard.violated` when the turn arrives (one only the measurement finds fires when it runs).
+
+The **intent gate** is counted apart: after a turn served without slots, whether the agent asked the customer, before its next read, for something the pack or its reserve held, by the repetition rules. `gated_turns` answers per view the turns, the `asked_again` and the rate; no weight learns from those rows.
+
+
+The **learned view** of each reader shows in `view_budgets`: per source, target model and view, the factors per section (0.5 to 1.5), the budgets in tokens against the view's own and the difference per read, the share of customers who keep the default view and the last nightly runs with the say of the experiment (`guard`) and the outcome. The measurement behind it counts, per reader and section, the deliveries, the uses and what the agent missed; no line and no customer. See [the view each agent learns](/en/concepts/context#the-view-each-agent-and-each-model-learns).
+
+
+## Control group and 72-hour recontact
+
+The measurement explains; recontact proves. A recontact is a session the customer starts within 72 hours of the end of another, on the same profile, in the same normalized category; that is what `recontacts` and `recontact_rate` count. Outbound contact from your company does not count.
+
+To measure the effect of the memory, your space can run an experiment: a stable fraction of customers, drawn by an HMAC of their oldest handle, receives the memory, and the rest form the control group. The same customer stays in the same group on every channel and vendor. For the control group, `context()` returns an empty pack with `path: "holdout"` and navigation returns empty, while the memory keeps being built so the comparison holds. The SDK treats `holdout` as an empty pack, never as an error. A shadow manifest records what would have been delivered, which is how repetition is counted for the control group. Sources marked critical (`critical`) stay out of the experiment, and a session with a company promise already overdue receives the context and the navigation normally, without the group label: it is billed like any session and never counts as a control observation. Control-group sessions are not billed.
+
+## Sampled review
+
+Your team checks the measurement by sample. [`GET /v1/review/queue`](/en/api/review-queue) hands out up to 50 samples without a verdict at a time, with the facts the memory extracted from the session, the signals the measurement marked in it, the pending items and promises the conversation left (`open_items`, with `owner` and `promise`) and the customer's patterns that rest on it (`traits`, with their evidence), each only when the policy of the sample's purpose lets it through whole: a fact whose category that purpose does not read is left out and counted in `withheld`. A session that left no fact, pending item, pattern or signal is not sampled, and a sample left with nothing to judge, because its memory was erased, leaves the queue by itself. The sample says in `condition` why the session was drawn: the base rate, a source that started sending in the last two weeks (`new_source`), an extractor changed in the last week that extracted the session (`new_extractor`), a pattern of the customer first derived in the last week (`new_trait`), a measurement signal or a sensitive category. A reviewer records a verdict per item with [`POST /v1/review/{sample_id}/verdicts`](/en/api/review-verdicts): the `target` (`fact`, `open_item`, `signal` or `trait`), its id and the verdict. Verdicts are the one governance write that only a person makes: it takes a Console person with the `review` role, never a source key.
+
+[`GET /v1/review/agreement`](/en/api/review-agreement) shows how much reviewers and the system agree over the last `days` (90 by default), per kind of item (`fact`, `open_item`, `trait`) and per signal of the measurement (`signal:used`, `signal:repeated`, `signal:contradicted` and `signal:selection_miss`): it is the number that tells you whether to trust the measurement. Each verdict names the source of its sample, so a person with the `vendor` role reads the agreement on its own sources only, and `source_id` narrows the report to one source. Agreement between reviewers counts when two people record verdicts on the same item. A verdict never changes the memory by itself: a wrong fact leaves through [a correction](/en/api/feedback), a wrong pattern through [a retraction](/en/api/trait-retract).
+
+Every verdict is also a test of the space. [`GET /v1/review/cases`](/en/api/review-cases) runs each verdict of the period (`days`, 90 by default) against today's memory and measurement: a signal against the current mark of the same item in the same pack, a fact against whether it still stands, an open item against whether it is still in memory. The answer tallies passing and failing cases per target (`tallies`) and lists the failing ones (`failing`, up to 50), so a new extractor or new measurement rules show at once which judged cases they now answer otherwise; a vendor runs only its own agents' cases. And the verdicts correct the count they judged: the context-use report carries, per signal, the measured count and the one corrected by the share of confirmed marks (`calibrated`). In the Console, the Review screen lists the period's test cases, and the Usage screen shows the count review would keep next to the agreement.
+
+## Knowledge gaps and standing answers
+
+Measurement also says what memory does not know. A nightly pass, after 03:00 in the space's time zone, reads the day's slot receipts (the kind of value the customer's turn asked for and whether the rules wrote the "no record" line) and the questions agents asked in the day's measured conversations (a detail asked of a customer memory already knew and had no row of before the question, through confirmed links only). It keeps per day, subject and conversation category the number of times and a HyperLogLog sketch of the customers, built from hashes salted by the space: a 30-day window counts each customer once, and no id, value or text is stored. None of this calls a model, and nothing reaches the agents' context.
+
+`GET /v1/insights/gaps?days=` (1 to 90, 30 by default) returns three lists, with the `analysis` or `admin` role or a key with the `analytics` scope, and leaves an analytics receipt like the other base analysis tools:
+
+- **Gaps** (`gaps`): "132 customers asked for the invoice in billing conversations and memory had no record", with the sources that could record the subject through their webhook mapping (`mapping`) or the extraction schema (`schema`). With no source, the gap is structural: no system sends that data to memory, and it is the one to connect next.
+- **Recurring questions** (`recurring`): the ten most frequent, with the share of times memory answered (`answered_share`).
+- **Proposed standing answers** (`proposals`): lines written by rule in the space's language, for your team to approve as it approves the schema: a subject no source records (no record must never read as "the customer has none") and a question the rules answer nine times in ten.
+
+A group with fewer customers than the analysis minimum group size, or in a category the policy does not open to analysis, is left out and counted in `withheld_groups`. `POST /v1/insights/gaps/review` keeps the team's decision on a gap or a proposal (`accepted` or `dismissed`, with a note), and the Console shows it all on the Knowledge gaps screen.
+
+## Usage
+
+What your space consumes comes from [`GET /v1/usage`](/en/api/usage), for a `since` and `until` window, by `hour` or `day`, optionally for some `metric` values: `session_billable` (the conversation or task, the billed unit), `context_read`, `history_call`, `event_ingested`, `extraction_run` and `extraction_tokens`, `measure_run`, `trigger_fired`, `webhook_delivered`, `export_run` and `export_bytes` (the bytes of the on-demand package and of each continuous export run, counted once per run), `assistant_tokens` (the tokens of each call to the configuration assistant) and `review_sample`. Exported bytes and assistant tokens enter as usage events in the same transaction as the work; the price stays per conversation or task. With `group_by=source`, each row names the source, so you see which agent and vendor drove the conversations and tasks. It takes the `analysis` role or an `admin` key. Each space answers for its own usage in `GET /v1/usage`, in its region, and every 15 minutes the cell sends each space's hourly usage to the control plane, where the control API's [`GET /v1/usage`](/en/api/control/usage) sums the whole tenant. The control API's [`GET /v1/usage/statement?month=YYYY-MM`](/en/api/control/usage-statement) is the month's statement, one line per space of the tenant that existed in the month (conversations and tasks, every metric and the AI cost), in JSON or, with `format=csv`, as CSV; the Console downloads the statement of any of the last twelve months, for the `analysis` and `security` roles. The statement says what was used, never the price, which stays in the contract. A conversation or task is billed once when any agent reads the memory in it, and counts for the source that opened it. Control-group sessions are not billed, not even when the agent looks up the history in them.
+
+[`GET /v1/usage/budget`](/en/api/usage-budget) shows, per purpose (`extraction` and `assistant`), today's AI spend, the space's daily ceiling, whether the contract set it or it is Niadra's default, and whether work waits for the next day, with the time it resumes. With no ceiling in the contract, extraction's ceiling follows the space's traffic: the higher of a floor of US$ 5 a day and three times the median daily spend of the last 7 days (counting only days with spend). It is there against a runaway loop, never to set the pace of memory: a busy Monday or a campaign passes. Past the ceiling, extraction waits for the next day (UTC) and the memory of conversations arrives later, with nothing lost; the [`usage.budget_reached`](/en/concepts/triggers-and-webhooks) webhook says so once a day, and the [`budget_reached`](/en/api/data-issues) data issue opens next to the others, in the Console. It takes the `analysis` role.
+
+[`GET /v1/usage/prompt-cache`](/en/api/usage-prompt-cache) shows your agents' prompt cache: per day, agent, vendor, provider or model, the calls that reported their usage, the input tokens, the ones read from the cache and written to it, the hit rate and the savings estimated at each model's price. The usage arrives with the agent's turn, through the SDKs' `wrap()` or the turn's `usage`. The price table ships with Niadra, with the date it was taken, and `settings.model_prices` sets a space's prices by `provider/model`; calls of models without a price are left out of the estimate and counted apart. It needs the `analysis` or `vendor` role, and a vendor sees only its own sources.
+
+## Privacy
+
+The measurement reads what the cell already holds, and its result is about the agent, never about the data subject. Human attendants are aggregated by source and by channel, never by the id of the person who answered: the measurement keeps no person's id. Erasing a profile removes its measurement rows through the same lineage.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Receipts and audit" href="/en/concepts/receipts">
+    the delivery record every signal points to.
+  </Card>
+  <Card title="Triggers and webhooks" href="/en/concepts/triggers-and-webhooks">
+    get notified when a repetition rate crosses your threshold.
+  </Card>
+  <Card title="Context use" href="/en/api/context-use">
+    the aggregate endpoint in detail.
+  </Card>
+  <Card title="Voice agents" href="/en/guides/voice-agents">
+    capture turns so the measurement has the agent's text.
+  </Card>
+</CardGroup>

@@ -1,0 +1,8 @@
+User-agent: *
+Content-Signal: ai-train=yes, search=yes, ai-input=yes
+Disallow: /cdn-cgi/
+Allow: /_next/image
+Disallow: /_next/
+Disallow: /v1/
+Disallow: /openapi/
+Sitemap: https://docs.niadra.com/sitemap.xml

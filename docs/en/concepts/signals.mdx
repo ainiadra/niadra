@@ -1,0 +1,145 @@
+---
+title: "Signals and constraints"
+description: "What the customer was shown, saw, wanted and refused: interactions, the constraints block for the agent's tools, beneficiaries, inferences and the reviewable profile."
+---
+
+"Nothing in black", "not that network", "don't use that argument": what one person wants, refuses and is, in a form the agent's tools can use. The memory derives the customer's **signals** from what they were shown, what they saw, what they engaged with, what they said they want or refuse and what they said they are, and hands them back to the tools as a **constraints block**, once per turn, with the context. A stated preference is a hard constraint; an inference is at most soft, and the customer can see it, correct it and delete it.
+
+## Turning it on and off
+
+Signals are the space's `signals` feature, on by default; a space turns it off in the `features` document, by the `security` role. With it off, an `interaction` item in the batch is refused, [`POST /v1/constraints`](/en/api/constraints) answers 404 and a context read that asks for `include: ["constraints"]` gets the context without the block. Interactions arrive inside the [turn record](/en/concepts/turn-records), when the space records turns, or as batch items when it does not.
+
+## Interactions
+
+An interaction is what the person was shown or did, in eight kinds:
+
+| `kind` | What it is |
+|---|---|
+| `presented` | A list delivered to the person: the exposure, with `exposure_id`, the list, the page, the items with their position and the values shown, and how many were visible |
+| `seen` | How far the person saw the list, as the list component reports |
+| `engaged` | A click, a detail opened, a mention ("tell me about the second one"), an item added to a cart, compared or shared |
+| `feedback` | The person liked or disliked an object, and why, by field |
+| `preference` | What the person wants or refuses: a field of a declared type, an operator (`in`, `not_in`, `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `between`), values, the strength (`must` and `must_not` make a hard constraint; `prefer` and `avoid`, a soft one), the scope (`turn`, `session` or `persistent`) and the category |
+| `attribute` | What the person is: a size, a preferred network, a diet, with the measuring system |
+| `watch` | "Let me know when": a condition on a shared object, with the consent event |
+| `unwatch` | The end of a watch |
+
+The **exposure** has a canonical moment: `delivered_at`, when the list reached the customer, never when a tool returned the results or the model named them. It gets an id (a UUIDv7 the SDK mints at delivery) and each item has a position in the whole list; "see more" is the same list on the next page. An item counts as exposed when its position is among the visible ones, or up to the highest `max_index_seen` of a `seen` of the same exposure. `method` says how Niadra knew: `bridge` from the interface bridge, `otel` from a `niadra.exposure` span, or `tool_result`, inferred from what a tool returned, which counts more than the person saw and never serves attribution by line. `shown` keeps the values the item displayed for the fields its type tracks or lets be claimed, and it is against them that the state read later says what changed since the person saw it.
+
+Purchases, deliveries, returns and "kept it" are not interactions: they come from the lifecycle outcomes of the objects that record them, never from what an agent says. A preference is never inferred: `source` is `stated` (the person said it), `tool_args` (the SDK captured it from the arguments of a tool call) or `correction` (the person corrected an inference). Niadra never derives affinity or interest from an interaction with an object whose type or field is sensitive; for those it keeps only the type and a count. Raw interactions are kept until an erasure, or for the window you set in `raw_content`; the nightly measurement pass reads them and keeps the aggregates beside them.
+
+<CodeGroup>
+```python Python
+from niadra.exposure import exposure_token
+
+# What the person was shown, recorded in the turn; the token goes on the card
+with conversation.turn(build=BUILD) as frame:
+    exposure_id = uuid7()
+    frame.interact({
+        "kind": "presented", "exposure_id": exposure_id, "list_id": "results-1", "list_kind": "search_products",
+        "delivered_at": now_iso(), "visible_k": 3,
+        "items": [{"pos": 1, "ref": "item_variant:store:991", "shown": {"price_sale": 199.9}}],
+    })
+    card_token = exposure_token(exposure_id, 1)  # nx1.<id>.1.<verifier>, copied by the app into the cart line
+    frame.interact({"kind": "preference", "attr": "item_variant.color", "op": "not_in", "values": ["black"], "strength": "must_not", "source": "stated"})
+```
+```typescript TypeScript
+import { exposureToken, uuidv7 } from "@niadra/sdk";
+
+// The token goes on the card; the app copies it into the cart line as an opaque string.
+// In TypeScript the interactions themselves travel as batch items (the cURL tab).
+const exposureId = uuidv7();
+const cardToken = exposureToken(exposureId, 1); // nx1.<id>.1.<verifier>
+```
+```bash cURL
+# A source that records no turns sends each interaction as one item of the batch
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/batch" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"items": [{"type": "interaction", "idempotency_key": "pref-8812-1",
+       "handle": {"type": "phone_e164", "value": "+5511900005678"}, "conversation_id": "wa-8812",
+       "occurred_at": "2026-09-29T14:02:11Z",
+       "interaction": {"kind": "preference", "attr": "item_variant.color", "op": "not_in", "values": ["black"], "strength": "must_not", "source": "stated"}}]}'
+```
+</CodeGroup>
+
+## The constraints block
+
+The block reaches the agent once per turn, with the context (`include: ["constraints"]`), or through [`POST /v1/constraints`](/en/api/constraints), for one customer and, optionally, rendered for one tool. It has a `version` (`cv_` and a digest of the content, which the turn record cites) and:
+
+| Field | What it holds |
+|---|---|
+| `subject.for` | Whose block it is: `self`, `beneficiary:<id>` or `gift` |
+| `hard` | What the person said they want or refuse, and must hold: each with `attr`, `op`, `values`, `source`, `scope`, `category`, `relax` (`never` or `ask`), the origin (the event or the turn where it was said) and `expires_at` |
+| `soft` | Preferences with a weight: inferred affinity, or a stated `prefer` or `avoid` |
+| `attributes` | What the person is (a size, a network), with where it came from and when it applies |
+| `exclude`, `already_presented` | Objects not to offer again, and the ones shown before, with how many times and the numbers each was last shown with (`values`: each `money`, `percent` or `number` field of the type, with its role and `claim_safe`, true while the type lets the field be claimed and its claim age has not passed since it was shown). The [claim contract](/en/concepts/claims) takes them as evidence |
+| `relaxation_order` | What gives way first when a search finds nothing: `soft`, then ids |
+| `precedence` | `current_utterance`, `stated_persistent`, `inferred`: what wins over what |
+| `rules` | Your own company's rules delivered with the block, each with its origin (`code`, `db:<table>`, `prompt:<version>`, `policy:<version>`) and its rank in the order the company declared |
+| `conflicts` | Entries that cannot both hold, the one kept and why |
+| `ask` | Questions the agent should ask before assuming, such as `for_whom` |
+| `omitted` | Only when the block's size left something out: how many entries of each kind (`hard`, `soft`, `exclude`, `already_presented`, `instructions`) were left out. Restrictions (`must_not`, `only_with`) keep their room first, newest first, instructions go up to 500, and `text` says in one line what was left out. Nothing leaves memory: what did not fit stays stored and comes back in the next read that has room |
+| `text` | The block as lines for a model, rendered by the server in the space's language (Portuguese, English or Spanish): each field by its type's label (the field's `label`, or its name in words) and each operator in words, such as `required: monthly price at most 700` or `exigido: sem coparticipação`. A constraint that lost a conflict is left out, and `text` is not part of `version`. The SDK places it in the turn block beside the state view's text; a block with nothing to say has an empty `text` |
+
+The block passes the [verification gate](/en/concepts/context#blocks-by-include) of the pack of the same read: when the pack or the live turns withheld something until identity is verified further, the block says nothing of the customer. [`POST /v1/constraints`](/en/api/constraints), on its own, is a program read with its own receipt, and is not gated.
+
+What may enter: a hard constraint comes only from what the person said; an inference never becomes hard, and a negative inferred from behavior is at most soft. An attribute the person did not say (`acquired`, `kept`, `returned_for_size`, `inferred`) applies only `when_asked`: an inferred size applies only when the person asks for "my size". The current utterance wins: when a hard constraint said now clashes with one said before, the block keeps the new one and reports the pair in `conflicts`; between a stated and an inferred one, the stated one stays. Both entries of a conflict stay in the block, so the turn record can cite either, and `kept` says which one stands. A clash between two company rules is kept by rank and returned to the company as a [data issue](/en/api/data-issues). A session constraint lasts at most 24 hours, and a turn constraint never reaches the server.
+
+### Tool bindings
+
+A tool's **bindings** live in the space's `tool-bindings` configuration document, of the `integration` role: one per tool and source (an empty `sources` applies to every source), with `args`, which argument carries which field (`attr` as `type.field`, `param`, `transform`, `negation.param`, `ops`); `results`, where the result carries objects of a type (`path`, `type`, `namespace`, `id`) and which key of each item holds which field (`fields`); and `capabilities`: `overfetch` (the tool returns more than asked, and the SDK filters the residual), `relax_flag` (where the result says the tool relaxed what it was asked), `dry_run_param` (the argument that makes a call change nothing, for the [counterfactual](/en/concepts/outcomes)) and `mask_output` (the SDK masks the fields the key may not read in the output).
+
+[`GET /v1/sdk/profile`](/en/api/sdk-profile) serves in `tool_bindings` the bindings of the calling source, without `sources`. The document is the one place a binding lives: the SDK never takes one from code. It measures the block through the binding served for the tool's name, runs the counterfactual through it and, when the code leaves `mask_output` unset, follows `capabilities.mask_output`; a tool the space does not bind is not measured, and its counterfactual stops before calling it. [`POST /v1/constraints`](/en/api/constraints) with `tool` answers the block already rendered for that tool in `rendered`, in advisory mode, through the calling source's binding, without changing `version`; a tool the space does not bind for that source answers 422. An MCP-only agent asks for the same through the [`get_constraints`](/en/guides/mcp) tool, with an optional `tool`.
+
+```json
+{
+  "tool": "search_plans",
+  "args": [
+    { "attr": "health_plan.copay", "param": "copay", "ops": ["eq"] },
+    { "attr": "health_plan.monthly_price", "param": "max_price", "ops": ["lte"] },
+    { "attr": "health_plan.network", "param": "networks", "negation": { "param": "exclude_networks" } }
+  ],
+  "results": { "path": "$.plans", "type": "health_plan", "namespace": "sales", "id": "plan_id", "fields": { "copay": "copay", "monthly_price": "price" } },
+  "capabilities": { "overfetch": true, "dry_run_param": "dry_run", "mask_output": true }
+}
+```
+
+### Rendering for one tool
+
+The SDK renders the block for each tool through its bindings: which argument carries which attribute (`attr`, `param`, `transform`, `negation.param`, `ops`) and whether the tool overfetches. `in` and `eq` go to the parameter, `not_in` and `ne` to the negation parameter, comparisons only when `ops` lists them; a constraint no argument expresses is **residual**, filtered from the results by the SDK when the tool overfetches, and unenforced when it does not, which the rendering says. In advisory mode (the default), the call goes as it is and the SDK returns the suggestions; in apply mode, it adds a suggested parameter only when the call left it out and everything behind it may be injected (a stated hard constraint, of turn or session scope, with no conflict; a stated attribute), never overrides an argument the call set, never injects an inferred size or a persistent constraint. When the call sets a constraint's own argument to a value the constraint refuses, the call's value stands, and the pair is reported as a conflict.
+
+Sent is not applied: a tool may relax a filter on its own. After the call, the SDK reads the results and counts, over the hard constraints sent, `results_checked`, `violations`, `unverifiable` (the results that break none but lack the field of one) and `relaxed`. The measure is "sent, verifiable, violated", never only "sent"; the counts go to the turn record and to [context use](/en/concepts/context-use) (`constraints`, per source and agent). A tool decorated with `@Niadra.tool(...)` in Python, or `niadra.tool(name, fn)` in TypeScript, does that measurement itself, through the binding the space declares for it and the profile serves; `niadra.constraints.render` in Python and `renderConstraints()` and `honoredConstraints()` in TypeScript expose the rendering and the count. The example of a bound tool's counterfactual is in [`examples/tool_counterfactual.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/tool_counterfactual.py) and [`examples/tool-counterfactual.ts`](https://github.com/ainiadra/niadra-sdk-ts/blob/main/examples/tool-counterfactual.ts).
+
+## Beneficiaries and gifts
+
+Every interaction carries `for`: `self` (the default), `beneficiary:<id>` (a person under the customer's profile, such as a dependent) or `gift`. Signals are kept apart per `for`: what a person buys for a dependent never becomes their own taste, and a beneficiary's block holds that beneficiary's entries, because the size of whoever will wear it decides. A gift goes to a disposable bucket and never becomes an attribute of the customer. A delivery to another address is never taken as a beneficiary by itself: the block asks `for_whom` in `ask`. See [Identity and verification](/en/concepts/identity#beneficiaries).
+
+## Inferences and the reviewable profile
+
+An **inference** is one thing the signals infer about the customer, with what it rests on: an affinity (`soft_constraint` when the block already carries it as a soft entry, `affinity` when not yet), a size inferred from outcomes (`attribute`) or an interest in an object (`interest`). The evidence is in counts: effective exposure (weighted by position, `1 / log2(pos + 1)`), weighted signal, events, sessions and lift; an item shown often and never chosen becomes an implicit negative, soft. Derivation runs when the oldest pending item reaches 5 minutes or when the session has been quiet for 1 minute; a nightly pass adjusts the priors with what the space saw in 90 days, only from values seen by at least 10 people. What the customer said is not an inference and is not listed here.
+
+The customer can see, correct and delete each inference, through your team: [`GET /v1/profiles/{profile_id}/inferences`](/en/api/profile-inferences) lists each one with its origin, evidence, confidence, purposes of use and date; [`/correct`](/en/api/profile-inference-correct) replaces the inference with what the customer says, as a stated preference or attribute, and deletes it; [`DELETE`](/en/api/profile-inference-delete) leaves a tombstone, and the same evidence never infers it again. An objection to profiling ([`POST /v1/profiles/{profile_id}/traits/opt-out`](/en/api/traits-opt-out)) stops derivation. In the Console, the profile's inferences tab shows all of this, for the `security` role.
+
+A **review request** ([`POST /v1/profiles/{profile_id}/review-requests`](/en/api/review-requests-create)) takes to the controller's data protection officer a subject's request to review an automated decision, with the explanation built from [receipts](/en/concepts/receipts): their ids, kinds, surfaces, rules, versions and inputs, by reference, never personal content. The controller's decision is recorded once ([`/resolve`](/en/api/review-request-resolve)), and the `review_request.created` and `review_request.resolved` webhooks tell. Requests stay at least 395 days after resolution, as a legal obligation, and an erasure of the subject counts them in `retained`. See [Privacy](/en/concepts/privacy#the-reviewable-profile).
+
+## Experiments by element
+
+The space can measure what each element of the block does: an experiment in the `measurement` document drops, per arm, the constraints block, the inferred soft signals, the inferred sizes or the state block, and compares what people did afterwards. Critical sources never go to a control arm, and the memory's control group gets no block at all. Before an experiment, the **tool counterfactual** says whether the element changes what the tool returns, from recorded turns. See [Outcomes and attribution](/en/concepts/outcomes).
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Object types and state" href="/en/concepts/object-types">
+    the fields and attribute families a preference names.
+  </Card>
+  <Card title="Outcomes and attribution" href="/en/concepts/outcomes">
+    from the exposure to the order, through the exposure token.
+  </Card>
+  <Card title="Constraints block" href="/en/api/constraints">
+    the reference of `POST /v1/constraints`.
+  </Card>
+  <Card title="Retail agents" href="/en/guides/retail-agents">
+    lists, sizes and "nothing in black" in a store.
+  </Card>
+</CardGroup>

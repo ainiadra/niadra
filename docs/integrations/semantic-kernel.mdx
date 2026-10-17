@@ -1,0 +1,82 @@
+---
+title: "Semantic Kernel"
+description: "A memória do cliente num kernel: uma thread para o ChatCompletionAgent, filtros de prompt e o kit como um KernelPlugin."
+---
+
+`NiadraKernel` traz três peças: `register(kernel)` acrescenta ao kernel o plugin `niadra` e dois filtros (renderização de prompt e invocação de função), `thread()` é a thread de um `ChatCompletionAgent`, e `plugin` é o kit como `KernelPlugin`. Só em Python.
+
+## Instalar
+
+```sh
+pip install 'niadra[semantic-kernel]'   # semantic-kernel 1.44.1 ou mais novo, abaixo da 2
+```
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | Com um `ChatCompletionAgent`, `memory.thread()` é a thread do agente: a cada leitura o contexto (depois das notas do agente, com `agent_memory=`) vem primeiro, e o agente o coloca logo depois das instruções; depois as mensagens guardadas; e o `turn_block` no fim. Só a conversa fica guardada; as mensagens da Niadra são montadas de novo a cada leitura. Numa função de prompt (`kernel.invoke_prompt`, `kernel.invoke(function, ...)`), o filtro de renderização coloca as mesmas coisas no prompt renderizado. Se você chama um chat service por conta própria, `await memory.chat_history(history)` devolve uma cópia com elas |
+| Turnos | A thread registra as mensagens do usuário como turnos do cliente e o texto do assistente como turno do agente, com o uso e o modelo; numa função de prompt, os filtros registram a última mensagem de usuário do prompt e a resposta da função |
+| Ferramentas | `memory.plugin` é um `KernelPlugin` chamado `niadra` cujas funções são as ferramentas do histórico, com os nomes, descrições e esquemas JSON do kit, amarradas ao cliente. O Semantic Kernel mostra uma função ao modelo como `plugin-function`: `niadra-search_customer_history` |
+| Verificação | `conversation.verify()` antes do primeiro contexto |
+| Transbordo | `transferred_to_agent()` e `transferred_to_human()` registram a transferência, num group chat ou numa orquestração que passa a conversa adiante, ou numa escalada para uma pessoa |
+
+## Exemplo mínimo
+
+```python
+"""A Semantic Kernel ChatCompletionAgent with the customer's memory as a thread, filters and a plugin."""
+
+import asyncio
+
+from semantic_kernel import Kernel
+from semantic_kernel.agents import ChatCompletionAgent
+from semantic_kernel.connectors.ai import FunctionChoiceBehavior
+from semantic_kernel.connectors.ai.open_ai import OpenAIChatCompletion
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.semantic_kernel import NiadraKernel
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    memory = NiadraKernel(niadra.conversation("thread-81", subject=phone("+5511912345678")))
+    agent = ChatCompletionAgent(
+        service=OpenAIChatCompletion(ai_model_id="gpt-4.1"),
+        kernel=memory.register(Kernel()),
+        name="acme",
+        instructions="You are Acme's agent.",
+        function_choice_behavior=FunctionChoiceBehavior.Auto(),
+    )
+    thread = memory.thread()
+    response = await agent.get_response(messages="Where is my replacement lid?", thread=thread)
+    print(response.content)
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+
+O mesmo código está em `examples/semantic_kernel_agent.py`.
+
+## Memória do agente
+
+`NiadraKernel(conversation, agent_memory=True)` põe as notas do próprio agente antes do contexto do cliente e acrescenta as duas ferramentas ao plugin. Veja [Memória do agente](/concepts/agent-memory).
+
+## Limites
+
+- Funciona com conversas de `Niadra` e de `AsyncNiadra`.
+- Nada aqui para o kernel: com a Niadra lenta ou fora, o prompt sai sem o contexto e uma ferramenta responde que o histórico está indisponível.
+- O extra instala `azure-ai-agents` em pré-lançamento, porque o `semantic-kernel` 1.44 o exige.
+- Testado contra `semantic-kernel` 1.44.1 com o chat service substituído por um fake e a Niadra no emulador.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Microsoft Agent Framework" href="/integrations/agent-framework">
+    o context provider do sucessor do AutoGen.
+  </Card>
+  <Card title="Memória do agente" href="/concepts/agent-memory">
+    as notas de trabalho do próprio agente.
+  </Card>
+</CardGroup>

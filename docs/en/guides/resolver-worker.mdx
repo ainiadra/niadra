@@ -1,0 +1,159 @@
+---
+title: "The resolver worker"
+description: "Niadra never calls a system of yours: when a value must be read again, it asks, and a worker of yours reads and returns it, inside your company and within the budget you gave."
+---
+
+A price the agent is about to state is too old to claim. A timer fired and asks for a re-read. A customer watches an item and its value must be checked live. In all of those cases someone must ask your system of record, and Niadra never does: it **asks**, and a **resolver worker** of yours, running inside your company with your credentials, reads the object and sends back what it read through [`POST /v1/objects/push`](/en/api/objects-push). The same code serves the immediate re-read of a claim, in the agent's process, within 300 ms.
+
+## Before you start
+
+- The `state` feature on in the space and the [declared types](/en/concepts/object-types) with a `refetch` section: the re-read reasons, each with its condition, priority and budget, and the budget's unit (`platform_call`, for instance), never money.
+- A key with the `state:push` scope for the worker, and `context` for the agent that verifies claims.
+
+## The resolvers
+
+A resolver is a function of yours per type: it takes the object's reference and the fields asked for and returns the fields read from the source, with their provenance. Register one per type:
+
+<CodeGroup>
+```python Python
+from datetime import datetime, timezone
+
+from niadra import Niadra
+from niadra.resolvers import Resolved
+
+niadra = Niadra()
+
+
+def read_variant(ref, fields):
+    row = platform.variant(ref.id)  # your system, your credentials
+    return Resolved(
+        fields={"available": row.available, "price_sale": row.price_sale},
+        version=row.version,                                  # the source's version of the object, when it has one
+        observed_at=datetime.now(timezone.utc),
+    )
+
+
+niadra.resolvers.register("item_variant", read_variant, rate=20)  # at most 20 reads per second
+```
+```typescript TypeScript
+import { Niadra } from "@niadra/sdk";
+
+const niadra = new Niadra();
+
+niadra.resolvers.register(
+  "item_variant",
+  async (ref, fields) => {
+    const row = await platform.variant(ref.id); // your system, your credentials
+    return { fields: { available: row.available, price_sale: row.price_sale }, version: row.version, observedAt: new Date() };
+  },
+  { rate: 20 }, // at most 20 reads per second
+);
+```
+</CodeGroup>
+
+A resolver may return just a dictionary of fields: they count as observed now, live. `version` is the object's version at the source, when it has one; a push moves a field only under a greater version. Each resolver runs at the rate you gave and behind a circuit breaker: 5 failures in 30 seconds open it for 30 seconds, and while it is open nothing of that type is read.
+
+## The worker
+
+The worker takes the refresh requests Niadra admitted ([`GET /v1/state/refresh-requests`](/en/api/state-refresh-requests)), the higher priorities and the older ones first, each leased to it for 60 seconds; reads each object with the type's resolver, at its rate; and sends what it read through `POST /v1/objects/push`, with the request's `request_id` on each item, which settles the request and its paid reservation. A request the resolver cannot answer, the worker **releases** through [`POST /v1/state/refresh-requests/{request_id}/release`](/en/api/state-refresh-request-release): `not_found` when the resolver returns `niadra.resolvers.NOT_FOUND` (`NOT_FOUND` in TypeScript), because the source no longer has the object, and `failed` when it failed; the request leaves at once and its paid call counts as failed. A request neither answered nor released is offered again, three times at most, and then given up, with its paid call counted as failed. A request of a type with no resolver, or whose circuit is open, is left to its lease, with one log warning per type. `Resolvers.fetch()` says why a read brought no object; `resolve()` is unchanged.
+
+<CodeGroup>
+```sh Python
+niadra resolver-worker --resolvers app.resolvers:register --limit 50 --poll 2
+# --once serves what waits now and stops; NIADRA_API_KEY holds the state:push key
+```
+```sh TypeScript
+npx niadra resolver-worker --resolvers ./dist/resolvers.js:register
+```
+```python Python (in code)
+from niadra.cli.worker import ResolverWorker
+
+worker = ResolverWorker(niadra, limit=50, poll=2.0, budget=5.0)
+pushed = worker.run_once()  # leases, resolves, pushes; returns how many objects were pushed
+```
+```typescript TypeScript (in code)
+import { ResolverWorker } from "@niadra/sdk";
+
+const worker = new ResolverWorker(niadra, { limit: 50, pollMs: 2000, budgetMs: 5000 });
+await worker.run(abortController.signal); // or await worker.runOnce()
+```
+</CodeGroup>
+
+`--resolvers` names a module and an export: a `Resolvers` already built, or a function that registers the resolvers on the one it gets. Run one worker per space, with its `state:push` key; several processes may run in parallel, because each request is leased to one.
+
+## Who asks, and when
+
+Niadra evaluates each type's `refetch` reasons when it reads the object and when a value arrives, and names on the read the highest-priority reason that holds (`refetch.reason`), or `floor` when the newest observation passed the age at which a re-read is due whatever the reasons say. `admitted` says whether a request for the worker was admitted, within the budget and in this order: a reason in `never` is reported and never admitted; one request per object and reason in the budget's period (`item/1h` is an hour); the type's `min_interval` between two re-reads of one object; and the paid budget of the company's unit, reserved before the read, where an unknown cost reserves the highest measured and a paid call that fails still counts. The read never waits for the source and never fails because of it.
+
+An example of reasons, on a shared store item:
+
+```json
+"refetch": {
+  "reasons": [
+    { "name": "never_observed", "when": "observer(available) == none", "budget": { "units": 1, "per": "item/1h" } },
+    { "name": "exposed_now", "when": "presented_in_top(3)", "budget": { "units": 1, "per": "item/60s" } },
+    { "name": "claim_pending", "when": "purpose == 'claim'", "budget": { "units": 1, "per": "turn" } },
+    { "name": "interest_alert", "when": "watch_count > 0", "budget": { "units": 1, "per": "item/5min" } }
+  ],
+  "budget": { "unit": "platform_call", "never_money": true }
+}
+```
+
+A timer with `refresh(<field>)` also asks for a re-read through the same reasons.
+
+## Watch revalidation
+
+A [watch](/en/concepts/object-types#shared-objects) tells a customer when a shared object meets a condition, and a notice is only worth sending if the condition is true at the source. When a write moves the object and the condition comes to hold on a value that did **not** come live from the source (a snapshot, a cache, what a tool showed), Niadra does not tell yet: it opens a refresh request with the reason `watch_revalidation`, admitted like any other, with the priority and the budget of the type's `interest_alert` reason, one per object, for every watch on it. The worker serves it first, along with the other requests, and the push with the `request_id` decides: Niadra checks the condition on the stored object with the values read in place of the source's own, even when the push was `stale_version`, and sends `object.watch_fired` with `revalidated: true` only when the condition still holds.
+
+With no fresh value, the type's `refetch.unconfirmed_watch` decides: `fire`, the default, tells with `revalidated: false`; `drop` tells nothing. That happens when no worker took requests in the last ten minutes, when the budget refused the request, when the worker released it (`not_found` or `failed`) or when it was given up after three leases. A type with no `refetch`, or that lists `watch_revalidation` in `never`, asks nothing, and `fire` applies at once. A company that runs the worker therefore gets confirmed notices; one that does not gets the same notices with `revalidated: false`, or none.
+
+```json
+"refetch": {
+  "reasons": [
+    { "name": "interest_alert", "when": "watch_count > 0", "budget": { "units": 1, "per": "item/5min" } }
+  ],
+  "unconfirmed_watch": "drop"
+}
+```
+
+## The immediate re-read of a claim
+
+`claim_pending` does not go to the worker: it is admitted for the check in the agent's own process, which reads on the spot. `conversation.verify_claim(ref, field, value)` asks Niadra first ([`POST /v1/state/verify`](/en/api/state-verify)); when the value is not safe to claim (stale, expired, never observed), it reads it again through the type's resolver, within the 300 ms budget, and the fresh value decides. The value read enters the turn as an observation, so the [claim contract](/en/concepts/claims) and the memory see it. A value is never verified from a stale copy: without a resolver, past the budget or with the breaker open, the answer is `claim_safe: false`, with the gap said.
+
+<CodeGroup>
+```python Python
+verdict = conversation.verify_claim("item_variant:store:991", "price_sale", 199.9)
+if verdict.claim_safe:
+    say(f"R$ {verdict.value or 199.9:.2f}")
+else:
+    say_without_the_price(verdict.prohibitions)  # or quote again
+```
+```typescript TypeScript
+const verdict = await convo.verifyClaim("item_variant:store:991", "price_sale", 199.9);
+if (verdict.claimSafe) say(`R$ ${(verdict.value ?? 199.9).toFixed(2)}`);
+else sayWithoutThePrice(verdict.prohibitions); // or quote again
+```
+</CodeGroup>
+
+The `ClaimVerdict` carries `claim_safe`, `status` (`fresh`, `stale`, `expired`, `unknown`), `matches` (whether the given value matches the one held), `source` (`niadra`, `resolver` or `none`, when nobody could say), `declared_gaps`, `prohibitions` and the fresh `value` a resolver read.
+
+## Content by pointer
+
+In a space that keeps [third-party content](/en/concepts/object-types#third-party-content) by pointer, the text stays in your storage and a read carries only the `content` marker (`mode`, `sha256`, `pointer`, `scan`). The SDK's content resolver puts it back inside your company: `niadra.content.register(fetch)` takes a function that reads a pointer and returns the bytes, and `niadra.content.fill(context)` (Python) or `niadra.content.fill(view)` (TypeScript) fills the state view with the texts, checking each digest. The same resolver reads the values kept by pointer in a [replay](/en/guides/replay-in-ci). See [Metadata only](/en/guides/metadata-only).
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Object types and state" href="/en/concepts/object-types">
+    each type's re-read reasons and budget.
+  </Card>
+  <Card title="Claims" href="/en/concepts/claims">
+    the contract the check feeds.
+  </Card>
+  <Card title="Refresh requests" href="/en/api/state-refresh-requests">
+    the reference of the route the worker consumes.
+  </Card>
+  <Card title="Push state" href="/en/api/objects-push">
+    the reference of `POST /v1/objects/push`.
+  </Card>
+</CardGroup>

@@ -1,0 +1,700 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Niadra cluster, small profile: k3s on one machine with a fixed address, RDS PostgreSQL, S3, ECR,
+  KMS, SNS, CloudWatch Logs and the DNS zone of the domain. Workloads are plain Kubernetes
+  (deploy/k8s); growing means more machines joining the same cluster and a larger database,
+  not a rebuild. The same template makes a dedicated cell (scripts/cell.sh): its own network,
+  machine, database, master key, buckets, secrets and alerts, all named after the cell.
+
+Parameters:
+  # The default cell is `niadra`; its names never change.
+  # A cell dedicated to one tenant is `niadra-<name>`, and every name below
+  # derives from it: the buckets, the key alias, the database, the log group, the alerts topic, the
+  # secrets path and the DNS names.
+  CellName:
+    Type: String
+    Default: niadra
+    AllowedPattern: "niadra(-[a-z][a-z0-9]{1,19})?"
+    ConstraintDescription: niadra, or niadra- and 2 to 20 lowercase letters and digits, starting with a letter
+  # A dedicated cell adds its records to the default cell's zone (its ZoneId output); the default cell
+  # creates the zone and leaves this empty.
+  ZoneId:
+    Type: String
+    Default: ""
+  InstanceType:
+    Type: String
+    Default: m7i-flex.large
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+  NodeVolumeGiB:
+    Type: Number
+    Default: 40
+  K3sVersion:
+    Type: String
+    Default: v1.33.13+k3s2
+  DatabaseClass:
+    Type: String
+    Default: db.t4g.micro
+  DatabaseEngineVersion:
+    Type: String
+    Default: "17.11"
+  DatabaseStorageGiB:
+    Type: Number
+    Default: 20
+  DomainName:
+    Type: String
+    Default: niadra.com
+    Description: The zone created in Route 53. Point the registrar's nameservers at its NS records.
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: Gets the alerts by email after confirming the SNS subscription. Empty, no one.
+  DocsTarget:
+    Type: String
+    Default: ""
+    Description: The CNAME target of docs.<domain> at the docs host. Empty, no record.
+  DocsHostnameProof:
+    Type: String
+    Default: ""
+    Description: The docs host's TXT proof of the hostname (_cf-custom-hostname.docs). Empty, no record.
+  DocsCertificateProof:
+    Type: String
+    Default: ""
+    Description: The docs host's TXT proof for its certificate (_acme-challenge.docs). Empty, no record.
+
+Mappings:
+  Network:
+    Vpc: {Cidr: 10.40.0.0/16}
+    PublicA: {Cidr: 10.40.0.0/20}
+    DataA: {Cidr: 10.40.128.0/22}
+    DataB: {Cidr: 10.40.132.0/22}
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+  HasDocs: !Not [!Equals [!Ref DocsTarget, ""]]
+  HasDocsHostnameProof: !Not [!Equals [!Ref DocsHostnameProof, ""]]
+  HasDocsCertificateProof: !Not [!Equals [!Ref DocsCertificateProof, ""]]
+  IsDefaultCell: !Equals [!Ref CellName, niadra]
+  IsDedicatedCell: !Not [!Condition IsDefaultCell]
+
+Rules:
+  DedicatedCellUsesTheZone:
+    RuleCondition: !Not [!Equals [!Ref CellName, niadra]]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ZoneId, ""]]
+        AssertDescription: A dedicated cell needs ZoneId, the default cell's zone.
+
+Resources:
+  # Network: the machine in a public subnet (no NAT to pay for), the database in subnets with no
+  # route out. RDS asks for subnets in two zones even for a single instance.
+
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !FindInMap [Network, Vpc, Cidr]
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: [{Key: Name, Value: !Ref CellName}]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: {VpcId: !Ref Vpc, InternetGatewayId: !Ref InternetGateway}
+
+  PublicRoutes:
+    Type: AWS::EC2::RouteTable
+    Properties: {VpcId: !Ref Vpc}
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties: {RouteTableId: !Ref PublicRoutes, DestinationCidrBlock: 0.0.0.0/0, GatewayId: !Ref InternetGateway}
+
+  PublicA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !FindInMap [Network, PublicA, Cidr]
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags: [{Key: Name, Value: !Sub "${CellName}-public-a"}]
+  PublicARoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PublicA, RouteTableId: !Ref PublicRoutes}
+
+  DataA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !FindInMap [Network, DataA, Cidr]
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{Key: Name, Value: !Sub "${CellName}-data-a"}]
+  DataB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !FindInMap [Network, DataB, Cidr]
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags: [{Key: Name, Value: !Sub "${CellName}-data-b"}]
+
+  NodeSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: k3s machine - HTTP and HTTPS from anywhere, no SSH
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0}
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+      Tags: [{Key: Name, Value: !Sub "${CellName}-nodes"}]
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: PostgreSQL from the cluster only
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 5432, ToPort: 5432, SourceSecurityGroupId: !Ref NodeSecurityGroup}
+      Tags: [{Key: Name, Value: !Sub "${CellName}-database"}]
+
+  # Storage, images, logs and secrets.
+
+  CellBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub ${CellName}-cell-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration: [{ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}}]
+      # Browsers upload media straight to the bucket with a signed URL.
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [PUT, GET]
+            AllowedOrigins: ["*"]
+            AllowedHeaders: ["*"]
+            MaxAge: 3000
+
+  ReleaseBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${CellName}-releases-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration: [{ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}}]
+      LifecycleConfiguration:
+        Rules: [{Id: expire-old-releases, Status: Enabled, Prefix: releases/, ExpirationInDays: 30}]
+
+  # The images are the same code for every cell: the default cell holds the repositories, and every
+  # machine of the account pushes and pulls there (AmazonEC2ContainerRegistryPowerUser).
+  ServerRepository:
+    Type: AWS::ECR::Repository
+    Condition: IsDefaultCell
+    Properties:
+      RepositoryName: niadra/server
+      ImageScanningConfiguration: {ScanOnPush: true}
+      EncryptionConfiguration: {EncryptionType: AES256}
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"keep the last 15 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":15},"action":{"type":"expire"}}]}'
+  ModelsRepository:
+    Type: AWS::ECR::Repository
+    Condition: IsDefaultCell
+    Properties:
+      RepositoryName: niadra/models
+      ImageScanningConfiguration: {ScanOnPush: true}
+      EncryptionConfiguration: {EncryptionType: AES256}
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"keep the last 15 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":15},"action":{"type":"expire"}}]}'
+  SiteRepository:
+    Type: AWS::ECR::Repository
+    Condition: IsDefaultCell
+    Properties:
+      RepositoryName: niadra/site
+      ImageScanningConfiguration: {ScanOnPush: true}
+      EncryptionConfiguration: {EncryptionType: AES256}
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"keep the last 15 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":15},"action":{"type":"expire"}}]}'
+  SiteApiRepository:
+    Type: AWS::ECR::Repository
+    Condition: IsDefaultCell
+    Properties:
+      RepositoryName: niadra/site-api
+      ImageScanningConfiguration: {ScanOnPush: true}
+      EncryptionConfiguration: {EncryptionType: AES256}
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"keep the last 15 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":15},"action":{"type":"expire"}}]}'
+
+  ClusterLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /${CellName}/cluster
+      RetentionInDays: 30
+
+  # Trust: the cell's master key, the write-once copy of the audit roots and the alerts topic.
+
+  # The master key wraps the data key of every space and never leaves KMS. KMS rotates its
+  # material every year and keeps the old material, so what it wrapped before still opens.
+  CellKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Niadra cell master key - wraps the data key of each space
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+      EnableKeyRotation: true
+      RotationPeriodInDays: 365
+      PendingWindowInDays: 30
+      # Who uses the key never administers it: the machine's role only uses it, the account
+      # only administers it; any other use takes a policy change first, which CloudTrail records.
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: KeyAdministration
+            Effect: Allow
+            Principal: {AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"}
+            Action: [kms:Create*, kms:Describe*, kms:Enable*, kms:List*, kms:Put*, kms:Update*,
+                     kms:Revoke*, kms:Disable*, kms:Get*, kms:Delete*, kms:TagResource,
+                     kms:UntagResource, kms:ScheduleKeyDeletion, kms:CancelKeyDeletion,
+                     kms:RotateKeyOnDemand]
+            Resource: "*"
+          # Naming the role here is enough within the account; a statement in the role's own policy
+          # would name the key back and make a dependency cycle.
+          - Sid: KeyUse
+            Effect: Allow
+            Principal: {AWS: !GetAtt NodeRole.Arn}
+            Action: [kms:Encrypt, kms:Decrypt, kms:GenerateDataKey, kms:DescribeKey]
+            Resource: "*"
+          # A dedicated cell's database and machine disk are encrypted with this key too, not with the
+          # account's aws/rds and aws/ebs keys: RDS and EC2 use it on behalf of the account, and only
+          # through those services.
+          - !If
+            - IsDedicatedCell
+            - Sid: DiskEncryption
+              Effect: Allow
+              Principal: {AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"}
+              Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:CreateGrant, kms:ListGrants,
+                       kms:DescribeKey]
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  "kms:CallerAccount": !Ref AWS::AccountId
+                  "kms:ViaService": [!Sub "rds.${AWS::Region}.amazonaws.com", !Sub "ec2.${AWS::Region}.amazonaws.com"]
+            - !Ref AWS::NoValue
+  CellKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties: {AliasName: !Sub "alias/${CellName}-cell", TargetKeyId: !Ref CellKey}
+
+  # The daily root of each space's receipt chain, kept outside the database. Object
+  # Lock in compliance mode holds each copy five years; no one, not even the root user, deletes it.
+  AuditBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub ${CellName}-audit-${AWS::AccountId}
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule: {DefaultRetention: {Mode: COMPLIANCE, Days: 1825}}
+      VersioningConfiguration: {Status: Enabled}
+      PublicAccessBlockConfiguration:
+        {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration: [{ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}}]
+  # A locked version stays, but a newer version under the same key would be the one read back: every
+  # write has to fail when the key exists (If-None-Match), and only TLS gets in.
+  AuditBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AuditBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyWriteWithoutIfNoneMatch
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub ${AuditBucket.Arn}/*
+            Condition: {"Null": {"s3:if-none-match": "true"}}
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource: [!GetAtt AuditBucket.Arn, !Sub "${AuditBucket.Arn}/*"]
+            Condition: {Bool: {"aws:SecureTransport": "false"}}
+
+  # Alertmanager publishes the alerts meant for people here. No KMS key on the topic: an
+  # alert carries a rule's name, severity and summary, never customer data.
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties: {TopicName: !Sub "${CellName}-alerts", DisplayName: Niadra alerts}
+  AlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties: {TopicArn: !Ref AlertsTopic, Protocol: email, Endpoint: !Ref AlertEmail}
+
+  # Machine: one k3s server that also builds the images and runs the deploy.
+
+  NodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Principal: {Service: ec2.amazonaws.com}, Action: sts:AssumeRole}
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+      Policies:
+        - PolicyName: niadra-node
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject, s3:ListBucket, s3:GetBucketLocation,
+                         s3:PutLifecycleConfiguration, s3:GetLifecycleConfiguration]
+                Resource:
+                  - !GetAtt CellBucket.Arn
+                  - !Sub ${CellBucket.Arn}/*
+              - Effect: Allow
+                Action: [s3:GetObject, s3:ListBucket]
+                Resource:
+                  - !GetAtt ReleaseBucket.Arn
+                  - !Sub ${ReleaseBucket.Arn}/*
+              # The audit roots: written once with their retention, read back, never deleted (in a
+              # versioned bucket a delete leaves a marker that hides the root from a plain read).
+              - Effect: Allow
+                Action: [s3:PutObject, s3:PutObjectRetention, s3:GetObject, s3:GetObjectRetention,
+                         s3:ListBucket]
+                Resource:
+                  - !GetAtt AuditBucket.Arn
+                  - !Sub ${AuditBucket.Arn}/*
+              # The cluster's secrets live under <cell name>/; the database master secret is RDS-managed.
+              # RDS names every master secret rds!db-<id>: a dedicated cell reads only its own
+              # (NodeDatabaseSecret, below).
+              - Effect: Allow
+                Action: [secretsmanager:GetSecretValue, secretsmanager:DescribeSecret]
+                Resource:
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${CellName}/*
+                  - !If
+                    - IsDefaultCell
+                    - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:rds!db-*
+                    - !Ref AWS::NoValue
+              - Effect: Allow
+                Action: [secretsmanager:CreateSecret, secretsmanager:PutSecretValue]
+                Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${CellName}/*
+              # scripts/reset-cell.sh deletes the sandbox tenant's secret, and the next deploy's tenant
+              # job writes a new one; no other secret may be deleted from the machine.
+              - Effect: Allow
+                Action: secretsmanager:DeleteSecret
+                Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${CellName}/tenant/bootstrap-??????
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams]
+                Resource: !Sub ${ClusterLogs.Arn}:*
+              # cert-manager proves certificates in the domain's zone (DNS-01), the wildcard included.
+              - Effect: Allow
+                Action: [route53:ChangeResourceRecordSets, route53:ListResourceRecordSets]
+                Resource: !If
+                  - IsDefaultCell
+                  - !Sub arn:aws:route53:::hostedzone/${Zone}
+                  - !Sub arn:aws:route53:::hostedzone/${ZoneId}
+              - Effect: Allow
+                Action: [route53:GetChange, route53:ListHostedZonesByName]
+                Resource: "*"
+              # Grafana reads the logs back through CloudWatch Logs Insights; a dedicated cell's Grafana
+              # queries its own log group only.
+              - !If
+                - IsDefaultCell
+                - Effect: Allow
+                  Action: [logs:DescribeLogGroups, logs:StartQuery, logs:StopQuery, logs:GetQueryResults,
+                           logs:GetLogEvents, logs:FilterLogEvents]
+                  Resource: "*"
+                - Effect: Allow
+                  Action: [logs:StartQuery, logs:GetLogEvents, logs:FilterLogEvents]
+                  Resource: [!GetAtt ClusterLogs.Arn, !Sub "${ClusterLogs.Arn}:*"]
+              - !If
+                - IsDefaultCell
+                - !Ref AWS::NoValue
+                - Effect: Allow
+                  Action: [logs:DescribeLogGroups, logs:StopQuery, logs:GetQueryResults]
+                  Resource: "*"
+              # Alertmanager sends the alerts meant for people.
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref AlertsTopic
+  NodeProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: {Roles: [!Ref NodeRole]}
+  # A policy of its own, not a statement in the role's: the database is encrypted with the cell's key,
+  # whose policy names the role, so the role naming the database would be a dependency cycle.
+  NodeDatabaseSecret:
+    Type: AWS::IAM::Policy
+    Condition: IsDedicatedCell
+    Properties:
+      PolicyName: !Sub ${CellName}-database-secret
+      Roles: [!Ref NodeRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [secretsmanager:GetSecretValue, secretsmanager:DescribeSecret]
+            Resource: !GetAtt Database.MasterUserSecret.SecretArn
+
+  Server:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref AmiId
+      IamInstanceProfile: !Ref NodeProfile
+      SubnetId: !Ref PublicA
+      SecurityGroupIds: [!Ref NodeSecurityGroup]
+      # Hop limit 2: pods reach the instance role through IMDSv2 (S3, logs, secrets).
+      MetadataOptions: {HttpTokens: required, HttpEndpoint: enabled, HttpPutResponseHopLimit: 2}
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: !Ref NodeVolumeGiB
+            VolumeType: gp3
+            Encrypted: true
+            KmsKeyId: !If [IsDedicatedCell, !Ref CellKey, !Ref AWS::NoValue]
+            DeleteOnTermination: true
+      Tags: [{Key: Name, Value: !Sub "${CellName}-server"}]
+      UserData:
+        Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euxo pipefail
+            export DEBIAN_FRONTEND=noninteractive
+            # The subnet gives no automatic public address: the machine reaches the internet once the
+            # fixed address is attached, a few seconds after launch.
+            ip() { curl -s -H "X-aws-ec2-metadata-token: $(curl -s -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')" http://169.254.169.254/latest/meta-data/public-ipv4; }
+            until [ "$(ip)" = "${Address}" ]; do sleep 5; done
+            apt-get update -y && apt-get install -y jq curl unzip
+            snap install aws-cli --classic
+            # --cluster-init starts embedded etcd, so more servers can join later without a rebuild.
+            curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${K3sVersion}' \
+              sh -s - server --cluster-init --secrets-encryption --write-kubeconfig-mode 0600
+            # The machine also builds the images and runs the deploy: Docker, Helm and helmfile.
+            apt-get install -y docker.io && systemctl enable --now docker
+            curl -fsSL https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz | tar -xz -C /usr/local/bin --strip-components=1 linux-amd64/helm
+            curl -fsSL https://github.com/helmfile/helmfile/releases/download/v1.8.0/helmfile_1.8.0_linux_amd64.tar.gz | tar -xz -C /usr/local/bin helmfile
+            HOME=/root helm plugin install https://github.com/databus23/helm-diff --verify=false || true
+            # The ingress controller k3s ships, with access logs as JSON (they go to CloudWatch). The
+            # Local policy keeps the client's address on the way in (the contact form limits by it).
+            cat > /var/lib/rancher/k3s/server/manifests/traefik-config.yaml <<'EOF'
+            apiVersion: helm.cattle.io/v1
+            kind: HelmChartConfig
+            metadata: {name: traefik, namespace: kube-system}
+            spec:
+              valuesContent: |-
+                service:
+                  spec: {externalTrafficPolicy: Local}
+                logs:
+                  access: {enabled: true, format: json}
+            EOF
+            # ECR tokens last 12 hours: every 6 hours the pods' default service account in the
+            # niadra namespace gets a fresh pull secret, made with this machine's role.
+            cat > /usr/local/bin/niadra-ecr-login <<'EOF'
+            #!/bin/bash
+            set -euo pipefail
+            kubectl create namespace niadra --dry-run=client -o yaml | kubectl apply -f -
+            kubectl -n niadra create secret docker-registry ecr \
+              --docker-server=${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com --docker-username=AWS \
+              --docker-password="$(/snap/bin/aws ecr get-login-password --region ${AWS::Region})" \
+              --dry-run=client -o yaml | kubectl apply -f -
+            kubectl -n niadra patch serviceaccount default -p '{"imagePullSecrets":[{"name":"ecr"}]}'
+            EOF
+            chmod 755 /usr/local/bin/niadra-ecr-login
+            cat > /etc/systemd/system/niadra-ecr-login.service <<'EOF'
+            [Service]
+            Type=oneshot
+            Environment=KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+            ExecStart=/usr/local/bin/niadra-ecr-login
+            EOF
+            cat > /etc/systemd/system/niadra-ecr-login.timer <<'EOF'
+            [Timer]
+            OnBootSec=2min
+            OnUnitActiveSec=6h
+            [Install]
+            WantedBy=timers.target
+            EOF
+            systemctl daemon-reload && systemctl enable --now niadra-ecr-login.timer
+
+  # Entry: one fixed address, so the DNS records and the sslip.io names never change.
+
+  Address:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags: [{Key: Name, Value: !Ref CellName}]
+  AddressAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties: {AllocationId: !GetAtt Address.AllocationId, InstanceId: !Ref Server}
+
+  # Database: RDS PostgreSQL, one small instance with point-in-time recovery.
+
+  DatabaseSubnets:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !If [IsDefaultCell, Niadra data subnets, !Sub "Niadra data subnets of ${CellName}"]
+      SubnetIds: [!Ref DataA, !Ref DataB]
+
+  # A fleet of small databases on one small instance (one database per space).
+  # The launcher visits every database each naptime and starts a worker per database; with the defaults
+  # (60 s, three workers of 64 MB each) a hundred databases start a backend every 0.6 s and three workers
+  # can take a fifth of the micro's memory. Everything not set here keeps the family's default, as in
+  # default.postgres17. autovacuum_max_workers takes effect at a restart; the rest at once. Moving the
+  # instance to this group from the default one also needs one reboot (scripts/stack.sh prints it).
+  # The family follows DatabaseEngineVersion's major version.
+  DatabaseParameters:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Family: postgres17
+      Description: !Sub "Niadra ${CellName}: autovacuum and memory for many small databases"
+      Parameters:
+        autovacuum_naptime: "300"
+        autovacuum_max_workers: "2"
+        autovacuum_work_mem: "16384"
+        maintenance_work_mem: "32768"
+        work_mem: "2048"
+        # In 8 kB pages: 11295 pages, about 88 MiB, what the micro ran with until 28/09/2026. The family's
+        # formula ({DBInstanceClassMemory/32768}) gave 23081 pages (180 MiB) at the reboot that moved the
+        # instance to this group, and FreeableMemory fell under 100 MB with swap climbing (it has to stay
+        # above 100 MB). A static parameter: it takes effect at a reboot.
+        shared_buffers: "11295"
+        # Every connection to the database speaks TLS 1.3, as the edge does (the Traefik
+        # TLSOption). rds.force_ssl (1, the family's default) already refuses plain connections. Every
+        # client negotiated 1.3 before this was set (pg_stat_ssl, 30/09/2026): psycopg (the cell, the
+        # control plane, migrations, the backups' pg_dump), PgBouncer 1.25 and node-postgres (the site).
+        ssl_min_protocol_version: TLSv1.3
+      Tags: [{Key: Name, Value: !Ref CellName}]
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Ref CellName
+      Engine: postgres
+      EngineVersion: !Ref DatabaseEngineVersion
+      DBInstanceClass: !Ref DatabaseClass
+      AllocatedStorage: !Ref DatabaseStorageGiB
+      StorageType: gp3
+      StorageEncrypted: true
+      KmsKeyId: !If [IsDedicatedCell, !Ref CellKey, !Ref AWS::NoValue]
+      MasterUsername: niadra_admin
+      ManageMasterUserPassword: true
+      DBSubnetGroupName: !Ref DatabaseSubnets
+      DBParameterGroupName: !Ref DatabaseParameters
+      VPCSecurityGroups: [!Ref DatabaseSecurityGroup]
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MultiAZ: false
+      PubliclyAccessible: false
+      # Automated backups are kept one day; raise it to 35 where the AWS account's plan allows, and the
+      # chart's `backup.instanceRetentionDays` with it (a space deletion receipt states the expiry).
+      BackupRetentionPeriod: 1
+      DeletionProtection: true
+      EnablePerformanceInsights: false
+
+  # RDS names every master secret rds!db-<id>, and the default cell's role reads rds!db-*: on a
+  # dedicated cell only its own machine's role (and AWS services, for RDS's own rotation) may read it.
+  DatabaseSecretPolicy:
+    Type: AWS::SecretsManager::ResourcePolicy
+    Condition: IsDedicatedCell
+    Properties:
+      SecretId: !GetAtt Database.MasterUserSecret.SecretArn
+      BlockPublicPolicy: true
+      ResourcePolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: OnlyThisCellReads
+            Effect: Deny
+            Principal: "*"
+            Action: secretsmanager:GetSecretValue
+            Resource: "*"
+            Condition:
+              ArnNotEquals: {"aws:PrincipalArn": !GetAtt NodeRole.Arn}
+              BoolIfExists: {"aws:PrincipalIsAWSService": "false"}
+
+  # DNS: the zone the registrar delegates to. Until then these records are not authoritative.
+
+  Zone:
+    Type: AWS::Route53::HostedZone
+    Condition: IsDefaultCell
+    Properties: {Name: !Ref DomainName}
+
+  Records:
+    Type: AWS::Route53::RecordSetGroup
+    Condition: IsDefaultCell
+    Properties:
+      HostedZoneId: !Ref Zone
+      RecordSets:
+        - {Name: !Ref DomainName, Type: A, TTL: "300", ResourceRecords: [!Ref Address]}
+        - {Name: !Sub "www.${DomainName}", Type: A, TTL: "300", ResourceRecords: [!Ref Address]}
+        - {Name: !Sub "api.${DomainName}", Type: A, TTL: "300", ResourceRecords: [!Ref Address]}
+        # The address the SDKs derive from a key: <space>.<region>.api.<domain>.
+        - {Name: !Sub "*.${AWS::Region}.api.${DomainName}", Type: A, TTL: "300", ResourceRecords: [!Ref Address]}
+        - {Name: !Sub "control.api.${DomainName}", Type: A, TTL: "300", ResourceRecords: [!Ref Address]}
+        - {Name: !Sub "grafana.${DomainName}", Type: A, TTL: "300", ResourceRecords: [!Ref Address]}
+        # The site's admin panel (contact requests, access counts).
+        - {Name: !Sub "admin.${DomainName}", Type: A, TTL: "300", ResourceRecords: [!Ref Address]}
+        # The public docs at their host (../docs), and the host's proofs of the domain and its certificate.
+        - !If [HasDocs, {Name: !Sub "docs.${DomainName}", Type: CNAME, TTL: "300", ResourceRecords: [!Ref DocsTarget]}, !Ref AWS::NoValue]
+        - !If [HasDocsHostnameProof, {Name: !Sub "_cf-custom-hostname.docs.${DomainName}", Type: TXT, TTL: "300", ResourceRecords: [!Sub '"${DocsHostnameProof}"']}, !Ref AWS::NoValue]
+        - !If [HasDocsCertificateProof, {Name: !Sub "_acme-challenge.docs.${DomainName}", Type: TXT, TTL: "300", ResourceRecords: [!Sub '"${DocsCertificateProof}"']}, !Ref AWS::NoValue]
+
+  # A dedicated cell's own names, in the default cell's zone: <cell>.cells.<domain> is its address
+  # in the control plane, and grafana.<cell>.cells.<domain> its dashboards. The addresses the SDKs
+  # derive for its spaces, <space>.<region>.api.<domain>, point here once `scripts/cell.sh route`
+  # writes them: a name of its own beats the wildcard that points at the default cell.
+  CellRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Condition: IsDedicatedCell
+    Properties:
+      HostedZoneId: !Ref ZoneId
+      RecordSets:
+        - {Name: !Sub "${CellName}.cells.${DomainName}", Type: A, TTL: "300", ResourceRecords: [!Ref Address]}
+        - {Name: !Sub "grafana.${CellName}.cells.${DomainName}", Type: A, TTL: "300", ResourceRecords: [!Ref Address]}
+
+Outputs:
+  InstanceId:
+    Description: The k3s machine, which also builds the images and runs the deploy (through SSM).
+    Value: !Ref Server
+  PublicAddress:
+    Description: Fixed address of the machine, used for the sslip.io hosts before the domain moves.
+    Value: !Ref Address
+  DatabaseEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
+  DatabaseMasterSecretArn:
+    Value: !GetAtt Database.MasterUserSecret.SecretArn
+  CellBucket:
+    Value: !Ref CellBucket
+  ReleaseBucket:
+    Value: !Ref ReleaseBucket
+  CellKeyArn:
+    Description: The cell's master key in KMS; the cell gets it as NIADRA_KMS_KEY_ID.
+    Value: !GetAtt CellKey.Arn
+  AuditBucket:
+    Description: The daily audit roots, write-once (Object Lock in compliance mode for five years).
+    Value: !Ref AuditBucket
+  Registry:
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+  CellHost:
+    Condition: IsDedicatedCell
+    Description: The dedicated cell's own host name; its address in the control plane is https://<this>.
+    Value: !Sub ${CellName}.cells.${DomainName}
+  LogGroup:
+    Value: !Ref ClusterLogs
+  AlertsTopicArn:
+    Description: Alertmanager's topic for the alerts meant for people; AlertEmail subscribes to it.
+    Value: !Ref AlertsTopic
+  ZoneId:
+    Description: The Route 53 zone, where cert-manager proves the domain's certificates (DNS-01).
+    Value: !If [IsDefaultCell, !Ref Zone, !Ref ZoneId]
+  NameServers:
+    Condition: IsDefaultCell
+    Description: Set these as the nameservers of the domain at the registrar.
+    Value: !Join [",", !GetAtt Zone.NameServers]

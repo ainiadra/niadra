@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/contact-token.v0.json",
+  "title": "Niadra Contact Token v0",
+  "description": "The payload of a contact token a gateway checks offline before an outbound message leaves. See spec/contact-token.md.",
+  "additionalProperties": false,
+  "properties": {
+    "kid": {
+      "pattern": "^[A-Za-z0-9_-]{8,64}$",
+      "title": "Kid",
+      "type": "string"
+    },
+    "space": {
+      "format": "uuid",
+      "title": "Space",
+      "type": "string"
+    },
+    "jti": {
+      "format": "uuid",
+      "title": "Jti",
+      "type": "string"
+    },
+    "purpose": {
+      "pattern": "^[a-z][a-z0-9_]{0,39}$",
+      "title": "Purpose",
+      "type": "string"
+    },
+    "channel": {
+      "pattern": "^[a-z][a-z0-9_]{0,39}$",
+      "title": "Channel",
+      "type": "string"
+    },
+    "rcpt": {
+      "pattern": "^[A-Za-z0-9_-]{43}$",
+      "title": "Rcpt",
+      "type": "string"
+    },
+    "gateway": {
+      "pattern": "^[a-z][a-z0-9_]{0,39}$",
+      "title": "Gateway",
+      "type": "string"
+    },
+    "iat": {
+      "minimum": 0,
+      "title": "Iat",
+      "type": "integer"
+    },
+    "exp": {
+      "minimum": 0,
+      "title": "Exp",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "kid",
+    "space",
+    "jti",
+    "purpose",
+    "channel",
+    "rcpt",
+    "gateway",
+    "iat",
+    "exp"
+  ],
+  "type": "object"
+}

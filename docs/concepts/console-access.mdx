@@ -1,0 +1,129 @@
+---
+title: "Pessoas, papéis e SSO do Console"
+description: "Quem entra no Console, com que papel e como: convite, segundo fator, SSO por OIDC ou SAML 2.0 e o que acontece quando alguém sai."
+---
+
+O Console é onde o time da sua empresa governa a memória: fontes e chaves, identidade, comprovantes, privacidade, regras e medição. Toda pessoa entra com um token de 15 minutos, emitido pelo plano de controle, que nomeia um espaço e os papéis dela nele. Esta página cobre quem entra, com que papel e por qual caminho: e-mail e senha com segundo fator, ou o login único (SSO) da empresa, por OIDC ou SAML 2.0.
+
+## Papéis
+
+Os papéis se combinam, e cada um vale no tenant inteiro ou num espaço só.
+
+| Papel | O que alcança |
+|---|---|
+| `admin` | Fontes, chaves, pessoas, papéis e SSO; passa em toda checagem de papel |
+| `security` | Comprovantes, política e simulação, corte de acesso, apagamento e exportação |
+| `integration` | Mapeamentos, visões de tarefa, regras de padrão e de aviso, webhooks e o assistente de configuração |
+| `review` | A fila de revisão por amostra, com a máscara da finalidade de cada sessão |
+| `analysis` | Medição, padrões e uso, em agregado ou por pseudônimo |
+| `vendor` | Só as fontes do próprio fornecedor e a medição delas; o vínculo do papel nomeia as fontes |
+
+O tenant mantém sempre ao menos uma pessoa com `admin` no tenant inteiro: uma mudança de papel ou uma desativação que deixaria o tenant sem ela responde 409.
+
+## Como uma pessoa chega
+
+**Por convite.** Em **Pessoas e papéis**, um admin informa o e-mail e os papéis ([`POST /v1/users`](/api/control/users-create), sem senha). A resposta traz um link de uso único, que vale por sete dias e aparece uma vez só; a Niadra guarda apenas um hash com chave dele. A pessoa abre o link, escolhe a senha (12 caracteres ou mais) e, no primeiro login, configura o aplicativo autenticador pelo QR code e guarda dez códigos de recuperação, mostrados uma vez.
+
+**Pelo SSO.** Quando o domínio do e-mail pertence ao SSO da empresa, não há convite: no primeiro login pelo provedor de identidade, a pessoa é criada na hora, sem senha, com os papéis dos grupos dela.
+
+**Senha esquecida.** O admin gera um [link novo](/api/control/user-invitation); os links anteriores param de valer, e a senha atual continua valendo até o link novo ser usado.
+
+## Segundo fator
+
+No login com senha, o segundo fator é obrigatório por padrão: o código de seis dígitos de um aplicativo autenticador (TOTP). Cada código vale uma vez: a Niadra guarda o intervalo de 30 segundos do último código aceito de cada pessoa e recusa o mesmo código, ou um mais antigo, mesmo dentro do seu minuto. Quem perde o celular entra com um dos dez códigos de recuperação, cada um uma vez só. Em **Sua conta**, a própria pessoa gera códigos novos e troca de aplicativo, depois de confirmar a senha de novo; quem perdeu o aplicativo e os códigos pede a um admin que [redefina o segundo fator](/api/control/second-factor-reset), com o motivo registrado.
+
+## Desativar e reativar
+
+Uma pessoa [desativada](/api/control/user-deactivate) não entra mais, e o plano de controle recusa a sessão dela na próxima chamada. As células conferem os tokens sem consultar o controle, então um token já emitido vale na API de dados até vencer, em 15 minutos no máximo. Convites abertos param de valer. Ninguém desativa a si mesmo nem o último admin do tenant. A [reativação](/api/control/user-reactivate) devolve os mesmos papéis, a mesma senha e o mesmo segundo fator.
+
+Cada mudança no acesso de uma pessoa fica no [histórico dela](/api/control/user-history), com quem fez e por quê: convites, papéis, desativação, redefinição do segundo fator e o que o SSO fez num login.
+
+## Login único (SSO)
+
+Cada tenant tem uma conexão, por OpenID Connect ou por SAML 2.0, que responde por uma lista de domínios de e-mail. Quem digita um e-mail desses domínios no login do Console vê **Entrar com SSO**.
+
+### O que a Niadra confere
+
+| Protocolo | Como |
+|---|---|
+| OIDC | Fluxo de código de autorização com PKCE (S256), `state` e `nonce` novos a cada login. O token de ID precisa ser assinado por uma chave publicada pelo provedor, com algoritmo assimétrico, e bater emissor, público (`aud` e `azp`), validade e `nonce`. A declaração `email` é obrigatória; `email_verified` falso é recusado. |
+| SAML 2.0 | Login iniciado pela Niadra, com o AuthnRequest no binding HTTP-Redirect e a resposta no binding HTTP-POST. A asserção precisa vir assinada pelo certificado que você configurou, responder ao pedido que a Niadra mandou (o `InResponseTo` fica dentro da parte assinada), e bater emissor, público, destinatário e janela de validade. A Niadra lê só a cópia assinada da asserção. Asserção cifrada e login iniciado pelo provedor não são aceitos. |
+
+Nos dois casos, o e-mail precisa estar num dos domínios da conexão, e um e-mail que já pertence a outro tenant é recusado.
+
+### Configurar
+
+1. No Console, com o papel Administração, abra **Login único (SSO)** e escolha o protocolo.
+2. Cole no provedor de identidade o que a tela mostra:
+   - OIDC: a URI de redirecionamento, `https://control.api.niadra.com/v1/auth/sso/oidc/callback`;
+   - SAML: o entity ID, `urn:niadra:sso:<tenant_id>`, a URL do assertion consumer service, `https://control.api.niadra.com/v1/auth/sso/saml/<tenant_id>/acs`, ou os [metadados](/api/control/sso-saml-metadata) de uma vez.
+3. Traga do provedor, para o Console:
+   - OIDC: o emissor, o client ID e o client secret. O segredo fica cifrado com AES-256-GCM no plano de controle e nunca volta numa resposta;
+   - SAML: o entity ID do provedor, a URL de login e o certificado de assinatura.
+4. Informe os domínios de e-mail, onde vêm os grupos (a declaração ou o atributo `groups`, por exemplo) e quais grupos dão quais papéis.
+5. Salve desligado, use **Testar o login** e, com o resultado certo, ligue.
+
+Pela API, é [`PUT /v1/sso`](/api/control/sso-save).
+
+### Papéis vindos dos grupos
+
+Cada grupo mapeado dá o papel dele no tenant inteiro, e a comparação ignora maiúsculas. Quem não está em nenhum grupo mapeado recebe o papel padrão; sem papel padrão, o login é recusado. Os papéis são recalculados a cada login pelo SSO: o provedor de identidade é onde o acesso se administra, e uma mudança feita no Console vale até o próximo login pelo SSO. Os grupos nunca tiram o papel `admin` da última pessoa que o tem. O papel `vendor` nunca vem de um grupo: ele nomeia fontes, e chega por convite.
+
+### O login, passo a passo
+
+1. O Console pede o e-mail, e [`POST /v1/auth/sso/discover`](/api/control/sso-discover) responde pelo domínio, sem dizer se a pessoa existe.
+2. Em **Entrar com SSO**, o Console sorteia um valor, manda só o SHA-256 dele para [`POST /v1/auth/sso/start`](/api/control/sso-start) e guarda o valor nesta aba do navegador. O navegador vai para o provedor.
+3. O provedor responde ao plano de controle, que confere a resposta e devolve o navegador para o Console com um código de login no fragmento do endereço, a parte depois de `#`, que nunca chega a um servidor. O código vale dez minutos e uma vez só.
+4. O Console troca o código, junto com o valor guardado, pelo token em [`POST /v1/auth/sso/exchange`](/api/control/sso-exchange), e apaga o valor. Um código sem o valor guardado não abre nada.
+
+Um login recusado volta ao Console com o motivo: provedor negou, tempo esgotado, resposta inválida, domínio fora da conexão, nenhum papel, e-mail de outra empresa, pessoa desativada, provedor fora do ar ou SSO desligado.
+
+### Como fica o MFA com SSO
+
+Quem entra pelo SSO passa pelo MFA do provedor de identidade da empresa, com as regras que a empresa já definiu lá. A Niadra confere a resposta assinada do provedor, mas não enxerga qual fator a pessoa usou. Se a sua política pede mais, ligue **Pedir também o código da Niadra**: depois do provedor, o Console pede o código do aplicativo autenticador, com códigos de recuperação, e a pessoa configura o aplicativo no primeiro login ([`POST /v1/auth/sso/second-factor`](/api/control/sso-second-factor)). Uma pessoa criada pelo SSO não tem senha na Niadra: em **Sua conta**, o código do aplicativo faz o papel da senha.
+
+O login com e-mail e senha continua com o segundo fator obrigatório da Niadra.
+
+### Só pelo SSO
+
+Com **Só pelo SSO** ligado, pessoas dos domínios da conexão não entram com senha (401 "single sign-on required"). Quem tem `admin` no tenant inteiro mantém a senha e o segundo fator, como acesso quando o provedor falhar.
+
+### Testar
+
+[`POST /v1/sso/test`](/api/control/sso-test) devolve o endereço de um login de teste, para abrir em outra aba. Quando o provedor responde, [`GET /v1/sso/tests/{test_id}`](/api/control/sso-test-result) mostra o e-mail, os grupos e os papéis que o login daria, e se a pessoa já existe. Ninguém é criado e nenhum papel muda, e o teste funciona com a conexão ainda desligada.
+
+### Limites
+
+| Item | Limite |
+|---|---|
+| Conexões por tenant | 1, OIDC ou SAML |
+| Domínios por conexão | 20; cada domínio é de um tenant só, e e-mail público (gmail.com e parecidos) é recusado |
+| Grupos mapeados | 100 |
+| Tempo do login no provedor | 10 minutos; depois, o código de login vale 10 minutos |
+| Códigos errados do segundo fator da Niadra depois do SSO | 5 por login |
+
+Os domínios não passam por verificação de DNS: são únicos entre tenants, e só a Niadra cria tenants, sob contrato. Não há provisionamento por SCIM: as pessoas chegam por convite ou pelo primeiro login no SSO. No Microsoft Entra ID, os grupos chegam pelo id de objeto, e uma conta em grupos demais (mais de 200 no OIDC, mais de 150 no SAML) não os traz no token; atribua à aplicação só os grupos que dão papéis.
+
+## Telas por funcionalidade
+
+O Console mostra uma tela só quando o que ela mostra existe no espaço. As telas das [funcionalidades](/concepts/spaces-and-keys#funcionalidades-do-espaço), todas ligadas por padrão, saem do menu quando o documento `features` do espaço desliga a funcionalidade delas.
+
+| Tela | O que mostra | Aparece com |
+|---|---|---|
+| Turnos dos agentes | Os [registros de turno](/concepts/turn-records) guardados, cada um com o que leu, chamou, afirmou e disse, as marcas, os pinos e por que não pode ser reproduzido | `turns` |
+| Tipos | Os [tipos declarados e derivados](/concepts/object-types), a deriva e a cobertura de cada campo | `state` |
+| Memória de trabalho, na aba de um cliente | Os metadados do [estado de trabalho](/concepts/agent-state) de cada agente sobre o cliente, nunca o conteúdo | `agent_state` |
+| Inferências, na aba de um cliente | As [inferências](/concepts/signals#inferências-e-o-perfil-revisável) sobre o cliente, com o que as sustenta, e os pedidos de revisão | `signals` |
+| Coordenação | A [visão geral da coordenação](/concepts/coordination): posse, efeitos, conflitos, orçamentos e contatos, em contagens | `coordination` |
+| Desfechos e experimentos | Os [desfechos, a atribuição, os experimentos e o contrafactual](/concepts/outcomes) | `measurement` |
+
+Um espaço que nunca ligou uma funcionalidade nunca vê a tela dela, e nada muda para quem não pediu.
+
+<CardGroup cols={2}>
+  <Card title="Espaços e chaves" href="/concepts/spaces-and-keys">
+    Fontes, chaves com escopos e o corte de um fornecedor na hora.
+  </Card>
+  <Card title="Configurar o SSO" href="/api/control/sso-save">
+    A referência de `PUT /v1/sso`, com exemplo.
+  </Card>
+</CardGroup>

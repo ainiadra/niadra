@@ -1,0 +1,559 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/handoff-package.v0.json",
+  "title": "Niadra Handoff Package v0",
+  "description": "What a handoff carries to whoever receives the subject. See spec/coordination.md.",
+  "$defs": {
+    "ClaimKind": {
+      "enum": [
+        "owner",
+        "case",
+        "task_lock"
+      ],
+      "title": "ClaimKind",
+      "type": "string"
+    },
+    "ClaimVia": {
+      "description": "The three ways in: a declaration through the API, an observation mapped from a webhook, an observation the company's worker read and sent.",
+      "enum": [
+        "declaration",
+        "mapping",
+        "worker"
+      ],
+      "title": "ClaimVia",
+      "type": "string"
+    },
+    "CommitmentRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}$",
+          "title": "Type",
+          "type": "string"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "CommitmentRef",
+      "type": "object"
+    },
+    "EffectKind": {
+      "enum": [
+        "delivery",
+        "document",
+        "notice",
+        "filing",
+        "paid_call",
+        "external_action"
+      ],
+      "title": "EffectKind",
+      "type": "string"
+    },
+    "EffectSeen": {
+      "additionalProperties": false,
+      "properties": {
+        "effect_id": {
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "title": "Effect Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/EffectKind"
+        },
+        "state": {
+          "enum": [
+            "reserved",
+            "done",
+            "failed",
+            "unknown_outcome"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "effect_id",
+        "kind",
+        "state"
+      ],
+      "title": "EffectSeen",
+      "type": "object"
+    },
+    "Handle": {
+      "additionalProperties": false,
+      "description": "An identifier of a subject in some channel or system: a phone, an e-mail, a CRM id.",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/HandleType"
+        },
+        "value": {
+          "maxLength": 320,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Namespace for scoped identifiers: the WhatsApp Business account for `wa_bsuid`, the system for `system_id`, the country for `gov_id_hmac`.",
+          "title": "Scope"
+        },
+        "subject_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubjectKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Defaults to `person`, except for organization-only handle types."
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "title": "Handle",
+      "type": "object"
+    },
+    "HandleType": {
+      "enum": [
+        "phone_e164",
+        "wa_id",
+        "wa_jid",
+        "wa_lid",
+        "wa_bsuid",
+        "email",
+        "gov_id_hmac",
+        "app_user_id",
+        "system_id",
+        "org_registry_hmac",
+        "email_domain",
+        "anon_id"
+      ],
+      "title": "HandleType",
+      "type": "string"
+    },
+    "HandoffContext": {
+      "additionalProperties": false,
+      "description": "The compiled `handoff` view, at the receiving side's policy and verification level. `etag` is the pack's it was compiled from, absent for a subject the memory knows nothing of yet.",
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "etag": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Etag"
+        },
+        "policy_version": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Policy Version"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "HandoffContext",
+      "type": "object"
+    },
+    "ObjectRef": {
+      "additionalProperties": false,
+      "description": "A business object in a system of record, e.g. `invoice` / `erp` / `0823`.",
+      "properties": {
+        "type": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Type",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "namespace",
+        "id"
+      ],
+      "title": "ObjectRef",
+      "type": "object"
+    },
+    "OpenObject": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "State"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Since"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "title": "OpenObject",
+      "type": "object"
+    },
+    "OutcomeRequest": {
+      "additionalProperties": false,
+      "description": "How the receiving side reports back: one of `vocabulary`, by `expected_by`.",
+      "properties": {
+        "vocabulary": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Vocabulary",
+          "type": "array"
+        },
+        "expected_by": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected By"
+        }
+      },
+      "title": "OutcomeRequest",
+      "type": "object"
+    },
+    "Owner": {
+      "additionalProperties": false,
+      "description": "Who holds the subject or the object now: the most restrictive valid claim, where it came from and until when. `epoch` fences a release.",
+      "properties": {
+        "holder": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Holder",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ClaimKind"
+        },
+        "level": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}$",
+          "title": "Level",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "via": {
+          "$ref": "#/$defs/ClaimVia"
+        },
+        "since": {
+          "format": "date-time",
+          "title": "Since",
+          "type": "string"
+        },
+        "valid_until": {
+          "format": "date-time",
+          "title": "Valid Until",
+          "type": "string"
+        },
+        "epoch": {
+          "title": "Epoch",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "holder",
+        "kind",
+        "level",
+        "source",
+        "via",
+        "since",
+        "valid_until",
+        "epoch"
+      ],
+      "title": "Owner",
+      "type": "object"
+    },
+    "PromiseRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "due": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Due"
+        },
+        "owner": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Owner",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "owner"
+      ],
+      "title": "PromiseRef",
+      "type": "object"
+    },
+    "SubjectKind": {
+      "enum": [
+        "person",
+        "account",
+        "partner",
+        "staff"
+      ],
+      "title": "SubjectKind",
+      "type": "string"
+    },
+    "Verification": {
+      "description": "Session verification levels. `no_customer` sits outside the V0-V4 scale.",
+      "enum": [
+        "V0",
+        "V1",
+        "V2",
+        "V3",
+        "V4",
+        "no_customer"
+      ],
+      "title": "Verification",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "spec": {
+      "const": "handoff-package.v0",
+      "default": "handoff-package.v0",
+      "title": "Spec",
+      "type": "string"
+    },
+    "handoff_id": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Handoff Id",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "from_agent": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "From Agent",
+      "type": "string"
+    },
+    "target": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Target",
+      "type": "string"
+    },
+    "subject": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Handle"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Whom the handoff is about."
+    },
+    "level": {
+      "$ref": "#/$defs/Verification"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "context": {
+      "$ref": "#/$defs/HandoffContext"
+    },
+    "owner": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Owner"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "open_objects": {
+      "items": {
+        "$ref": "#/$defs/OpenObject"
+      },
+      "maxItems": 50,
+      "title": "Open Objects",
+      "type": "array"
+    },
+    "open_objects_more": {
+      "default": 0,
+      "description": "The subject's open objects past the 50 a package carries, left out.",
+      "minimum": 0,
+      "title": "Open Objects More",
+      "type": "integer"
+    },
+    "commitments_active": {
+      "items": {
+        "$ref": "#/$defs/CommitmentRef"
+      },
+      "title": "Commitments Active",
+      "type": "array"
+    },
+    "promises_open": {
+      "items": {
+        "$ref": "#/$defs/PromiseRef"
+      },
+      "title": "Promises Open",
+      "type": "array"
+    },
+    "effects": {
+      "items": {
+        "$ref": "#/$defs/EffectSeen"
+      },
+      "title": "Effects",
+      "type": "array"
+    },
+    "suppressions": {
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]{0,39}$",
+        "type": "string"
+      },
+      "title": "Suppressions",
+      "type": "array"
+    },
+    "outcome": {
+      "$ref": "#/$defs/OutcomeRequest"
+    }
+  },
+  "required": [
+    "handoff_id",
+    "created_at",
+    "from_agent",
+    "target",
+    "level",
+    "context"
+  ],
+  "type": "object"
+}

@@ -1,0 +1,122 @@
+# Metrics and dashboards stay in the cluster; logs go to CloudWatch (values/fluent-bit) and Grafana
+# reads them back through CloudWatch Logs Insights with the machines' role.
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    # Pick up every PodMonitor, ServiceMonitor and rule, not only this release's.
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    # Not measured on 25/09/2026 (paused for the benchmark). On 24/09 the kernel's OOM killer found it
+    # at 850 MB of anonymous memory, so the request moves toward that and the limit stays above it.
+    # CPU: the whole monitoring stack used 30 to 38 ms of CPU per second on a temporary cell under load
+    # (30/09/2026); 50m of the node's 2000m went to Traefik, which had none (scripts/on-ops.sh).
+    resources:
+      requests: {cpu: 50m, memory: 512Mi}
+      limits: {memory: 1Gi}
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources: {requests: {storage: 8Gi}}
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: {cpu: 20m, memory: 64Mi}
+      limits: {memory: 128Mi}
+  # The alerts meant for people go to the stack's SNS topic, and to a webhook when one is set at deploy:
+  # page and ticket (k8s/charts/niadra/files/alerts.yaml), and critical and warning (the rules of
+  # kube-prometheus-stack: node, disk, pods, Prometheus itself). Info, Watchdog and InfoInhibitor stay
+  # in Grafana. scripts/check.sh tests these routes with amtool.
+  config:
+    route:
+      group_by: [alertname, severity]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: "null"
+      routes:
+        - {receiver: "null", matchers: ['alertname =~ "Watchdog|InfoInhibitor"']}
+        - {receiver: notify, matchers: ['severity =~ "page|critical|ticket|warning"']}
+    receivers:
+      - name: "null"
+      - name: notify
+        sns_configs:
+          # Signed with the machine's role, which the pod reaches through the instance metadata.
+          - topic_arn: {{ requiredEnv "NIADRA_ALERTS_TOPIC_ARN" | quote }}
+            sigv4: {region: {{ requiredEnv "NIADRA_REGION" }}}
+            send_resolved: true
+            # SNS takes an email subject of up to 100 characters, on one line.
+            subject: '{{`[{{ .Status | toUpper }}] Niadra {{ .CommonLabels.alertname }} ({{ .CommonLabels.severity }})`}}'
+            message: |-
+              {{`{{ range .Alerts }}{{ .Status | toUpper }} {{ .Labels.alertname }}, severity {{ .Labels.severity }}: {{ .Annotations.summary }}`}}
+              {{`{{ end }}`}}
+              Grafana: https://{{ requiredEnv "NIADRA_GRAFANA_HOST" }}
+        {{- with env "NIADRA_ALERTS_WEBHOOK_URL" }}
+        webhook_configs:
+          - {url: {{ . | quote }}, send_resolved: true}
+        {{- end }}
+
+grafana:
+  # Killed at its old limit (256Mi) on 24/09/2026 with 200 MB of anonymous memory.
+  resources:
+    requests: {cpu: 20m, memory: 192Mi}
+    limits: {memory: 384Mi}
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  grafana.ini:
+    analytics: {reporting_enabled: false, check_for_updates: false}
+    users: {allow_sign_up: false}
+    server: {root_url: "https://{{ requiredEnv "NIADRA_GRAFANA_HOST" }}"}
+    # Grafana's own metrics would answer on the public host; nobody reads them, so they are off.
+    metrics: {enabled: false}
+  serviceMonitor: {enabled: false}
+  sidecar:
+    dashboards: {enabled: true, label: grafana_dashboard, searchNamespace: ALL}
+    # The two sidecars (dashboards and data sources) had no request; not measured yet.
+    resources:
+      requests: {cpu: 10m, memory: 48Mi}
+      limits: {memory: 192Mi}
+  additionalDataSources:
+    - name: CloudWatch
+      uid: cloudwatch
+      type: cloudwatch
+      jsonData: {authType: default, defaultRegion: {{ requiredEnv "NIADRA_REGION" }}}
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt
+      # HTTPS only; plain HTTP is redirected by the chart's http-redirect ingress.
+      traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    hosts: [{{ requiredEnv "NIADRA_GRAFANA_HOST" }}]
+    tls: [{secretName: tls-grafana, hosts: [{{ requiredEnv "NIADRA_GRAFANA_HOST" }}]}]
+
+# Working set on 25/09/2026 and, in parentheses, the peak since the pod started, in MiB: operator
+# 20 (63), kube-state-metrics 26 (76), node exporter 9 (25). The config reloaders beside Prometheus and
+# Alertmanager asked for nothing (the chart passes 0 to the operator); a few MiB each.
+prometheusOperator:
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 128Mi}
+  prometheusConfigReloader:
+    resources:
+      requests: {cpu: 5m, memory: 16Mi}
+      limits: {memory: 64Mi}
+kube-state-metrics:
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 128Mi}
+prometheus-node-exporter:
+  resources:
+    requests: {cpu: 10m, memory: 16Mi}
+    limits: {memory: 64Mi}
+
+# k3s runs its control plane in one process; these targets do not exist there.
+kubeEtcd: {enabled: false}
+kubeControllerManager: {enabled: false}
+kubeScheduler: {enabled: false}
+kubeProxy: {enabled: false}

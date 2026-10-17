@@ -1,0 +1,11 @@
+{
+  "kid": "ck_test_space_a_1",
+  "space": "0192f5a0-0000-7000-8000-00000000a004",
+  "jti": "0199a3b2-5c00-7a1e-8f3d-2b6c0e4a9d01",
+  "purpose": "Marketing",
+  "channel": "whatsapp",
+  "rcpt": "GgDKNynckNBxoc-4yKRQQTK_p5XjdU2tnM-DAbIDXDI",
+  "gateway": "wa_gateway",
+  "iat": 1790000000,
+  "exp": 1790000120
+}

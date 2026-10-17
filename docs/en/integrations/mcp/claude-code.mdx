@@ -1,0 +1,68 @@
+---
+title: "Claude Code"
+description: "Your space's MCP server in Claude Code, with the key and the subject token in environment variables."
+---
+
+Claude Code speaks Streamable HTTP and takes custom headers, so it connects straight to the space's MCP server at `/mcp`. Use a key of the **sandbox** space (`nia_sk_test_...`) on your machine, never a `live` one.
+
+## What the connection needs
+
+| Header | Value | Where it comes from |
+|---|---|---|
+| `Authorization` | `Bearer` and the source key | The Console, under **Agents and keys**, in the sandbox space |
+| `Niadra-Subject-Token` | A signed token that binds the connection to a test customer | [`POST /v1/subject-tokens`](/en/api/subject-tokens), with the same key; valid for 15 minutes |
+
+```sh
+export NIADRA_API_KEY="nia_sk_test_us-east-2_acme-sandbox_..."
+export NIADRA_SUBJECT_TOKEN="$(curl -s -X POST "https://acme-sandbox.us-east-2.api.niadra.com/v1/subject-tokens" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" -H "Content-Type: application/json" \
+  -d '{"subject": {"type": "phone_e164", "value": "+14155550123"}, "conversation_id": "dev-1", "verification": "V1"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+```
+
+## Connect
+
+From the command line:
+
+```sh
+claude mcp add --transport http niadra "https://acme-sandbox.us-east-2.api.niadra.com/mcp" \
+  --header "Authorization: Bearer $NIADRA_API_KEY" \
+  --header "Niadra-Subject-Token: $NIADRA_SUBJECT_TOKEN"
+```
+
+Or in the project's `.mcp.json`, which Claude Code reads and expands the environment variables in:
+
+```json
+{
+  "mcpServers": {
+    "niadra": {
+      "type": "http",
+      "url": "https://acme-sandbox.us-east-2.api.niadra.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${NIADRA_API_KEY}",
+        "Niadra-Subject-Token": "${NIADRA_SUBJECT_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Run `/mcp` in Claude Code to see the server and its tools. With agent memory on in the space, `search_agent_memory` (and `remember`, with a key that has the `agent_memory:write` scope) show up next to the customer tools (eight; seven for a customer-facing source, without `resolve_identity`).
+
+## Limits
+
+- The token lasts 15 minutes: once it expires, the customer tools answer `unauthenticated` in the JSON-RPC. Mint another and reconnect. The two agent memory tools work without a token.
+- The customer is always the token's: the model chooses what to ask, never about whom. To look at another test customer, mint another token.
+- The server answers `POST` only; a `GET /mcp` returns 405.
+- Every tool call leaves a receipt in the space, like any read.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="MCP with any LLM" href="/en/guides/mcp">
+    the tools, the token and what each one requires.
+  </Card>
+  <Card title="Coding assistants" href="/en/integrations/coding-assistants">
+    the skill that teaches the assistant to connect a repository to Niadra.
+  </Card>
+</CardGroup>

@@ -1,0 +1,2203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/turn-record.v0.json",
+  "title": "Niadra Turn Record v0",
+  "description": "What an AI agent read, called, showed, claimed and decided in one turn, with its build pinned. See spec/turn-record.md.",
+  "$defs": {
+    "Attribute": {
+      "additionalProperties": false,
+      "description": "What the person is: a size, a preferred network, a diet. Said here; the lifecycle's outcomes (bought, kept, returned for size) derive the rest on the server, never an agent.",
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "attribute",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}(?:\\.[a-z0-9_]{1,64}){0,3}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "system": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The measuring system: `BR`, `EU`, `US`.",
+          "title": "System"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "maxLength": 256,
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        },
+        "source": {
+          "default": "stated",
+          "enum": [
+            "stated",
+            "correction"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "value"
+      ],
+      "title": "Attribute",
+      "type": "object"
+    },
+    "ClaimEvidenceRef": {
+      "additionalProperties": false,
+      "description": "Where a claim's evidence is in the turn record: a call's field, an object's field, or a document.",
+      "properties": {
+        "call_id": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Call Id"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An object, `type:namespace:id`.",
+          "title": "Ref"
+        },
+        "field": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,39}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Field"
+        },
+        "document": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The document an anchor cites.",
+          "title": "Document"
+        },
+        "anchor": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The blob that keeps the quoted text.",
+          "title": "Anchor"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The anchor's similarity.",
+          "title": "Score"
+        }
+      },
+      "title": "ClaimEvidenceRef",
+      "type": "object"
+    },
+    "ClaimRecord": {
+      "additionalProperties": false,
+      "description": "One claim the SDK found in an output, as the turn record carries it: kinds, spans and verdicts.",
+      "properties": {
+        "category": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}$",
+          "title": "Category",
+          "type": "string"
+        },
+        "class": {
+          "anyOf": [
+            {
+              "enum": [
+                "money",
+                "percent",
+                "date",
+                "duration",
+                "quantity",
+                "count",
+                "dosage"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Class"
+        },
+        "nature": {
+          "anyOf": [
+            {
+              "enum": [
+                "computed",
+                "quoted",
+                "model"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nature"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,39}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "span": {
+          "description": "Code point offsets of the claim in the output, end exclusive.",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "Span",
+          "type": "array"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClaimValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClaimEvidenceRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "verdict": {
+          "enum": [
+            "matched",
+            "mismatch",
+            "stale",
+            "gap_not_stated",
+            "role_ambiguous",
+            "unsupported",
+            "no_evidence",
+            "quoted_found",
+            "quoted_missing",
+            "anchored",
+            "below_threshold",
+            "source_exists_claim_unverified",
+            "source_missing",
+            "not_checked",
+            "internal_text_found"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "action": {
+          "description": "What was done, which the contract's configured action decides: `rewrite_if_unequivocal` is `rewrite` when the rewrite is unequivocal and `warn` otherwise, `discard_anchor_and_count` is `discard_anchor`, and a claim that stands (`matched`, `quoted_found`, `anchored`) is `none`.",
+          "enum": [
+            "none",
+            "block",
+            "warn",
+            "count",
+            "rewrite",
+            "discard_anchor"
+          ],
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "span",
+        "verdict",
+        "action"
+      ],
+      "title": "ClaimRecord",
+      "type": "object"
+    },
+    "ClaimValue": {
+      "additionalProperties": false,
+      "description": "A number the parser read, normalized: an amount, or a range from `min` to `max`, with its unit (the currency code of money, `%`, a time unit, a unit of measure or of dose), or a date, or a range of dates.",
+      "properties": {
+        "amount": {
+          "anyOf": [
+            {
+              "pattern": "^-?(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,6})?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "pattern": "^-?(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,6})?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "pattern": "^-?(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,6})?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "maxLength": 16,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "date": {
+          "anyOf": [
+            {
+              "pattern": "^(?:[0-9]{4}-[0-9]{2}(?:-[0-9]{2})?|--[0-9]{2}-[0-9]{2}|---[0-9]{2})$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Date"
+        },
+        "date_from": {
+          "anyOf": [
+            {
+              "pattern": "^(?:[0-9]{4}-[0-9]{2}(?:-[0-9]{2})?|--[0-9]{2}-[0-9]{2}|---[0-9]{2})$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Date From"
+        },
+        "date_to": {
+          "anyOf": [
+            {
+              "pattern": "^(?:[0-9]{4}-[0-9]{2}(?:-[0-9]{2})?|--[0-9]{2}-[0-9]{2}|---[0-9]{2})$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Date To"
+        }
+      },
+      "title": "ClaimValue",
+      "type": "object"
+    },
+    "Engaged": {
+      "additionalProperties": false,
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "engaged",
+          "title": "Kind",
+          "type": "string"
+        },
+        "exposure_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absent for an item of no list.",
+          "title": "Exposure Id"
+        },
+        "ref": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+          "title": "Ref",
+          "type": "string"
+        },
+        "how": {
+          "enum": [
+            "click",
+            "detail",
+            "mention",
+            "add_to_cart",
+            "compare",
+            "share",
+            "other"
+          ],
+          "title": "How",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "ref",
+        "how"
+      ],
+      "title": "Engaged",
+      "type": "object"
+    },
+    "Feedback": {
+      "additionalProperties": false,
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "feedback",
+          "title": "Kind",
+          "type": "string"
+        },
+        "ref": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+          "title": "Ref",
+          "type": "string"
+        },
+        "polarity": {
+          "enum": [
+            "positive",
+            "negative"
+          ],
+          "title": "Polarity",
+          "type": "string"
+        },
+        "reason_attrs": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,39}\\.[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Reason Attrs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "ref",
+        "polarity"
+      ],
+      "title": "Feedback",
+      "type": "object"
+    },
+    "Preference": {
+      "additionalProperties": false,
+      "description": "What the person wants or refuses, said or captured from a tool's arguments; only these become hard.",
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "preference",
+          "title": "Kind",
+          "type": "string"
+        },
+        "attr": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}\\.[a-z][a-z0-9_]{0,63}$",
+          "title": "Attr",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "in",
+            "not_in",
+            "eq",
+            "ne",
+            "lt",
+            "lte",
+            "gt",
+            "gte",
+            "between"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "maxLength": 256,
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Values",
+          "type": "array"
+        },
+        "strength": {
+          "enum": [
+            "must",
+            "must_not",
+            "prefer",
+            "avoid"
+          ],
+          "title": "Strength",
+          "type": "string"
+        },
+        "scope": {
+          "default": "session",
+          "enum": [
+            "turn",
+            "session",
+            "persistent"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Holds only in this category of the type.",
+          "title": "Category"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "source": {
+          "default": "stated",
+          "enum": [
+            "stated",
+            "tool_args",
+            "correction"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "attr",
+        "op",
+        "values",
+        "strength"
+      ],
+      "title": "Preference",
+      "type": "object"
+    },
+    "Presented": {
+      "additionalProperties": false,
+      "description": "A list delivered to the person: the exposure. Its canonical moment is `delivered_at`, when the interface bridge handed the list to the client, never when a tool returned it or the model named it.",
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "presented",
+          "title": "Kind",
+          "type": "string"
+        },
+        "exposure_id": {
+          "format": "uuid",
+          "title": "Exposure Id",
+          "type": "string"
+        },
+        "list_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "List Id",
+          "type": "string"
+        },
+        "list_kind": {
+          "default": "results",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "List Kind",
+          "type": "string"
+        },
+        "page": {
+          "default": 1,
+          "description": "\"See more\" is the same list with `page + 1`.",
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "parent_list_id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent List Id"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/PresentedItem"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Items",
+          "type": "array"
+        },
+        "visible_k": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How many of the first items were visible on delivery.",
+          "title": "Visible K"
+        },
+        "delivered_at": {
+          "format": "date-time",
+          "title": "Delivered At",
+          "type": "string"
+        },
+        "method": {
+          "default": "bridge",
+          "description": "`bridge` from the interface bridge, `otel` from a `niadra.exposure` span, `tool_result` inferred from what a tool returned: labeled, because it counts more than was shown.",
+          "enum": [
+            "bridge",
+            "otel",
+            "tool_result"
+          ],
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "exposure_id",
+        "list_id",
+        "items",
+        "delivered_at"
+      ],
+      "title": "Presented",
+      "type": "object"
+    },
+    "PresentedItem": {
+      "additionalProperties": false,
+      "properties": {
+        "pos": {
+          "description": "1-based position in the whole list, across pages.",
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Pos",
+          "type": "integer"
+        },
+        "ref": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+          "title": "Ref",
+          "type": "string"
+        },
+        "shown": {
+          "description": "The values the item showed, for the fields its type tracks or lets be claimed; what `changes_since_seen` later compares against.",
+          "maxProperties": 32,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,63}$": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "Shown",
+          "type": "object"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "enum": [
+                "a",
+                "b"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Which of two interleaved lists contributed the item.",
+          "title": "Team"
+        }
+      },
+      "required": [
+        "pos",
+        "ref"
+      ],
+      "title": "PresentedItem",
+      "type": "object"
+    },
+    "Seen": {
+      "additionalProperties": false,
+      "description": "A ping of the list component: how far the person saw.",
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "seen",
+          "title": "Kind",
+          "type": "string"
+        },
+        "exposure_id": {
+          "format": "uuid",
+          "title": "Exposure Id",
+          "type": "string"
+        },
+        "max_index_seen": {
+          "description": "The highest `pos` the component showed.",
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Max Index Seen",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "exposure_id",
+        "max_index_seen"
+      ],
+      "title": "Seen",
+      "type": "object"
+    },
+    "TurnAgent": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "The agent's name inside the source, e.g. `closing`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Free text, e.g. `specialist` or `router`.",
+          "title": "Role"
+        },
+        "parent_turn_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The turn that opened this one as a sub-turn (a sub-agent, an agent as tool).",
+          "title": "Parent Turn Id"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "TurnAgent",
+      "type": "object"
+    },
+    "TurnBlob": {
+      "additionalProperties": false,
+      "description": "A large value of the record. `sha256` is over its normalized canonical JSON (RFC 8785): the same value always has the same hash.",
+      "properties": {
+        "sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Bytes of the canonical form.",
+          "title": "Size"
+        },
+        "pointer": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9+.-]*://\\S{1,1024}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where the customer keeps it, in `pointer` mode.",
+          "title": "Pointer"
+        },
+        "content": {
+          "default": null,
+          "description": "The value itself, only in `stored` mode.",
+          "title": "Content"
+        }
+      },
+      "required": [
+        "sha256"
+      ],
+      "title": "TurnBlob",
+      "type": "object"
+    },
+    "TurnBuild": {
+      "additionalProperties": false,
+      "properties": {
+        "pins": {
+          "$ref": "#/$defs/TurnPins"
+        },
+        "sdk": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "E.g. `niadra-python/0.7.0`.",
+          "title": "Sdk"
+        },
+        "adapter": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The framework adapter and its version, if any.",
+          "title": "Adapter"
+        }
+      },
+      "title": "TurnBuild",
+      "type": "object"
+    },
+    "TurnCall": {
+      "additionalProperties": false,
+      "description": "One tool or model call of the turn, copied deep at the moment it happened.",
+      "properties": {
+        "call_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Call Id",
+          "type": "string"
+        },
+        "parent_call_id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Call Id"
+        },
+        "kind": {
+          "enum": [
+            "tool",
+            "model"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The tool's name, or the model's for a model call.",
+          "title": "Name"
+        },
+        "attempt": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "synthetic": {
+          "default": false,
+          "title": "Synthetic",
+          "type": "boolean"
+        },
+        "cache_hit": {
+          "default": false,
+          "title": "Cache Hit",
+          "type": "boolean"
+        },
+        "status": {
+          "default": "ok",
+          "enum": [
+            "ok",
+            "error",
+            "timeout",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "latency_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latency Ms"
+        },
+        "args_hash": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Of the normalized arguments.",
+          "title": "Args Hash"
+        },
+        "args": {
+          "anyOf": [
+            {
+              "description": "A blob of this record, by its key in `blobs`, e.g. `b:1`.",
+              "pattern": "^[a-z]{1,8}:[A-Za-z0-9_-]{1,32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Args"
+        },
+        "result_model": {
+          "anyOf": [
+            {
+              "description": "A blob of this record, by its key in `blobs`, e.g. `b:1`.",
+              "pattern": "^[a-z]{1,8}:[A-Za-z0-9_-]{1,32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The result as the model saw it.",
+          "title": "Result Model"
+        },
+        "result_ui": {
+          "anyOf": [
+            {
+              "description": "A blob of this record, by its key in `blobs`, e.g. `b:1`.",
+              "pattern": "^[a-z]{1,8}:[A-Za-z0-9_-]{1,32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The result as the interface got it.",
+          "title": "Result Ui"
+        },
+        "observations": {
+          "items": {
+            "$ref": "#/$defs/TurnObservation"
+          },
+          "maxItems": 200,
+          "title": "Observations",
+          "type": "array"
+        },
+        "applied": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TurnConstraints"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "effect_key": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effect Key"
+        },
+        "cost_units": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "maxProperties": 20,
+          "propertyNames": {
+            "maxLength": 256,
+            "minLength": 1
+          },
+          "title": "Cost Units",
+          "type": "object"
+        },
+        "tokens": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TurnTokens"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "truncated": {
+          "default": false,
+          "description": "Arguments or result arrived cut (OpenTelemetry).",
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "call_id",
+        "kind"
+      ],
+      "title": "TurnCall",
+      "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "tokens"
+            ],
+            "properties": {
+              "tokens": {
+                "type": "object"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "kind": {
+                "const": "model"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "TurnCompilerPins": {
+      "additionalProperties": false,
+      "properties": {
+        "compiler": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The context compiler's version, from the pack.",
+          "title": "Compiler"
+        },
+        "pack_hash": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The hash of the pack this turn read.",
+          "title": "Pack Hash"
+        }
+      },
+      "title": "TurnCompilerPins",
+      "type": "object"
+    },
+    "TurnConstraints": {
+      "additionalProperties": false,
+      "description": "What the SDK measured of the constraints block on one tool call: sent, checked, violated.",
+      "properties": {
+        "constraints": {
+          "description": "The version of the constraints block applied.",
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Constraints",
+          "type": "string"
+        },
+        "hard_sent": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 200,
+          "title": "Hard Sent",
+          "type": "array"
+        },
+        "results_checked": {
+          "minimum": 0,
+          "title": "Results Checked",
+          "type": "integer"
+        },
+        "violations": {
+          "minimum": 0,
+          "title": "Violations",
+          "type": "integer"
+        },
+        "unverifiable": {
+          "minimum": 0,
+          "title": "Unverifiable",
+          "type": "integer"
+        },
+        "relaxed": {
+          "anyOf": [
+            {
+              "enum": [
+                "declared",
+                "suspected"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Relaxed"
+        }
+      },
+      "required": [
+        "constraints",
+        "results_checked",
+        "violations",
+        "unverifiable"
+      ],
+      "title": "TurnConstraints",
+      "type": "object"
+    },
+    "TurnCoordination": {
+      "additionalProperties": false,
+      "properties": {
+        "decision_id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "decision": {
+          "enum": [
+            "allow",
+            "defer",
+            "deny",
+            "handoff_to"
+          ],
+          "title": "Decision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision_id",
+        "decision"
+      ],
+      "title": "TurnCoordination",
+      "type": "object"
+    },
+    "TurnCost": {
+      "additionalProperties": false,
+      "properties": {
+        "usd": {
+          "minimum": 0,
+          "title": "Usd",
+          "type": "number"
+        }
+      },
+      "required": [
+        "usd"
+      ],
+      "title": "TurnCost",
+      "type": "object"
+    },
+    "TurnEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "reserved",
+            "done",
+            "failed",
+            "unknown_outcome"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "state"
+      ],
+      "title": "TurnEffect",
+      "type": "object"
+    },
+    "TurnObservation": {
+      "additionalProperties": false,
+      "description": "State a tool result showed, with provenance per field; without provenance it is display only.",
+      "properties": {
+        "ref": {
+          "description": "An object as `<type>:<namespace>:<id>`, e.g. `item_variant:store:991`.",
+          "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+          "title": "Ref",
+          "type": "string"
+        },
+        "fields": {
+          "additionalProperties": true,
+          "maxProperties": 200,
+          "propertyNames": {
+            "maxLength": 256,
+            "minLength": 1
+          },
+          "title": "Fields",
+          "type": "object"
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TurnProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "ref",
+        "fields"
+      ],
+      "title": "TurnObservation",
+      "type": "object"
+    },
+    "TurnOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "event_keys": {
+          "description": "The events `track()` sent for what the turn said: the text is never repeated here.",
+          "items": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Event Keys",
+          "type": "array"
+        },
+        "ui": {
+          "anyOf": [
+            {
+              "description": "A blob of this record, by its key in `blobs`, e.g. `b:1`.",
+              "pattern": "^[a-z]{1,8}:[A-Za-z0-9_-]{1,32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ui"
+        },
+        "document": {
+          "anyOf": [
+            {
+              "description": "A blob of this record, by its key in `blobs`, e.g. `b:1`.",
+              "pattern": "^[a-z]{1,8}:[A-Za-z0-9_-]{1,32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A document the turn wrote, by its blob.",
+          "title": "Document"
+        },
+        "handoff_id": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Handoff Id"
+        }
+      },
+      "title": "TurnOutput",
+      "type": "object"
+    },
+    "TurnPins": {
+      "additionalProperties": false,
+      "description": "What must be the same for a replay to reproduce this turn. The recording document says which are required; a turn without one of them is kept, marked not replayable.",
+      "properties": {
+        "prompts": {
+          "additionalProperties": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "description": "Prompt name -> version, e.g. `core` -> `v16`.",
+          "maxProperties": 50,
+          "propertyNames": {
+            "maxLength": 256,
+            "minLength": 1
+          },
+          "title": "Prompts",
+          "type": "object"
+        },
+        "corpus_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Digest of the files the agent consults, computed in the SDK; never the files.",
+          "title": "Corpus Digest"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The exact model the agent called.",
+          "title": "Model"
+        },
+        "assembler": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The version of the company's context assembler.",
+          "title": "Assembler"
+        },
+        "tool_schemas": {
+          "additionalProperties": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "description": "Tool name -> hash of its schema.",
+          "maxProperties": 200,
+          "propertyNames": {
+            "maxLength": 256,
+            "minLength": 1
+          },
+          "title": "Tool Schemas",
+          "type": "object"
+        },
+        "niadra": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TurnCompilerPins"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "TurnPins",
+      "type": "object"
+    },
+    "TurnProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "enum": [
+            "live",
+            "snapshot",
+            "cache"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "source_observed_at": {
+          "format": "date-time",
+          "title": "Source Observed At",
+          "type": "string"
+        },
+        "scope": {
+          "default": "global",
+          "enum": [
+            "global",
+            "customer",
+            "context"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "source_observed_at"
+      ],
+      "title": "TurnProvenance",
+      "type": "object"
+    },
+    "TurnRead": {
+      "additionalProperties": false,
+      "description": "A read the turn made from Niadra, by its version: the pack by ETag, a block by its version.",
+      "properties": {
+        "surface": {
+          "enum": [
+            "pack",
+            "state",
+            "constraints",
+            "coordination",
+            "budget",
+            "history",
+            "agent_memory",
+            "agent_state"
+          ],
+          "title": "Surface",
+          "type": "string"
+        },
+        "etag": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Etag"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        },
+        "blob": {
+          "anyOf": [
+            {
+              "description": "A blob of this record, by its key in `blobs`, e.g. `b:1`.",
+              "pattern": "^[a-z]{1,8}:[A-Za-z0-9_-]{1,32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The content read, when the recording keeps it.",
+          "title": "Blob"
+        },
+        "receipt_id": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Receipt Id"
+        }
+      },
+      "required": [
+        "surface"
+      ],
+      "title": "TurnRead",
+      "type": "object"
+    },
+    "TurnTokens": {
+      "additionalProperties": false,
+      "properties": {
+        "in": {
+          "minimum": 0,
+          "title": "In",
+          "type": "integer"
+        },
+        "cached": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Cached",
+          "type": "integer"
+        },
+        "out": {
+          "minimum": 0,
+          "title": "Out",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "in",
+        "out"
+      ],
+      "title": "TurnTokens",
+      "type": "object"
+    },
+    "Unwatch": {
+      "additionalProperties": false,
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "unwatch",
+          "title": "Kind",
+          "type": "string"
+        },
+        "ref": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+          "title": "Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "title": "Unwatch",
+      "type": "object"
+    },
+    "Watch": {
+      "additionalProperties": false,
+      "description": "An explicit \"let me know when\": the only way an interest raises a notice.",
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "watch",
+          "title": "Kind",
+          "type": "string"
+        },
+        "ref": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+          "title": "Ref",
+          "type": "string"
+        },
+        "condition": {
+          "description": "A `niadra-expr` expression over the object's fields.",
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Condition",
+          "type": "string"
+        },
+        "consent_event_key": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Consent Event Key",
+          "type": "string"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        }
+      },
+      "required": [
+        "kind",
+        "ref",
+        "condition",
+        "consent_event_key"
+      ],
+      "title": "Watch",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "spec": {
+      "const": "turn-record.v0",
+      "default": "turn-record.v0",
+      "title": "Spec",
+      "type": "string"
+    },
+    "turn_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "title": "Turn Id",
+      "type": "string"
+    },
+    "conversation_id": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Conversation Id"
+    },
+    "task_id": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Id"
+    },
+    "agent": {
+      "$ref": "#/$defs/TurnAgent"
+    },
+    "kind": {
+      "default": "message",
+      "enum": [
+        "message",
+        "action",
+        "event",
+        "timer"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "ended_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ended At"
+    },
+    "fidelity": {
+      "default": "gold",
+      "enum": [
+        "bronze",
+        "silver",
+        "gold"
+      ],
+      "title": "Fidelity",
+      "type": "string"
+    },
+    "completeness": {
+      "default": "complete",
+      "enum": [
+        "complete",
+        "partial",
+        "incomplete",
+        "unknown"
+      ],
+      "title": "Completeness",
+      "type": "string"
+    },
+    "content_mode": {
+      "enum": [
+        "stored",
+        "pointer",
+        "hash_only"
+      ],
+      "title": "Content Mode",
+      "type": "string"
+    },
+    "build": {
+      "$ref": "#/$defs/TurnBuild"
+    },
+    "reads": {
+      "items": {
+        "$ref": "#/$defs/TurnRead"
+      },
+      "maxItems": 20,
+      "title": "Reads",
+      "type": "array"
+    },
+    "calls": {
+      "items": {
+        "$ref": "#/$defs/TurnCall"
+      },
+      "maxItems": 500,
+      "title": "Calls",
+      "type": "array"
+    },
+    "interactions": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "attribute": "#/$defs/Attribute",
+            "engaged": "#/$defs/Engaged",
+            "feedback": "#/$defs/Feedback",
+            "preference": "#/$defs/Preference",
+            "presented": "#/$defs/Presented",
+            "seen": "#/$defs/Seen",
+            "unwatch": "#/$defs/Unwatch",
+            "watch": "#/$defs/Watch"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/Presented"
+          },
+          {
+            "$ref": "#/$defs/Seen"
+          },
+          {
+            "$ref": "#/$defs/Engaged"
+          },
+          {
+            "$ref": "#/$defs/Feedback"
+          },
+          {
+            "$ref": "#/$defs/Preference"
+          },
+          {
+            "$ref": "#/$defs/Attribute"
+          },
+          {
+            "$ref": "#/$defs/Watch"
+          },
+          {
+            "$ref": "#/$defs/Unwatch"
+          }
+        ]
+      },
+      "maxItems": 200,
+      "title": "Interactions",
+      "type": "array"
+    },
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/ClaimRecord"
+      },
+      "maxItems": 500,
+      "title": "Claims",
+      "type": "array"
+    },
+    "coordination": {
+      "items": {
+        "$ref": "#/$defs/TurnCoordination"
+      },
+      "maxItems": 50,
+      "title": "Coordination",
+      "type": "array"
+    },
+    "effects": {
+      "items": {
+        "$ref": "#/$defs/TurnEffect"
+      },
+      "maxItems": 50,
+      "title": "Effects",
+      "type": "array"
+    },
+    "output": {
+      "$ref": "#/$defs/TurnOutput"
+    },
+    "cost": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TurnCost"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "latency_ms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Latency Ms"
+    },
+    "flags": {
+      "items": {
+        "enum": [
+          "error",
+          "guard_acted",
+          "guard_budget_exceeded",
+          "handoff",
+          "assertion_failed",
+          "synthetic",
+          "incomplete",
+          "negative_feedback",
+          "truncated"
+        ],
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Flags",
+      "type": "array"
+    },
+    "blobs": {
+      "maxProperties": 1000,
+      "patternProperties": {
+        "^[a-z]{1,8}:[A-Za-z0-9_-]{1,32}$": {
+          "$ref": "#/$defs/TurnBlob"
+        }
+      },
+      "propertyNames": {
+        "description": "A blob of this record, by its key in `blobs`, e.g. `b:1`.",
+        "pattern": "^[a-z]{1,8}:[A-Za-z0-9_-]{1,32}$"
+      },
+      "title": "Blobs",
+      "type": "object"
+    }
+  },
+  "required": [
+    "turn_id",
+    "agent",
+    "started_at",
+    "content_mode"
+  ],
+  "type": "object",
+  "allOf": [
+    {
+      "anyOf": [
+        {
+          "required": [
+            "conversation_id"
+          ],
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "task_id"
+          ],
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "if": {
+        "required": [
+          "content_mode"
+        ],
+        "properties": {
+          "content_mode": {
+            "const": "stored"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "blobs": {
+            "additionalProperties": {
+              "properties": {
+                "pointer": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "content_mode"
+        ],
+        "properties": {
+          "content_mode": {
+            "const": "pointer"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "blobs": {
+            "additionalProperties": {
+              "required": [
+                "pointer"
+              ],
+              "properties": {
+                "pointer": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "content_mode"
+        ],
+        "properties": {
+          "content_mode": {
+            "const": "hash_only"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "blobs": {
+            "additionalProperties": {
+              "properties": {
+                "pointer": {
+                  "type": "null"
+                },
+                "content": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

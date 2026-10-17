@@ -1,0 +1,127 @@
+---
+title: "WhatsApp Cloud API"
+description: "Meta's webhook becomes Niadra turns: signature checked, the wa_id as handle and the reply recorded by the id Meta returns."
+---
+
+The WhatsApp Cloud API adapter only translates: it checks the signature of Meta's webhook, extracts each message with the customer's handle and the item ready to record, and records the agent's reply from the send API's answer. **It never sends a message**: your code talks to the Graph API.
+
+## Install
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[whatsapp]'   # no framework dependency
+```
+```sh TypeScript
+npm install @niadra/sdk   # @niadra/sdk/whatsapp
+```
+</CodeGroup>
+
+The TypeScript integration is in `@niadra/sdk` on npm.
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | Your code reads `context()` in the conversation the adapter helps open (`wa-<wa_id>` as id, the `wa_id` as subject) and builds the prompt; the adapter does not touch the model |
+| Turns | `parse_webhook()` (Python) and `readWhatsApp()` (TypeScript) check `X-Hub-Signature-256` (HMAC-SHA256 of the raw body with the app secret) and return the messages of every entry and change, oldest first; `message.record()` and `recordInbound()` record the customer's turn with the `wamid` as idempotency key (Meta retries webhooks for days), the time it was sent and every id of the sender. `sent()` and `recordOutbound()` record the agent's reply with the `wamid` the Cloud API returned |
+| Tools | The kit's, through the conversation (`chat.tools()`); nothing channel-specific |
+| Verification | The recorded turn carries `verification_hint: "V1"`: it came from that number. It raises the session to V1 for the next read |
+| Handoff | The conversation's `chat.handoff()`, when your flow transfers |
+
+`subscribe()` (Python) and `whatsAppChallenge()` (TypeScript) answer Meta's subscription challenge on the `GET`.
+
+## Minimal example
+
+<CodeGroup>
+```python Python
+"""A WhatsApp Cloud API webhook: each message is the customer's turn, each reply the agent's."""
+
+import os
+
+from fastapi import FastAPI, Request, Response
+
+from niadra import Niadra
+from niadra.integrations.whatsapp import parse_webhook, sent, subscribe
+
+niadra = Niadra(channel="whatsapp")
+app = FastAPI()
+
+
+@app.get("/whatsapp")
+def challenge(request: Request) -> Response:
+    result = subscribe(request.query_params, os.environ["WHATSAPP_VERIFY_TOKEN"])
+    return Response(result.text(), result.status, media_type=result.content_type)
+
+
+@app.post("/whatsapp")
+async def inbound(request: Request) -> Response:
+    messages = parse_webhook(await request.body(), request.headers, os.environ["META_APP_SECRET"])
+    if messages is None:
+        return Response(status_code=401)
+    for message in messages:
+        with niadra.conversation(f"wa-{message.wa_id}", subject=message.subject) as chat:
+            message.record(chat)
+            niadra.flush()
+            context = chat.context()
+            reply = your_model(context.system_block, context.turn_block, message.text)
+            sent(chat, reply, send_whatsapp(message.wa_id, reply))
+    return Response(status_code=200)
+```
+```typescript TypeScript
+// A WhatsApp Cloud API webhook on Hono: reads Meta's delivery, gives the agent the customer's
+// context, sends the answer through the Graph API and records both turns.
+import { Hono } from "hono";
+import { Niadra } from "@niadra/sdk";
+import { readWhatsApp, recordInbound, recordOutbound, whatsAppChallenge } from "@niadra/sdk/whatsapp";
+
+const niadra = new Niadra();
+const env = (name: string): string => process.env[name] ?? "";
+
+export const app = new Hono();
+
+app.get("/whatsapp", (c) => {
+  const { status, body } = whatsAppChallenge(new URL(c.req.url).searchParams, env("META_VERIFY_TOKEN"));
+  return c.text(body, status as 200);
+});
+
+app.post("/whatsapp", async (c) => {
+  const { status, messages } = await readWhatsApp(await c.req.text(), c.req.raw.headers, { appSecret: env("META_APP_SECRET") });
+  for (const inbound of messages) {
+    const convo = niadra.conversation({ subject: inbound.subject, channel: "whatsapp", conversation_id: `wa:${inbound.waId}` });
+    recordInbound(convo, inbound);
+    const ctx = await convo.context();
+    convo.markInjected(ctx);
+    const reply = await answer(`You are Acme's WhatsApp agent.\n\n${ctx.text}`, ctx.suffix, inbound.text);
+    const sent = await fetch(`https://graph.facebook.com/v23.0/${inbound.phoneNumberId}/messages`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${env("META_ACCESS_TOKEN")}`, "content-type": "application/json" },
+      body: JSON.stringify({ messaging_product: "whatsapp", to: inbound.waId, type: "text", text: { body: reply } }),
+    });
+    recordOutbound(convo, reply, await sent.json());
+  }
+  return c.body(null, status as 200);
+});
+
+export default app;
+```
+</CodeGroup>
+
+The same code is in `examples/whatsapp_webhook.py` and `examples/whatsapp-cloud.ts`. The `flush()` after `record()` makes the turn, and the V1 it proves, land before the first read.
+
+## Limits
+
+- The adapter never sends a message nor calls the Graph API; it translates the webhook and records what your code sent.
+- Media arrives as a reference (`id`, MIME type, SHA-256): download the bytes from the Graph API, hand them to `upload_media()` and pass the result as `upload=` (with your `transcript=` of a voice note). The text of a PDF, an image or an Office file (DOCX, XLSX, PPTX) is read inside the cell only, and only when the space lists the type in `media.extract_text_from`; the type comes from the bytes, never from the declared MIME type. All reading happens in the models server, in one child process per document, one at a time: the PDF's text layer, and OCR (RapidOCR with the PP-OCRv6 small recognizer) of the image, scaled down, and of each scanned PDF page, rendered at 200 dpi; a macro-enabled Office file is refused. A file that fails (413 or 422) is treated as a file without text, and no file leaves the region. The text keeps its line breaks, passes the redactor before extraction and becomes a derived turn.
+- Each `WhatsAppMessage` carries the `wa_id` and, for a WhatsApp username, the business-scoped user id (BSUID); statuses and other webhook fields are left out.
+- Tested with public payloads in Meta's format and signatures computed in the test; no Meta account is needed.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="WhatsApp agents" href="/en/guides/whatsapp-agents">
+    identity by number, V1 from the channel and the turn the other agents read.
+  </Card>
+  <Card title="Twilio" href="/en/integrations/twilio">
+    WhatsApp and SMS through Twilio, with the same design.
+  </Card>
+</CardGroup>

@@ -1,0 +1,84 @@
+# Everything that runs in the cluster, in dependency order. scripts/deploy.sh sets the environment.
+#   helmfile apply        install or upgrade all
+#   helmfile -l name=niadra apply     only the Niadra deployables
+
+repositories:
+  - {name: jetstack, url: https://charts.jetstack.io}
+  - {name: external-secrets, url: https://charts.external-secrets.io}
+  - {name: kedacore, url: https://kedacore.github.io/charts}
+  - {name: prometheus-community, url: https://prometheus-community.github.io/helm-charts}
+  - {name: fluent, url: https://fluent.github.io/helm-charts}
+
+helmDefaults:
+  wait: true
+  timeout: 900
+  atomic: false
+
+# Every long-running container states its memory request, so the scheduler counts all of it
+# (scripts/requests_budget.py fails otherwise). Working set on 25/09/2026, and in parentheses the peak
+# since the pod started (cgroup memory.peak), in MiB.
+releases:
+  - name: cert-manager
+    namespace: cert-manager
+    chart: jetstack/cert-manager
+    version: v1.21.2
+    values:
+      - crds: {enabled: true}
+        # controller 27 (84), cainjector 41 (67), webhook 13 (34)
+        resources: {requests: {cpu: 10m, memory: 48Mi}, limits: {memory: 192Mi}}
+        cainjector:
+          resources: {requests: {cpu: 10m, memory: 48Mi}, limits: {memory: 192Mi}}
+        webhook:
+          resources: {requests: {cpu: 10m, memory: 24Mi}, limits: {memory: 96Mi}}
+
+  - name: external-secrets
+    namespace: external-secrets
+    chart: external-secrets/external-secrets
+    version: 2.11.0
+    values:
+      - installCRDs: true
+        # controller 37 (85), cert controller 42 to 53 (81), webhook 28 (37)
+        resources: {requests: {cpu: 10m, memory: 48Mi}, limits: {memory: 192Mi}}
+        certController:
+          resources: {requests: {cpu: 10m, memory: 48Mi}, limits: {memory: 160Mi}}
+        webhook:
+          resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 96Mi}}
+
+  - name: keda
+    namespace: keda
+    chart: kedacore/keda
+    version: 2.20.2
+    # The defaults reserve 100m per component, a sixth of a small machine for three idle processes.
+    # operator 44 (133), metrics server 40 (68), webhooks 16 (34)
+    values:
+      - resources:
+          operator: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 512Mi}}
+          metricServer: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 256Mi}}
+          webhooks: {requests: {cpu: 10m, memory: 24Mi}, limits: {memory: 128Mi}}
+
+  - name: niadra-base
+    namespace: niadra
+    chart: ./charts/niadra
+    needs: [cert-manager/cert-manager, external-secrets/external-secrets]
+    values: [values/niadra.yaml.gotmpl, {part: base}]
+
+  - name: monitoring
+    namespace: monitoring
+    chart: prometheus-community/kube-prometheus-stack
+    version: 91.5.0
+    needs: [niadra/niadra-base]
+    values: [values/monitoring.yaml.gotmpl]
+
+  - name: fluent-bit
+    namespace: logging
+    chart: fluent/fluent-bit
+    version: 0.58.2
+    values: [values/fluent-bit.yaml.gotmpl]
+
+  - name: niadra
+    namespace: niadra
+    chart: ./charts/niadra
+    needs: [niadra/niadra-base, keda/keda, monitoring/monitoring]
+    # The pre-upgrade hooks (roles, migrations) can take minutes on a cold database.
+    timeout: 1800
+    values: [values/niadra.yaml.gotmpl, {part: app}]

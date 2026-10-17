@@ -1,0 +1,168 @@
+---
+title: "Internal agents"
+description: "The billing agent reads the invoice context, posts the credit in the ERP and records the action."
+---
+
+Internal agents work inside your systems without talking to the customer: billing reviews disputes and posts credits, orders reschedules deliveries in the ERP, tickets triages the help desk. They act on the same customers your service agents talk to, and without a shared memory each side gets it wrong in its own way. The internal agent acts without knowing what was said in service; the service agent promises what another agent already did.
+
+This guide wires a billing agent to Niadra with the same calls a service agent uses: it reads the context of the invoice it works on, posts the credit in the ERP with its own credentials, and records the action. A minute later the voice agent answers knowing it.
+
+## The flow at 2:05, 2:06 and 2:07 pm
+
+1. **2:05 pm, app.** Marina disputes the August bill in your app. The message is tied to `invoice:erp:0823` through `object_refs` and is in the live layer in under a second after it reaches the API.
+2. **2:06 pm, billing agent.** It reads `context(object="invoice:erp:0823", view="task:billing", verification="no_customer")`, receives the dispute through `live`, the technician visit that failed at 2:02 pm and the March credit from the history. It posts the $40 credit in the ERP and records `action("credit", closes=...)`.
+3. **2:06 pm, ERP.** The ERP emits `invoice.credited`. The action and the event become one record, and the action goes from `declared` to `confirmed`.
+4. **2:07 pm, call.** The voice pack already says: "Another agent: $40 credit on the August bill, Billing, 2:06 pm, confirmed by the system".
+
+No language model sits between the recorded action and the voice context. Once they reach the API, actions and system events are in the live layer in under a second and in the recompiled pack in under ten.
+
+<Note>
+Niadra never executes an action in a system of record. Your agent acts, with its own credentials. Niadra keeps what it needs to remember and what it did.
+</Note>
+
+## Before you start: the source
+
+An internal agent is a source like any other, with its own key, audience class `internal_agent` and a purpose such as `billing`. Access to the ERP is not access to the memory: the billing agent reads invoices and disputes, not technical open items or health data. Three settings matter here:
+
+- **Scope `act`** on the key (an agent key ships with it) and, if you want to close the list, `trusted_action_ops` on the source (here `["credit"]`): the only operations it may record and whose declared actions close open items before the system confirms them. With no list, the source records any operation, and the closing's gates decide. The `track` scope alone never records an action.
+- **Verification `no_customer`**, the level for tasks with no customer present. It sits outside the V0 to V4 scale and is only accepted from `internal_agent` sources. A pack built for `no_customer` never goes to the customer.
+- **Categories released for `no_customer`** in the space's policy (`no_customer_allowed` on the category): a task with no customer reads only what the policy releases for it. Here, the `invoice` category, with the `billing` purpose. It holds for the invoice in the pack and for the recent turns about it in `live`: the 2:05 pm dispute names `invoice:erp:0823` and is filed under `invoice`.
+
+The `act` scope comes with the key and the `no_customer` ceiling with the source, both chosen in the Console or through the control API; the `trusted_action_ops` list goes in when the source is created, in the Console's "Operações confiáveis" field or through the [control API](/en/api/control/sources-create). The billing source created at sign-up trusts only `credit`: any other operation it records comes back as `operation_not_allowed` (403) and is not recorded. When you create an agent's source, declare every operation it performs.
+
+## Steps
+
+### 1. Open a task centered on the invoice
+
+A task plays the role a conversation plays for service agents: it pins the pack, scopes the SDK cache, groups the events for billing and closes with `task.ended`. Without it, the server closes the task after 3 minutes without events, and an event of the same task within 10 minutes reopens it; each reopen doubles the wait, up to the 10 minutes.
+
+The `task:billing` view is defined by your space as a template plus a policy. It favors objects of the task type, the open items tied to them and what was said about them in conversations; it leaves out what the billing purpose does not allow.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, system_id
+
+niadra = Niadra(channel="erp")
+
+with niadra.task(
+    "billing-7741",
+    subject=system_id("crm", "48213"),
+    object="invoice:erp:0823",
+    view="task:billing",
+    verification="no_customer",
+    agent_id="billing-agent",
+) as task:
+    ctx = task.context()
+    decision = billing_llm.review(instructions=BILLING_RULES, context=ctx.system_block, recent=ctx.turn_block)
+```
+```typescript TypeScript
+import { Niadra } from "@niadra/sdk";
+
+const niadra = new Niadra();
+
+const task = niadra.task({
+  task_id: "billing-7741",
+  channel: "erp",
+  object: "invoice:erp:0823",
+  view: "task:billing",
+  verification: "no_customer",
+});
+const ctx = await task.context();
+const decision = await billingLlm.review({ instructions: BILLING_RULES, context: ctx.text, recent: ctx.suffix });
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/context" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "object": { "type": "invoice", "namespace": "erp", "id": "0823" },
+    "view": "task:billing",
+    "verification": "no_customer",
+    "task_id": "billing-7741"
+  }'
+```
+</CodeGroup>
+
+`context(object=...)` resolves the invoice to its owner and returns the pack centered on it: the timeline of the object plus the customer context the task needs. The same laws hold as for a conversation: pinned by task, with ETag and a receipt of the read. A read centered on an object is compiled on demand, with no language model in the path. A read by object or by profile id, like every internal agent's read, sees only the items that came through confirmed handles: what arrived through an [unconfirmed link](/en/concepts/identity#safeguards-against-wrong-merges) stays out until a person or a system of record confirms it.
+
+### 2. Act in the ERP, then record the action
+
+Post the credit through your ERP integration. Then record the action with `closes`, the open item it fulfils. Name it by id, or by the object and the canonical operation the open item waits for, which is what you usually know: the credit on invoice 0823.
+
+<CodeGroup>
+```python Python
+    erp.post_credit(invoice="0823", amount=40.00, currency="USD")  # your integration, your credentials
+
+    task.action(
+        "credit",
+        result="$40 credit on the August bill",
+        purpose="billing",
+        closes={"object": {"type": "invoice", "namespace": "erp", "id": "0823"}, "operation": "credit"},
+    )
+```
+```typescript TypeScript
+await erp.postCredit({ invoice: "0823", amount: 40.0, currency: "USD" }); // your integration, your credentials
+
+task.action({
+  object_refs: ["invoice:erp:0823"],
+  operation: "credit",
+  result: "$40 credit on the August bill",
+  purpose: "billing",
+  closes: { object: { type: "invoice", namespace: "erp", id: "0823" }, operation: "credit" },
+});
+await task.end();
+```
+</CodeGroup>
+
+A correction goes as a new action, with `corrects_action_id` pointing to the old one. It only counts when both actions came from the same source: another source's (another vendor's) stays on record and in the context.
+
+### 3. Let the system of record confirm it
+
+The action stays `declared` until an event from the system of record confirms it. Send the ERP events through the [generic webhook](/en/guides/system-webhooks) or as system events. When `invoice.credited` arrives for the same object and operation within the window, the two become a single record and the action is `confirmed`, so the credit is never counted twice.
+
+| Status | What it means | What the pack says |
+|---|---|---|
+| `declared` | Recorded by the agent, not yet confirmed by the system | "Declared by Billing at 2:06 pm; the system has not confirmed yet" |
+| `confirmed` | The system of record emitted the matching event | "Confirmed by the system" |
+| `divergent` | The window passed without the confirming event | Flagged, and the `fact.contradicted_by_system_event` trigger condition can notify you |
+| `quarantined` | Recorded in a session the injection screening (Niadra's AI) flagged | No longer shown as done, and what it closed opens again |
+
+A declared action closes an open item when its source trusts its operation (with no list, every one; with a list, only those on it); a confirmed one always closes it. The closing rules are in [Systems](/en/concepts/systems).
+
+### 4. Understand the retroactive close
+
+The action can arrive before the open item exists. The dispute written in the app at 2:05 pm only becomes an open item when the app session closes and is extracted, say at 2:35 pm, and the billing agent acted at 2:06 pm. When the open item is created, Niadra looks for agent actions already applied to the same object and operation within the window. If one exists, the open item is born `resolved`, pointing to the action that closed it.
+
+### 5. Let other agents know
+
+Every agent that reads this customer next sees the action in "Another agent", with its source and time. If your CRM needs to show the outcome, subscribe to the `action.recorded` and `open_item.closed` webhooks and write it there with your own integration. See [Triggers and webhooks](/en/concepts/triggers-and-webhooks).
+
+## An assistant that talks with your team
+
+An internal source also serves an assistant that talks with someone at your company, such as the lawyer who asks for a filing. Name that person by the id your system gives them, with `staff("hr", "U-17")` in Python or `handles.staff("U-17", "hr")` in TypeScript: the conversation stays internal, the agent reads what your team may read, and what the person says counts as your company's word, marked "(team)" on the lines. A conversation with anyone else, or with someone named by phone or e-mail, reads as customer-facing, whatever the key: when in doubt, Niadra tightens. A task with no conversation stays internal.
+
+## When the team undoes a correction
+
+Agents retract and correct facts through `feedback()`; agents never undo what the company retracted. If a retraction or a correction was a mistake, a person with the `security` role undoes it with [`POST /v1/facts/{fact_id}/restore`](/en/api/facts-restore): the fact comes back as it was, with the value, validity, evidence and confidence it had, last confirmed at the time of the restore; the correction that replaced it is retracted and gets the inverse `supersedes` edge; the slot settles again over the confirmed rows only; the history of the fact keeps every step. The route answers 202 and becomes a `feedback.restore_fact` event of the governance source, which memory applies within seconds, with an `admin` receipt (`memory.restore_fact`); the `fact.restored` webhook tells the subscribed endpoints, next to `fact.added` and `fact.retracted`. A fact an erasure took no longer exists: the route answers 404, because only the events of the customer hold a fact and the feedback mentions of the company never do. It refuses with 409, at once and again when memory applies it: a fact that is not retracted, one that came through an [unconfirmed link](/en/concepts/identity#safeguards-against-wrong-merges), one the consolidation merged into another and a correction that the restore of the original fact undid (`undone`: correct the fact again). The next context of any agent carries the item again.
+
+
+## Delta for recurring work
+
+Internal agents often revisit the same customers. Ask with `delta=True` (`delta: true`) and the answer carries only what changed since this source last read in the same task; reads without a `task_id` share one base. "What changed since the last time YOU looked" costs tens of tokens.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Systems, objects and actions" href="/en/concepts/systems">
+    objects, derived state and actions in depth.
+  </Card>
+  <Card title="Webhooks from your systems" href="/en/guides/system-webhooks">
+    how `invoice.credited` gets in.
+  </Card>
+  <Card title="Voice agents" href="/en/guides/voice-agents">
+    the call that knows about the credit.
+  </Card>
+  <Card title="Context use" href="/en/concepts/context-use">
+    how the action counts as use of the context.
+  </Card>
+</CardGroup>

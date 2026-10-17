@@ -1,0 +1,626 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/claim-contract.v0.json",
+  "title": "Niadra Claim Contract v0",
+  "description": "What an agent may state, and the evidence each claim needs in the turn record, checked without a model. See spec/claim-contract.md.",
+  "$defs": {
+    "Actions": {
+      "additionalProperties": false,
+      "description": "What happens to a claim that does not stand, by the task's context (an output kind or a document kind); `default` for any other. A context the contract lists as immutable is never rewritten.",
+      "properties": {
+        "default": {
+          "enum": [
+            "block",
+            "warn",
+            "count",
+            "rewrite_if_unequivocal",
+            "discard_anchor_and_count"
+          ],
+          "type": "string",
+          "title": "Default"
+        },
+        "contexts": {
+          "maxProperties": 32,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,39}$": {
+              "enum": [
+                "block",
+                "warn",
+                "count",
+                "rewrite_if_unequivocal",
+                "discard_anchor_and_count"
+              ],
+              "type": "string"
+            }
+          },
+          "title": "Contexts",
+          "type": "object",
+          "additionalProperties": false
+        },
+        "replace_with": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The caveat a blocked passage gives way to, in a mutable output.",
+          "title": "Replace With"
+        }
+      },
+      "required": [
+        "default"
+      ],
+      "title": "Actions",
+      "type": "object"
+    },
+    "AnchorEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "min_match": {
+          "default": 0.9,
+          "maximum": 1,
+          "minimum": 0.9,
+          "title": "Min Match",
+          "type": "number"
+        },
+        "coverage": {
+          "description": "Counted apart: law and fact never add up.",
+          "enum": [
+            "fact",
+            "law"
+          ],
+          "title": "Coverage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "coverage"
+      ],
+      "title": "AnchorEvidence",
+      "type": "object"
+    },
+    "ClaimCategory": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "agents": {
+          "description": "Empty: every agent.",
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Agents",
+          "type": "array"
+        },
+        "detect": {
+          "$ref": "#/$defs/Detect"
+        },
+        "evidence": {
+          "$ref": "#/$defs/ClaimEvidence"
+        },
+        "natures": {
+          "$ref": "#/$defs/Natures"
+        },
+        "actions": {
+          "$ref": "#/$defs/Actions"
+        }
+      },
+      "required": [
+        "id",
+        "detect",
+        "evidence",
+        "actions"
+      ],
+      "title": "ClaimCategory",
+      "type": "object"
+    },
+    "ClaimEvidence": {
+      "additionalProperties": false,
+      "description": "What the turn record must hold for a claim of the category to stand: exactly one kind.",
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A call of this tool in the turn.",
+          "title": "Tool"
+        },
+        "tool_any": {
+          "items": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Tool Any",
+          "type": "array"
+        },
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AnchorEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ClaimEvidence",
+      "type": "object",
+      "oneOf": [
+        {
+          "required": [
+            "value"
+          ],
+          "properties": {
+            "value": {
+              "type": "object"
+            }
+          }
+        },
+        {
+          "required": [
+            "tool"
+          ],
+          "properties": {
+            "tool": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "tool_any"
+          ],
+          "properties": {
+            "tool_any": {
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "anchor"
+          ],
+          "properties": {
+            "anchor": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    "ClaimOutputs": {
+      "additionalProperties": false,
+      "properties": {
+        "immutable": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Immutable",
+          "type": "array"
+        },
+        "mutable": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Mutable",
+          "type": "array"
+        }
+      },
+      "title": "ClaimOutputs",
+      "type": "object"
+    },
+    "Detect": {
+      "additionalProperties": false,
+      "description": "How a category finds its claims in the text, without a model: numbers of these classes, the words around them that give their role, terms of the trade, named patterns, or sections of a document.",
+      "properties": {
+        "classes": {
+          "items": {
+            "enum": [
+              "money",
+              "percent",
+              "date",
+              "duration",
+              "quantity",
+              "count",
+              "dosage"
+            ],
+            "type": "string"
+          },
+          "maxItems": 7,
+          "title": "Classes",
+          "type": "array"
+        },
+        "roles": {
+          "description": "The words that give a number its role, synonyms and every language in one list.",
+          "maxProperties": 32,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,39}$": {
+              "items": {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "title": "Roles",
+          "type": "object",
+          "additionalProperties": false
+        },
+        "terms": {
+          "description": "With `classes`, a number counts only in a sentence that holds one of them; alone, the term is the claim.",
+          "items": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Terms",
+          "type": "array"
+        },
+        "patterns": {
+          "items": {
+            "enum": [
+              "article_citation",
+              "precedent_citation"
+            ],
+            "type": "string"
+          },
+          "title": "Patterns",
+          "type": "array"
+        },
+        "document_sections": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Document Sections",
+          "type": "array"
+        }
+      },
+      "title": "Detect",
+      "type": "object",
+      "anyOf": [
+        {
+          "required": [
+            "classes"
+          ],
+          "properties": {
+            "classes": {
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "terms"
+          ],
+          "properties": {
+            "terms": {
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "patterns"
+          ],
+          "properties": {
+            "patterns": {
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "document_sections"
+          ],
+          "properties": {
+            "document_sections": {
+              "minItems": 1
+            }
+          }
+        }
+      ],
+      "if": {
+        "required": [
+          "roles"
+        ],
+        "properties": {
+          "roles": {
+            "minProperties": 1
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "classes"
+        ],
+        "properties": {
+          "classes": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    "InternalText": {
+      "additionalProperties": false,
+      "description": "Fingerprints of the company's own prompt: hashes of every `n` words, computed by the SDK, never the prompt itself. An output that repeats one gives way to `redact`, recorded as a claim of the category `internal_text` with the verdict `internal_text_found`, the action taken and, as evidence, the `shingle_hashes_ref` in `document`.",
+      "properties": {
+        "shingle_hashes_ref": {
+          "description": "The prompt version the hashes were computed from.",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Shingle Hashes Ref",
+          "type": "string"
+        },
+        "n": {
+          "default": 8,
+          "maximum": 32,
+          "minimum": 4,
+          "title": "N",
+          "type": "integer"
+        },
+        "redact": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Redact",
+          "type": "string"
+        }
+      },
+      "required": [
+        "shingle_hashes_ref",
+        "redact"
+      ],
+      "title": "InternalText",
+      "type": "object"
+    },
+    "Natures": {
+      "additionalProperties": false,
+      "description": "How a number is handled by where it came from: computed (a value with provenance in the turn, by rule or observed) is checked against it; quoted (inside quotation marks) is checked only for being in a source, as written, even when it is false; said by the model (no origin) takes this action, or the category's.",
+      "properties": {
+        "computed": {
+          "default": "check",
+          "enum": [
+            "check",
+            "count"
+          ],
+          "title": "Computed",
+          "type": "string"
+        },
+        "quoted": {
+          "default": "verbatim",
+          "enum": [
+            "verbatim",
+            "count"
+          ],
+          "title": "Quoted",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "enum": [
+                "block",
+                "warn",
+                "count"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        }
+      },
+      "title": "Natures",
+      "type": "object"
+    },
+    "NegativeCorpus": {
+      "additionalProperties": false,
+      "description": "Phrases of the trade that must never trigger the contract, versioned: `niadra contract test` fails when one does.",
+      "properties": {
+        "version": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "phrases": {
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 5000,
+          "minItems": 1,
+          "title": "Phrases",
+          "type": "array"
+        }
+      },
+      "required": [
+        "version",
+        "phrases"
+      ],
+      "title": "NegativeCorpus",
+      "type": "object"
+    },
+    "ValueEvidence": {
+      "additionalProperties": false,
+      "description": "A value in the turn record, from a tool's result or from state, that the number is checked against.",
+      "properties": {
+        "same_role": {
+          "default": false,
+          "description": "The value's role is the number's role.",
+          "title": "Same Role",
+          "type": "boolean"
+        },
+        "fresh_for": {
+          "anyOf": [
+            {
+              "const": "claim",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The value is within its type's `claim_max_age`, or the claim is `stale`.",
+          "title": "Fresh For"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,39}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,39}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A field or a computed value of `type`.",
+          "title": "Value"
+        },
+        "must_state_gaps": {
+          "default": false,
+          "description": "The value's declared gaps must be said with it, or `gap_not_stated`.",
+          "title": "Must State Gaps",
+          "type": "boolean"
+        },
+        "gap_terms": {
+          "description": "The words that state each declared gap; a gap without them is stated by its name.",
+          "maxProperties": 32,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,39}$": {
+              "items": {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "title": "Gap Terms",
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "title": "ValueEvidence",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "default": "0",
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    },
+    "languages": {
+      "description": "The languages the outputs are in; the first reads a number whose language is unknown.",
+      "items": {
+        "enum": [
+          "pt",
+          "en",
+          "es"
+        ],
+        "type": "string"
+      },
+      "maxItems": 3,
+      "minItems": 1,
+      "title": "Languages",
+      "type": "array"
+    },
+    "categories": {
+      "items": {
+        "$ref": "#/$defs/ClaimCategory"
+      },
+      "maxItems": 64,
+      "title": "Categories",
+      "type": "array"
+    },
+    "negative_corpus": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NegativeCorpus"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "internal_text": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/InternalText"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "outputs": {
+      "$ref": "#/$defs/ClaimOutputs"
+    }
+  },
+  "type": "object"
+}

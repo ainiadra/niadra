@@ -1,0 +1,296 @@
+{
+  "type": "item_variant",
+  "ownership": "global",
+  "mirror_of": {
+    "system": "plataforma_de_ecommerce",
+    "derived_by": "declaration",
+    "drift": "alert"
+  },
+  "key": {
+    "natural": [
+      "variant_id"
+    ]
+  },
+  "working_set": {
+    "enter_on": [
+      "presented",
+      "engaged",
+      "related",
+      "watched",
+      "committed"
+    ],
+    "leave_after": "30d"
+  },
+  "relations": {
+    "product": {
+      "type": "product",
+      "via": "product_id"
+    },
+    "looks": {
+      "type": "look",
+      "via": "item_ref",
+      "many": true
+    }
+  },
+  "fields": {
+    "available": {
+      "type": "bool",
+      "logic": "tri",
+      "freshness": {
+        "class": "volatile",
+        "max_age": "30s",
+        "claim_max_age": "5s"
+      },
+      "claim": {
+        "allowed": true,
+        "class": "quantity",
+        "nature": "observed"
+      },
+      "track_changes": true
+    },
+    "stock_qty": {
+      "type": "number",
+      "freshness": {
+        "class": "volatile"
+      },
+      "claim": {
+        "allowed": false
+      }
+    },
+    "price_sale": {
+      "type": "money",
+      "role": "price_sale",
+      "freshness": {
+        "class": "price",
+        "max_age": "60s",
+        "claim_max_age": "15s"
+      },
+      "claim": {
+        "allowed": true,
+        "class": "money",
+        "nature": "observed"
+      },
+      "track_changes": true
+    },
+    "price_list": {
+      "type": "money",
+      "role": "price_list",
+      "freshness": {
+        "class": "price",
+        "max_age": "60s"
+      },
+      "claim": {
+        "allowed": true,
+        "class": "money"
+      }
+    },
+    "size_label": {
+      "type": "string",
+      "freshness": {
+        "class": "stable"
+      },
+      "attribute": {
+        "family": "size"
+      }
+    },
+    "size_system": {
+      "type": "enum",
+      "freshness": {
+        "class": "stable"
+      }
+    },
+    "color": {
+      "type": "enum",
+      "logic": "tri",
+      "freshness": {
+        "class": "stable",
+        "max_age": "24h"
+      },
+      "attribute": {
+        "family": "color",
+        "vocabulary": "color"
+      }
+    }
+  },
+  "sources": {
+    "platform_live": {
+      "kind": "pull",
+      "precedence": 1,
+      "authoritative_for": [
+        "available",
+        "price_sale",
+        "price_list"
+      ]
+    },
+    "search_snapshot": {
+      "kind": "tool_observation",
+      "precedence": 2,
+      "scope": "global"
+    },
+    "enrichment": {
+      "kind": "batch",
+      "precedence": 1,
+      "authoritative_for": [
+        "color"
+      ]
+    },
+    "checkout_quote": {
+      "kind": "quote",
+      "precedence": 0,
+      "scope": "context"
+    }
+  },
+  "union": {
+    "available": "first_authoritative_live",
+    "price_sale": "first_by_precedence",
+    "color": "first_by_precedence"
+  },
+  "states": [
+    "scheduled",
+    "active",
+    "paused",
+    "discontinued"
+  ],
+  "lifecycle": {
+    "transitions": [
+      {
+        "from": "scheduled",
+        "to": "active",
+        "by": [
+          "source",
+          "clock"
+        ]
+      },
+      {
+        "from": "active",
+        "to": "paused",
+        "by": [
+          "source"
+        ]
+      },
+      {
+        "from": "*",
+        "to": "discontinued",
+        "by": [
+          "source"
+        ]
+      }
+    ]
+  },
+  "timers": {
+    "launch_at": {
+      "due": "launch_at",
+      "on_fire": [
+        "transition(scheduled->active)",
+        "notify"
+      ]
+    },
+    "promo_end_at": {
+      "due": "promo_end_at",
+      "on_fire": [
+        "refresh(price_sale)"
+      ]
+    }
+  },
+  "refetch": {
+    "reasons": [
+      {
+        "name": "never_observed",
+        "when": "observer(available) == none",
+        "budget": {
+          "units": 1,
+          "per": "item/1h"
+        }
+      },
+      {
+        "name": "exposed_now",
+        "when": "presented_in_top(3)",
+        "budget": {
+          "units": 1,
+          "per": "item/60s"
+        }
+      },
+      {
+        "name": "claim_pending",
+        "when": "purpose == 'claim'",
+        "budget": {
+          "units": 1,
+          "per": "turn"
+        }
+      },
+      {
+        "name": "interest_alert",
+        "when": "watch_count > 0",
+        "budget": {
+          "units": 1,
+          "per": "item/5min"
+        }
+      },
+      {
+        "name": "promo_boundary",
+        "when": "promo_end_at - now() < 10min",
+        "budget": {
+          "units": 1,
+          "per": "item"
+        }
+      },
+      {
+        "name": "floor_expired",
+        "when": "age(available) > 90s",
+        "budget": {
+          "units": 1,
+          "per": "item/1h"
+        }
+      }
+    ],
+    "budget": {
+      "unit": "platform_call",
+      "never_money": true
+    }
+  },
+  "purposes": {
+    "display": {
+      "on_stale": "serve_with_age"
+    },
+    "claim": {
+      "on_stale": "serve_with_prohibitions",
+      "prohibitions": [
+        "affirm_availability",
+        "affirm_price"
+      ]
+    },
+    "decide": {
+      "on_stale": "serve_with_age"
+    }
+  },
+  "readings": {
+    "display.available": {
+      "expr": "available == yes or (available == unobserved and state == 'active')",
+      "purposes": [
+        "display"
+      ]
+    },
+    "claim.available": {
+      "expr": "available == yes and age(available) <= 5s",
+      "purposes": [
+        "claim"
+      ]
+    },
+    "checkout.buyable": {
+      "expr": "quote(checkout_quote).available == yes",
+      "purposes": [
+        "decide"
+      ]
+    },
+    "alert.back": {
+      "expr": "was(available == no) and available == yes",
+      "purposes": [
+        "display"
+      ]
+    }
+  },
+  "retention": {
+    "observations": "45d",
+    "projection": "while_in_working_set"
+  }
+}

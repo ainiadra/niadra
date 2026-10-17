@@ -1,0 +1,63 @@
+{
+  "ref": {
+    "type": "item_variant",
+    "namespace": "store",
+    "id": "v-10231"
+  },
+  "type_version": "1",
+  "as_of": "2026-09-29T11:59:57Z",
+  "state": "active",
+  "fields": {
+    "available": {
+      "v": true,
+      "logic": "yes",
+      "status": "fresh",
+      "age_s": 3,
+      "observed_at": "2026-09-29T11:59:57Z",
+      "src": "platform_live",
+      "observer": "source:platform_live",
+      "known_at": "2026-09-29T11:59:58Z",
+      "claim_safe": true,
+      "was": {
+        "v": false,
+        "logic": "no"
+      }
+    },
+    "price_sale": {
+      "v": 189.9,
+      "status": "fresh",
+      "age_s": 40,
+      "observed_at": "2026-09-29T11:59:20Z",
+      "src": "platform_live",
+      "observer": "source:platform_live",
+      "known_at": "2026-09-29T11:59:21Z",
+      "role": "price_sale",
+      "claim_safe": false,
+      "was": {
+        "v": 229.9,
+        "logic": "yes"
+      }
+    },
+    "color": {
+      "logic": "unobserved",
+      "status": "expired",
+      "claim_safe": false
+    }
+  },
+  "readings": {
+    "claim.available": {
+      "logic": "yes",
+      "type": "bool",
+      "v": true
+    }
+  },
+  "prohibitions": [
+    "affirm_availability",
+    "affirm_price"
+  ],
+  "refetch": {
+    "reason": "claim_pending",
+    "priority": "normal",
+    "admitted": true
+  }
+}

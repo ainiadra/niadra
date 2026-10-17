@@ -1,0 +1,743 @@
+{
+  "customer": {
+    "center": "01a0b2c4-0000-7000-8000-0000000000f2",
+    "nodes": [
+      {
+        "id": "n1",
+        "kind": "person",
+        "label": "p_eyxl5q5omfynrwd5",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000f2",
+        "meta": {
+          "hop": 0,
+          "pseudonym": "p_eyxl5q5omfynrwd5",
+          "handles": 2,
+          "objects_total": 312
+        }
+      },
+      {
+        "id": "n2",
+        "kind": "handle",
+        "label": "+55*******0001",
+        "ref": null,
+        "meta": {
+          "hop": 1,
+          "type": "wa_id",
+          "channel": "whatsapp",
+          "weight": "verified",
+          "provisional": false,
+          "last_seen": "2026-09-29T17:40:00Z"
+        }
+      },
+      {
+        "id": "n3",
+        "kind": "handle",
+        "label": "m***@demo.niadra.com",
+        "ref": null,
+        "meta": {
+          "hop": 1,
+          "type": "email",
+          "channel": "email",
+          "weight": "declared",
+          "provisional": false,
+          "last_seen": "2026-07-01T09:15:00Z"
+        }
+      },
+      {
+        "id": "n4",
+        "kind": "account",
+        "label": "p_who365r6p4drsarv",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000e4",
+        "meta": {
+          "hop": 1,
+          "pseudonym": "p_who365r6p4drsarv",
+          "handles": 1
+        }
+      },
+      {
+        "id": "n5",
+        "kind": "account",
+        "label": "p_k2n8dd01qpl7ms3a",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000e5",
+        "meta": {
+          "hop": 1,
+          "pseudonym": "p_k2n8dd01qpl7ms3a",
+          "handles": 1
+        }
+      },
+      {
+        "id": "n6",
+        "kind": "object",
+        "label": "order PED-90039",
+        "ref": "01a0b2c4-0000-7000-8000-000000000012",
+        "meta": {
+          "hop": 1,
+          "type": "order",
+          "namespace": "erp",
+          "external_id": "PED-90039",
+          "state": "delivered",
+          "state_label": null,
+          "masked": false,
+          "as_of": "2026-09-20T12:05:00Z"
+        }
+      },
+      {
+        "id": "n7",
+        "kind": "object",
+        "label": "order PED-90112",
+        "ref": "01a0b2c4-0000-7000-8000-000000000013",
+        "meta": {
+          "hop": 1,
+          "type": "order",
+          "namespace": "erp",
+          "external_id": "PED-90112",
+          "state": "pending",
+          "state_label": null,
+          "masked": false,
+          "as_of": "2026-09-30T11:04:00Z"
+        }
+      },
+      {
+        "id": "n8",
+        "kind": "object",
+        "label": "order PED-90377",
+        "ref": "01a0b2c4-0000-7000-8000-000000000014",
+        "meta": {
+          "hop": 1,
+          "type": "order",
+          "namespace": "erp",
+          "external_id": "PED-90377",
+          "state": "shipped",
+          "state_label": null,
+          "masked": false,
+          "as_of": "2026-10-01T16:20:00Z"
+        }
+      },
+      {
+        "id": "n9",
+        "kind": "object",
+        "label": "ticket CH-2231",
+        "ref": "01a0b2c4-0000-7000-8000-000000000015",
+        "meta": {
+          "hop": 1,
+          "type": "ticket",
+          "namespace": "crm",
+          "external_id": "CH-2231",
+          "state": "open",
+          "state_label": null,
+          "masked": false,
+          "as_of": "2026-10-01T18:30:00Z"
+        }
+      },
+      {
+        "id": "n10",
+        "kind": "agent",
+        "label": "sac-voz",
+        "ref": "0192a000-0000-7000-8000-00000000b001",
+        "meta": {
+          "hop": 1,
+          "channel": "voice",
+          "vendor": "Fornecedor A"
+        }
+      },
+      {
+        "id": "n11",
+        "kind": "agent",
+        "label": "cobranca",
+        "ref": "0192a000-0000-7000-8000-00000000b002",
+        "meta": {
+          "hop": 1,
+          "channel": "erp",
+          "vendor": "Fornecedor B"
+        }
+      },
+      {
+        "id": "n12",
+        "kind": "system",
+        "label": "erp",
+        "ref": "0192a000-0000-7000-8000-00000000b003",
+        "meta": {
+          "hop": 1,
+          "channel": "erp",
+          "vendor": "erp"
+        }
+      },
+      {
+        "id": "n13",
+        "kind": "system",
+        "label": "crm",
+        "ref": "0192a000-0000-7000-8000-00000000b004",
+        "meta": {
+          "hop": 1,
+          "channel": "crm",
+          "vendor": "crm"
+        }
+      },
+      {
+        "id": "n14",
+        "kind": "person",
+        "label": "p_c21dw9a0rrt5uu8q",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000f9",
+        "meta": {
+          "hop": 1,
+          "pseudonym": "p_c21dw9a0rrt5uu8q",
+          "handles": 1
+        }
+      },
+      {
+        "id": "n15",
+        "kind": "agent",
+        "label": "fechamento",
+        "ref": null,
+        "meta": {
+          "hop": 1,
+          "target": "queue:fechamento"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "from": "n2",
+        "to": "n1",
+        "kind": "identifies",
+        "meta": {
+          "strength": "strong",
+          "weight": "verified",
+          "since": "2026-03-12T14:02:00Z"
+        }
+      },
+      {
+        "id": "e2",
+        "from": "n3",
+        "to": "n1",
+        "kind": "identifies",
+        "meta": {
+          "strength": "weak",
+          "weight": "declared",
+          "since": "2026-07-01T09:15:00Z"
+        }
+      },
+      {
+        "id": "e3",
+        "from": "n1",
+        "to": "n4",
+        "kind": "member_of",
+        "meta": {
+          "role": "compras",
+          "since": "2025-11-02T10:00:00Z"
+        }
+      },
+      {
+        "id": "e4",
+        "from": "n5",
+        "to": "n4",
+        "kind": "parent_of",
+        "meta": {
+          "since": "2025-01-10T00:00:00Z"
+        }
+      },
+      {
+        "id": "e5",
+        "from": "n1",
+        "to": "n6",
+        "kind": "owns",
+        "meta": {
+          "role": "owner"
+        }
+      },
+      {
+        "id": "e6",
+        "from": "n1",
+        "to": "n7",
+        "kind": "owns",
+        "meta": {
+          "role": "owner"
+        }
+      },
+      {
+        "id": "e7",
+        "from": "n1",
+        "to": "n8",
+        "kind": "owns",
+        "meta": {
+          "role": "owner"
+        }
+      },
+      {
+        "id": "e8",
+        "from": "n1",
+        "to": "n9",
+        "kind": "owns",
+        "meta": {
+          "role": "owner"
+        }
+      },
+      {
+        "id": "e9",
+        "from": "n10",
+        "to": "n1",
+        "kind": "talked_with",
+        "meta": {
+          "count": 4,
+          "last_at": "2026-09-29T17:40:00Z",
+          "channels": [
+            "voice",
+            "whatsapp"
+          ]
+        }
+      },
+      {
+        "id": "e10",
+        "from": "n11",
+        "to": "n7",
+        "kind": "acted_on",
+        "meta": {
+          "count": 1,
+          "last_at": "2026-09-30T11:05:00Z",
+          "operations": [
+            "invoice.credit"
+          ]
+        }
+      },
+      {
+        "id": "e11",
+        "from": "n12",
+        "to": "n6",
+        "kind": "reported",
+        "meta": {
+          "count": 6,
+          "last_at": "2026-09-20T08:00:00Z"
+        }
+      },
+      {
+        "id": "e12",
+        "from": "n12",
+        "to": "n7",
+        "kind": "reported",
+        "meta": {
+          "count": 3,
+          "last_at": "2026-09-30T11:04:00Z"
+        }
+      },
+      {
+        "id": "e13",
+        "from": "n12",
+        "to": "n8",
+        "kind": "reported",
+        "meta": {
+          "count": 4,
+          "last_at": "2026-10-01T16:20:00Z"
+        }
+      },
+      {
+        "id": "e14",
+        "from": "n13",
+        "to": "n9",
+        "kind": "reported",
+        "meta": {
+          "count": 2,
+          "last_at": "2026-10-01T18:30:00Z"
+        }
+      },
+      {
+        "id": "e15",
+        "from": "n10",
+        "to": "n15",
+        "kind": "handed_off",
+        "meta": {
+          "count": 1,
+          "status": "closed",
+          "outcome": "venda_fechada",
+          "last_at": "2026-09-29T17:52:00Z",
+          "about": "n1"
+        }
+      },
+      {
+        "id": "e16",
+        "from": "n1",
+        "to": "n14",
+        "kind": "suggested_same",
+        "meta": {
+          "score": 0.81
+        }
+      }
+    ],
+    "truncated": false,
+    "withheld": 0,
+    "generated_at": "2026-10-02T12:00:00Z"
+  },
+  "account": {
+    "center": "01a0b2c4-0000-7000-8000-0000000000e4",
+    "nodes": [
+      {
+        "id": "n1",
+        "kind": "account",
+        "label": "p_who365r6p4drsarv",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000e4",
+        "meta": {
+          "hop": 0,
+          "pseudonym": "p_who365r6p4drsarv",
+          "handles": 1
+        }
+      },
+      {
+        "id": "n2",
+        "kind": "account",
+        "label": "p_k2n8dd01qpl7ms3a",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000e5",
+        "meta": {
+          "hop": 1,
+          "pseudonym": "p_k2n8dd01qpl7ms3a",
+          "handles": 1
+        }
+      },
+      {
+        "id": "n3",
+        "kind": "person",
+        "label": "p_eyxl5q5omfynrwd5",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000f2",
+        "meta": {
+          "hop": 1,
+          "pseudonym": "p_eyxl5q5omfynrwd5",
+          "handles": 2
+        }
+      },
+      {
+        "id": "n4",
+        "kind": "person",
+        "label": "p_9b02hhtq0al4ms7v",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000f3",
+        "meta": {
+          "hop": 1,
+          "pseudonym": "p_9b02hhtq0al4ms7v",
+          "handles": 1
+        }
+      },
+      {
+        "id": "n5",
+        "kind": "handle",
+        "label": "CL*****01",
+        "ref": null,
+        "meta": {
+          "hop": 1,
+          "type": "system_id",
+          "channel": "crm",
+          "weight": "system",
+          "provisional": false,
+          "last_seen": "2026-09-15T10:00:00Z"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "from": "n3",
+        "to": "n1",
+        "kind": "member_of",
+        "meta": {
+          "role": "compras",
+          "since": "2025-11-02T10:00:00Z"
+        }
+      },
+      {
+        "id": "e2",
+        "from": "n2",
+        "to": "n1",
+        "kind": "parent_of",
+        "meta": {
+          "since": "2025-01-10T00:00:00Z"
+        }
+      },
+      {
+        "id": "e3",
+        "from": "n4",
+        "to": "n1",
+        "kind": "member_of",
+        "meta": {
+          "role": "technical",
+          "since": "2026-02-20T13:00:00Z"
+        }
+      },
+      {
+        "id": "e4",
+        "from": "n5",
+        "to": "n1",
+        "kind": "identifies",
+        "meta": {
+          "strength": "strong",
+          "weight": "system",
+          "since": "2025-11-02T10:00:00Z"
+        }
+      }
+    ],
+    "truncated": false,
+    "withheld": 0,
+    "generated_at": "2026-10-02T12:00:05Z"
+  },
+  "overview": {
+    "center": null,
+    "nodes": [
+      {
+        "id": "n1",
+        "kind": "person",
+        "label": "p_eyxl5q5omfynrwd5",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000f2",
+        "meta": {
+          "hop": 0,
+          "pseudonym": "p_eyxl5q5omfynrwd5",
+          "handles": 2,
+          "links": 1,
+          "objects": 4,
+          "interactions": 6,
+          "score": 13
+        }
+      },
+      {
+        "id": "n2",
+        "kind": "person",
+        "label": "p_9b02hhtq0al4ms7v",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000f3",
+        "meta": {
+          "hop": 0,
+          "pseudonym": "p_9b02hhtq0al4ms7v",
+          "handles": 1,
+          "links": 1,
+          "objects": 1,
+          "interactions": 2,
+          "score": 5
+        }
+      },
+      {
+        "id": "n3",
+        "kind": "account",
+        "label": "p_who365r6p4drsarv",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000e4",
+        "meta": {
+          "hop": 0,
+          "pseudonym": "p_who365r6p4drsarv",
+          "handles": 1,
+          "links": 2,
+          "objects": 0,
+          "interactions": 0,
+          "score": 3
+        }
+      },
+      {
+        "id": "n4",
+        "kind": "account",
+        "label": "p_k2n8dd01qpl7ms3a",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000e5",
+        "meta": {
+          "hop": 0,
+          "pseudonym": "p_k2n8dd01qpl7ms3a",
+          "handles": 1,
+          "links": 1,
+          "objects": 0,
+          "interactions": 0,
+          "score": 1
+        }
+      },
+      {
+        "id": "n5",
+        "kind": "partner",
+        "label": "p_tr4nsp0rt3n0rt3x",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000d1",
+        "meta": {
+          "hop": 0,
+          "pseudonym": "p_tr4nsp0rt3n0rt3x",
+          "handles": 1,
+          "links": 1,
+          "objects": 0,
+          "interactions": 0,
+          "score": 1
+        }
+      },
+      {
+        "id": "n6",
+        "kind": "agent",
+        "label": "sac-voz",
+        "ref": "0192a000-0000-7000-8000-00000000b001",
+        "meta": {
+          "hop": 0,
+          "channel": "voice",
+          "vendor": "Fornecedor A"
+        }
+      },
+      {
+        "id": "n7",
+        "kind": "agent",
+        "label": "cobranca",
+        "ref": "0192a000-0000-7000-8000-00000000b002",
+        "meta": {
+          "hop": 0,
+          "channel": "erp",
+          "vendor": "Fornecedor B"
+        }
+      },
+      {
+        "id": "n8",
+        "kind": "system",
+        "label": "erp",
+        "ref": "0192a000-0000-7000-8000-00000000b003",
+        "meta": {
+          "hop": 0,
+          "channel": "erp",
+          "vendor": "erp"
+        }
+      },
+      {
+        "id": "n9",
+        "kind": "system",
+        "label": "crm",
+        "ref": "0192a000-0000-7000-8000-00000000b004",
+        "meta": {
+          "hop": 0,
+          "channel": "crm",
+          "vendor": "crm"
+        }
+      },
+      {
+        "id": "n10",
+        "kind": "person",
+        "label": "p_s0l1t4ry8qn2vx9k",
+        "ref": "01a0b2c4-0000-7000-8000-0000000000f7",
+        "meta": {
+          "hop": 0,
+          "pseudonym": "p_s0l1t4ry8qn2vx9k",
+          "handles": 1,
+          "links": 0,
+          "objects": 0,
+          "interactions": 3,
+          "score": 2
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "from": "n1",
+        "to": "n3",
+        "kind": "member_of",
+        "meta": {
+          "role": "compras",
+          "since": "2025-11-02T10:00:00Z"
+        }
+      },
+      {
+        "id": "e2",
+        "from": "n2",
+        "to": "n3",
+        "kind": "member_of",
+        "meta": {
+          "role": "technical",
+          "since": "2026-02-20T13:00:00Z"
+        }
+      },
+      {
+        "id": "e3",
+        "from": "n4",
+        "to": "n3",
+        "kind": "parent_of",
+        "meta": {
+          "since": "2025-01-10T00:00:00Z"
+        }
+      },
+      {
+        "id": "e4",
+        "from": "n2",
+        "to": "n5",
+        "kind": "partner_of",
+        "meta": {
+          "role": "driver",
+          "since": "2026-05-05T08:00:00Z"
+        }
+      },
+      {
+        "id": "e5",
+        "from": "n6",
+        "to": "n1",
+        "kind": "talked_with",
+        "meta": {
+          "count": 4,
+          "last_at": "2026-09-29T17:40:00Z",
+          "channels": [
+            "voice",
+            "whatsapp"
+          ]
+        }
+      },
+      {
+        "id": "e6",
+        "from": "n6",
+        "to": "n2",
+        "kind": "talked_with",
+        "meta": {
+          "count": 2,
+          "last_at": "2026-09-28T10:10:00Z",
+          "channels": [
+            "voice"
+          ]
+        }
+      },
+      {
+        "id": "e7",
+        "from": "n7",
+        "to": "n1",
+        "kind": "acted_on",
+        "meta": {
+          "count": 1,
+          "last_at": "2026-09-30T11:05:00Z",
+          "operations": [
+            "invoice.credit"
+          ]
+        }
+      },
+      {
+        "id": "e8",
+        "from": "n8",
+        "to": "n1",
+        "kind": "reported",
+        "meta": {
+          "count": 13,
+          "last_at": "2026-10-01T16:20:00Z"
+        }
+      },
+      {
+        "id": "e9",
+        "from": "n9",
+        "to": "n1",
+        "kind": "reported",
+        "meta": {
+          "count": 2,
+          "last_at": "2026-10-01T18:30:00Z"
+        }
+      },
+      {
+        "id": "e10",
+        "from": "n9",
+        "to": "n2",
+        "kind": "reported",
+        "meta": {
+          "count": 5,
+          "last_at": "2026-09-27T09:00:00Z"
+        }
+      },
+      {
+        "id": "e11",
+        "from": "n6",
+        "to": "n10",
+        "kind": "talked_with",
+        "meta": {
+          "count": 3,
+          "last_at": "2026-09-26T15:00:00Z",
+          "channels": [
+            "voice"
+          ]
+        }
+      }
+    ],
+    "truncated": true,
+    "withheld": 3,
+    "generated_at": "2026-10-02T12:00:10Z"
+  }
+}

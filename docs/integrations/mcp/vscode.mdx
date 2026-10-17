@@ -1,0 +1,55 @@
+---
+title: "VS Code"
+description: "O servidor MCP do seu espaço no VS Code, com a chave e o subject token pedidos na hora e guardados em segredo."
+---
+
+O VS Code liga a servidores MCP por HTTP no `.vscode/mcp.json`, com `inputs` que pedem um valor uma vez e o guardam em segredo. Use uma chave do espaço de **sandbox** (`nia_sk_test_...`), nunca uma chave `live`.
+
+## O que a conexão precisa
+
+| Cabeçalho | Valor | De onde vem |
+|---|---|---|
+| `Authorization` | `Bearer` e a chave da fonte | O Console, em **Agentes e chaves**, no espaço de sandbox |
+| `Niadra-Subject-Token` | Um token assinado que amarra a conexão a um cliente de teste | [`POST /v1/subject-tokens`](/api/subject-tokens), com a mesma chave; vale 15 minutos |
+
+## Ligar
+
+Em `.vscode/mcp.json`:
+
+```json
+{
+  "inputs": [
+    { "type": "promptString", "id": "niadra-api-key", "description": "Niadra source key of the sandbox space", "password": true },
+    { "type": "promptString", "id": "niadra-subject-token", "description": "Subject token from POST /v1/subject-tokens (15 minutes)", "password": true }
+  ],
+  "servers": {
+    "niadra": {
+      "type": "http",
+      "url": "https://acme-sandbox.us-east-2.api.niadra.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:niadra-api-key}",
+        "Niadra-Subject-Token": "${input:niadra-subject-token}"
+      }
+    }
+  }
+}
+```
+
+Na primeira vez, o VS Code pede os dois valores e os guarda. As ferramentas entram no modo agente do Chat; com a memória dos agentes ligada no espaço, `search_agent_memory` (e `remember`, com o escopo `agent_memory:write`) aparecem ao lado das ferramentas do cliente (oito; sete numa fonte voltada ao cliente, sem `resolve_identity`). `${env:NIADRA_API_KEY}` também funciona, para quem prefere variáveis de ambiente.
+
+## Limites
+
+- O token vale 15 minutos: quando vence, as ferramentas do cliente respondem `unauthenticated`. Emita outro e use **MCP: Reset Cached Tools** ou reinicie o servidor para informar o novo. As duas ferramentas da memória do agente funcionam sem token.
+- O cliente é o do token, sempre. O servidor só responde `POST`.
+- Cada chamada de ferramenta deixa um comprovante no espaço.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="MCP com qualquer LLM" href="/guides/mcp">
+    as ferramentas, o token e o que cada uma exige.
+  </Card>
+  <Card title="Assistentes de código" href="/integrations/coding-assistants">
+    a skill que ensina o assistente a ligar um repositório à Niadra.
+  </Card>
+</CardGroup>

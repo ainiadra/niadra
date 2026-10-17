@@ -1,0 +1,28 @@
+{
+  "type": "shopping_assistant_state",
+  "ownership": "agent",
+  "agent_state": {
+    "scope": "conversation",
+    "max_bytes": 131072,
+    "write": "merge_by_key",
+    "over_cap": "keep_previous"
+  },
+  "fields": {
+    "step": {
+      "type": "enum"
+    },
+    "shortlist": {
+      "type": "list"
+    },
+    "size_hint": {
+      "type": "string"
+    },
+    "recipient_name": {
+      "type": "string",
+      "pii": true
+    }
+  },
+  "retention": {
+    "state": "30d"
+  }
+}

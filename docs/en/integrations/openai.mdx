@@ -1,0 +1,97 @@
+---
+title: "OpenAI and Azure OpenAI"
+description: "The wrap() of the OpenAI client, and of any client with the same shape, AzureOpenAI included: context on the way in, the answer recorded on the way out."
+---
+
+`wrap()` wraps the OpenAI client (Python and TypeScript) so every call inside a conversation or task block gets the context and records the answer. `AzureOpenAI` has the same shape and works with the same `wrap()`, with no adapter of its own; the integration test runs against both real clients.
+
+## Install
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[openai]'   # openai 1.40 or newer, below 4
+```
+```sh TypeScript
+npm install @niadra/sdk openai   # wrap() is in the main package
+```
+</CodeGroup>
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | Inside a block, `chat.completions.create` and `chat.completions.parse` (sync or async, streaming or not, and through `with_raw_response`) get the pinned pack as a system message right after your leading system messages and the `turn_block` as a system message at the end. Your instructions stay first: they are the same for every customer and remain the cacheable prefix |
+| Turns | The model's answer is recorded as the agent's turn, stamped with the pack that was in the prompt, with the usage the provider reported (prompt tokens, the ones read from the cache and the ones written to it). A stream reports usage only with `stream_options={"include_usage": True}`; the wrapper never changes your request |
+| Tools | `conversation.tools()` hands over the kit for `tools=`; `wrap()` does not touch the tools |
+| Verification | `conversation.verify()` before the call |
+| Handoff | `conversation.handoff()` where your flow transfers |
+
+## Minimal example
+
+<CodeGroup>
+```python Python (Azure OpenAI)
+"""Azure OpenAI through the same wrap() as OpenAI."""
+
+from openai import AzureOpenAI
+
+from niadra import Niadra, phone, wrap
+
+niadra = Niadra(channel="chat")
+azure = wrap(AzureOpenAI(api_version="2025-04-01-preview"))  # AZURE_OPENAI_ENDPOINT and _API_KEY
+
+with niadra.conversation("thread-81", subject=phone("+5511912345678")) as conversation:
+    conversation.customer("Where is my replacement lid?")
+    reply = azure.chat.completions.create(
+        model="support-gpt41",  # your deployment name
+        messages=[
+            {"role": "system", "content": "You are Acme's agent."},
+            {"role": "user", "content": "Where is my replacement lid?"},
+        ],
+    )
+    print(reply.choices[0].message.content)
+```
+```python Python (OpenAI)
+from openai import OpenAI
+from niadra import Niadra, phone, wrap
+
+niadra = Niadra(channel="whatsapp")
+openai = wrap(OpenAI())
+
+with niadra.conversation(thread_id, subject=phone("+5511912345678")) as conversation:
+    conversation.customer(incoming_text)
+    reply = openai.chat.completions.create(model="gpt-4.1", messages=messages)
+```
+```typescript TypeScript
+import OpenAI from "openai";
+import { Niadra, handles, wrap } from "@niadra/sdk";
+
+const niadra = new Niadra();
+const convo = niadra.conversation({ subject: handles.appUserId(userId), channel: "web_chat", conversation_id: chatId });
+const openai = wrap(new OpenAI(), convo);
+const completion = await openai.chat.completions.create({ model: "gpt-4.1", messages });
+```
+</CodeGroup>
+
+The same code is in `examples/azure_openai.py`.
+
+## Agent memory
+
+`wrap(client, agent_memory=True)` puts the agent's own notes in the same system message, before the customer's context, like the other adapters. In TypeScript, read the block with `conv.agentMemory()` and put `text` in your system message. See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- Outside a conversation or task block, calls pass through untouched.
+- In Python, `with_streaming_response` is not intercepted; in TypeScript, `.asResponse()` returns the raw HTTP response and nothing is recorded.
+- The wrapper returns a proxy and never modifies your client. Nothing it does can fail the model call.
+- Tested against `openai` 1.40 (real `OpenAI` and `AzureOpenAI` clients, with the transport replaced) and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="OpenAI Agents SDK" href="/en/integrations/openai-agents">
+    for those on the Agents SDK instead of the client.
+  </Card>
+  <Card title="Python SDK" href="/en/sdk/python">
+    `wrap()` and the provider's prompt cache.
+  </Card>
+</CardGroup>

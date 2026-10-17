@@ -1,0 +1,120 @@
+---
+title: "Padrões"
+description: "Sinais que se repetem, cada um com a regra, as evidências e o prazo de validade."
+---
+
+Um padrão é um sinal que a memória deriva do que se repete entre conversas, eventos de sistema e ações de agentes. "Terceira reclamação sobre visita técnica em 90 dias" é um padrão. "A cliente disse que está chateada" é um fato de um episódio. O padrão muda o que o agente faz antes da primeira palavra: o tom, a prioridade, o que oferecer e o que não oferecer de novo. Todo padrão traz a regra que o gerou, as evidências que o sustentam e a data em que ele deixa de valer.
+
+## O catálogo
+
+O seu espaço liga as regras que quiser e define os parâmetros. O catálogo inicial:
+
+| Padrão | Regra, com os seus parâmetros | Janela | O que o agente lê |
+|---|---|---|---|
+| `recurring_complaint` | 3 ou mais episódios com intenção `complaint` na mesma categoria | 90 dias | "Terceira reclamação sobre visita técnica em 90 dias, a última em 22/09" |
+| `broken_company_promise` | Promessa da empresa com prazo vencido e sem ação que a feche | 60 dias | "A empresa deve a visita remarcada desde 10/09" |
+| `asked_to_cancel` | Um episódio com intenção `cancellation` registrada | 180 dias | "Pediu cancelamento em 03/08; ficou com desconto" |
+| `preferred_channel` | 70% ou mais das conversas iniciadas pelo cliente num canal, com 5 ou mais conversas | 180 dias | "Prefere WhatsApp" |
+| `does_not_answer_calls` | 3 ou mais tentativas de voz sem atendimento e resposta por texto no mesmo período | 30 dias | "Não atende ligação; responde por texto" |
+| `escalated_to_human` | 2 ou mais conversas com desfecho `escalated` | 90 dias | "Transferido para atendimento humano duas vezes em 90 dias" |
+| `declining_sentiment` | Sentimento das 3 últimas sessões abaixo de -0,3, as três nos últimos 30 dias | 30 dias | "Três conversas seguidas com sentimento negativo" |
+| `overdue_invoices` | 2 ou mais eventos de sistema `invoice.overdue` | 90 dias, a janela quente do espaço | Só para a finalidade `billing`: "Duas faturas em atraso em 90 dias" |
+
+Regra própria é uma regra do catálogo com os seus parâmetros (categoria, intenção, desfecho, tipo canônico de evento, contagem, janela), nunca texto livre. Um espaço tem até 25 regras próprias, ligadas ou não, e a janela de uma regra vai de 1 a 365 dias. Regras sobre eventos de sistema (`does_not_answer_calls` e `overdue_invoices`) contam só os eventos que ficam no banco vivo, os da janela quente do espaço (`events_hot_days`, 90 dias por padrão, de 30 a 90): a janela delas vai até esse número, e uma regra já gravada com janela maior roda sobre a janela quente. Uma contagem mínima abaixo de 2 vale 2, porque padrão pede repetição, menos em `asked_to_cancel` e `broken_company_promise`, em que uma evidência estruturada basta. Um diff que passe desses limites, use um parâmetro que o catálogo não conhece ou toque uma categoria sensível é recusado quando é enviado e quando é aprovado. No Console, o formulário da regra segue as mesmas contas: a contagem começa em 2 e a janela de uma regra sobre eventos vai até a janela quente.
+
+## Como um padrão nasce
+
+Padrões saem de regras determinísticas sobre episódios tipados, pendências, ações de agentes e eventos de objetos. As regras rodam logo depois que a memória de um cliente muda (uma conversa reconciliada, um evento de objeto, uma união ou separação de perfis) e, a cada 5 minutos, para os padrões que venceram. Uma regra nova ou ajustada vale para cada cliente na próxima vez que a memória dele mudar. Nenhum modelo de linguagem inventa padrão: quando a regra pede uma classificação, como intenção ou sentimento, ela já foi feita na extração da conversa. Contam só os itens que chegaram por handles confirmados: o que veio por um [vínculo não confirmado](/concepts/identity#proteções-contra-união-errada) não sustenta padrão nenhum, e um padrão cuja evidência veio por esse vínculo não dispara aviso; a confirmação, uma união ou uma separação refazem os padrões do perfil na hora.
+
+Cada padrão grava:
+
+- a regra e a versão dela;
+- os ids das evidências;
+- `first_seen` e `last_evidence_at`;
+- `expires_at`, a data em que a regra deixa de casar com as evidências.
+
+Padrão sem evidência não existe. Quando o `forget` apaga uma evidência, o padrão cai junto pela mesma linhagem. Uma união ou separação de perfis deriva os padrões de novo na hora, e cada metade fica só com o que as próprias evidências sustentam.
+
+## O que nunca vira padrão
+
+- **Categoria sensível.** Saúde, religião, opinião política, vida sexual e as demais categorias do artigo 11 da LGPD e do artigo 9 do GDPR nunca viram sinal. O vazamento costuma morar no parâmetro da regra: "reclamação recorrente sobre autorização de exame" revela saúde sem nenhum dado pessoal. Por isso o plano de controle recusa a regra que nomeia categoria ou tipo de evento sensível, reconhecida pelo nome em português, inglês ou espanhol (`saude`, `politica`, `sindicato`, `vida_sexual`, `origem_etnica`) e pelas palavras do nome (`autorizacao_de_exame`, `exam_authorization`); o mesmo vale para a categoria de um episódio, que nunca alimenta uma regra. O seu espaço pode limitar as regras a uma lista de permissão (`trait_allowed_categories`), e o seu time marca como sensíveis as categorias próprias do seu setor ou normaliza procedimento, exame, medicamento e especialidade como `atendimento` no esquema de extração (`normalized_as`).
+- **Um episódio só.** Padrão exige repetição. A única exceção, `single_evidence`, vale para dado estruturado e inequívoco: a intenção `cancellation` registrada, ou uma promessa da empresa vencida sem nada que a feche. Nunca sentimento, tom ou texto livre.
+- **Inferência de probabilidade sobre a pessoa.** Nenhum modelo de linguagem escreve chance de comportamento. As regras são determinísticas, sobre campos estruturados, com parâmetros explícitos.
+
+## Padrões no contexto
+
+Os padrões aparecem na seção "Padrões" do contexto. O padrão estável fica na camada estável, sem data volátil; o volátil fica na camada recente, com a data da última evidência. Cada view tem um teto:
+
+| View | Padrões entregues |
+|---|---|
+| `voice` | Até 4, em até 60 tokens |
+| `chat` | Até 6 |
+| `brief` | Só o de maior peso |
+
+Um perfil tem até 20 padrões ativos. Padrões passam pela mesma política dos fatos: a categoria `trait`, um nível mínimo de verificação e a finalidade de quem lê. Uma regra pode nomear as próprias finalidades em `purposes`; sem elas, vale a do catálogo. `overdue_invoices` só chega a uma fonte com finalidade `billing`, mesmo quando a regra não nomeia nenhuma; `declining_sentiment`, só a agentes de atendimento. O mesmo vale para os webhooks `trait.added` e `trait.expired`, que só chegam a um endpoint cuja fonte pode ler o padrão. O contexto diz com todas as letras: são dados, não instruções. O padrão orienta o agente e nunca decide por ele.
+
+## Teste a regra antes de ligar
+
+Regras são configuração versionada, alterada por um diff que uma pessoa aprova na API de controle. No Console, a tela Padrões monta a regra a partir do catálogo, testa e envia para aprovação com um motivo; uma regra em uso é ajustada ali, com o mesmo ID e a versão seguinte, e ligada ou desligada por um diff. O plano de controle confere o diff quando ele chega e na aprovação, e recusa a regra que a célula ignoraria em silêncio: entrada fora do catálogo, parâmetro que o catálogo não conhece, janela fora de 1 a 365 dias, categoria sensível ou fora da lista liberada, ou mais de 25 regras no espaço. Uma política que passa a tratar uma categoria como sensível é sempre aceita: ela protege pessoas, e a regra que usava a categoria para de produzir padrões. Sem `trait_allowed_categories`, uma regra só pode nomear, e transformar em valor, uma categoria que o espaço declara na política ou no esquema de extração: categoria não declarada, erro de digitação ou tema que as listas de palavras sensíveis não conhecem nunca vira padrão. Uma lista explícita decide sozinha, tipo de evento não é categoria, e um espaço sem categorias de episódio declaradas fica com os nomes da extração; mudar as categorias declaradas deriva os padrões do espaço de novo.
+
+Antes de a regra entrar no ar, [`POST /v1/traits/rules/dry-run`](/api/traits-dry-run) roda a regra contra os últimos 90 dias do seu espaço e mostra quantos perfis ganhariam o padrão (`profiles_matching` de `profiles_evaluated`), com uma amostra e as evidências. Pede uma pessoa do Console com o papel `integration` ou `analysis`, ou uma chave de escopo `admin`.
+
+```bash
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/traits/rules/dry-run" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"rule_id": "visit_complaints", "catalog": "recurring_complaint", "params": {"category": "technician_visit", "min_count": 3, "window_days": 90}}'
+# => {"rule_id": "visit_complaints", "window_days": 90, "profiles_evaluated": 18204, "profiles_matching": 311, "sample": [...]}
+```
+
+Uma regra nova ou alterada passa a valer quando o diff é aprovado; o teste a seco é a sua forma de ver o efeito antes.
+
+## Retire um padrão errado
+
+O Console mostra a regra, a versão e as evidências de cada padrão. Quando um estiver errado, retire por [`POST /v1/traits/{trait_id}/retract`](/api/trait-retract), como pessoa com o papel `security` ou `integration` ou com uma chave `admin`: a lápide impede que a mesma evidência o traga de volta, e só evidência nova faz o padrão reaparecer. A resposta é o padrão com `retracted_at` preenchido.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/traits/0192f7c3-5a1e-7b2d-9c40-1e8f3a6b2d71/retract" \
+  -H "Authorization: Bearer $NIADRA_API_KEY"
+```
+```python Python
+import os
+import httpx
+
+response = httpx.post(
+    "https://acme-prod.us-east-2.api.niadra.com/v1/traits/0192f7c3-5a1e-7b2d-9c40-1e8f3a6b2d71/retract",
+    headers={"Authorization": f"Bearer {os.environ['NIADRA_API_KEY']}"},
+)
+response.raise_for_status()
+print(response.json()["retracted_at"])
+```
+```typescript TypeScript
+const response = await fetch(
+  "https://acme-prod.us-east-2.api.niadra.com/v1/traits/0192f7c3-5a1e-7b2d-9c40-1e8f3a6b2d71/retract",
+  { method: "POST", headers: { Authorization: `Bearer ${process.env.NIADRA_API_KEY}` } },
+);
+console.log((await response.json()).retracted_at);
+```
+</CodeGroup>
+
+## Oposição ao perfilamento
+
+O titular pode se opor ao perfilamento. [Desligar padrões do titular](/api/traits-opt-out), uma rota do papel `security`, interrompe a derivação de padrões para aquela pessoa e remove os que estão ativos. Os padrões fazem parte da exportação de acesso e portabilidade, com as evidências. Se a sua empresa usar um padrão para decidir algo sobre uma pessoa, a decisão é dela e segue as regras de decisão automatizada da lei aplicável; a Niadra entrega o meio de explicar, com a regra, a versão e as evidências.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Gatilhos e webhooks" href="/concepts/triggers-and-webhooks">
+    avise o seu sistema quando um padrão aparecer.
+  </Card>
+  <Card title="O contexto e as views" href="/concepts/context">
+    onde a seção Padrões fica no contexto.
+  </Card>
+  <Card title="Retirar um padrão" href="/api/trait-retract">
+    o endpoint em detalhe.
+  </Card>
+  <Card title="Privacidade, apagamento e exportação" href="/concepts/privacy">
+    direitos do titular por API.
+  </Card>
+</CardGroup>

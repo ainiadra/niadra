@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/media-upload-request.v0.json",
+  "title": "Niadra Media Upload Request v0",
+  "description": "Reserves an upload for one file, which events then reference by `media_ref` and digest. See spec/media-upload.md.",
+  "$defs": {
+    "Handle": {
+      "additionalProperties": false,
+      "description": "An identifier of a subject in some channel or system: a phone, an e-mail, a CRM id.",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/HandleType"
+        },
+        "value": {
+          "maxLength": 320,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Namespace for scoped identifiers: the WhatsApp Business account for `wa_bsuid`, the system for `system_id`, the country for `gov_id_hmac`.",
+          "title": "Scope"
+        },
+        "subject_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubjectKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Defaults to `person`, except for organization-only handle types."
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "title": "Handle",
+      "type": "object"
+    },
+    "HandleType": {
+      "enum": [
+        "phone_e164",
+        "wa_id",
+        "wa_jid",
+        "wa_lid",
+        "wa_bsuid",
+        "email",
+        "gov_id_hmac",
+        "app_user_id",
+        "system_id",
+        "org_registry_hmac",
+        "email_domain",
+        "anon_id"
+      ],
+      "title": "HandleType",
+      "type": "string"
+    },
+    "SubjectKind": {
+      "enum": [
+        "person",
+        "account",
+        "partner",
+        "staff"
+      ],
+      "title": "SubjectKind",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "content_type": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Content Type",
+      "type": "string"
+    },
+    "size_bytes": {
+      "exclusiveMinimum": 0,
+      "maximum": 524288000,
+      "title": "Size Bytes",
+      "type": "integer"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sha256",
+      "type": "string"
+    },
+    "subject": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Handle"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Whose media it is. The object is stored under the subject's handle, so `forget` reaches it even if no event ever references it."
+    }
+  },
+  "required": [
+    "content_type",
+    "size_bytes",
+    "sha256"
+  ],
+  "type": "object"
+}

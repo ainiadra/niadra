@@ -1,0 +1,241 @@
+---
+title: "Gatilhos e webhooks"
+description: "Avisos assinados quando algo acontece na memória. A Niadra avisa; quem age é o seu sistema."
+---
+
+A Niadra avisa os seus sistemas quando algo acontece na memória, por webhooks assinados. Há dois tipos. Uma **assinatura de webhook** entrega cada ocorrência de um tipo de evento, como `action.recorded`. Um **gatilho** é uma regra sua sobre o que a memória sabe, com parâmetros, janela e deduplicação por sujeito, como "promessa da empresa vencida há um dia". Nos dois casos, a Niadra avisa por webhook, e quem age é o seu agente ou o seu sistema. Gatilho nunca chama sistema de registro, nunca abre ticket, nunca manda mensagem ao cliente final e nunca ramifica.
+
+## Tipos de evento de saída
+
+| Tipo | Quando é enviado |
+|---|---|
+| `conversation.outcome` | A memória de uma conversa ou tarefa ficou pronta, com o desfecho, ou uma correção mudou esse desfecho |
+| `open_item.closed` / `open_item.reopened` | Uma pendência foi fechada, ou voltou a abrir porque a ação que a fechou foi posta em quarentena |
+| `action.recorded` | Um agente registrou o que fez num sistema de registro |
+| `identity.merged` / `identity.unmerged` | Dois perfis foram unidos, ou separados |
+| `identity.suggestion` | Uma possível ligação entre handles aguarda revisão |
+| `trait.added` / `trait.expired` | Um padrão apareceu num perfil, ou venceu ou perdeu a evidência que o sustentava |
+| `trigger.fired` / `trigger.retracted` | Uma regra sua disparou, ou um disparo foi retirado depois que uma separação de perfis dividiu as evidências |
+| `fact.added` / `fact.retracted` / `fact.restored` | Um fato passou a valer, ou deixou de valer, pela extração de uma sessão ou por uma correção: ids, predicado, categoria, sensibilidade, status, horários, o objeto e os eventos de evidência, com `replaces` e `replaced_by` ligando a troca de um valor e `by` (a extração, com a sessão e a fonte, ou o feedback, com o evento). Nunca o valor. Um fato visto de novo não é notícia; `fact.restored` quando o papel `security` desfaz uma retratação ou uma correção, com `by` (o evento de restauração) |
+| `guard.violated` | A resposta de um agente contrariou uma [linha de guarda](/concepts/context#linhas-de-guarda-e-o-portão-de-intenção): o id curto da guarda, o tipo de valor, a fonte e o turno, nunca o valor dito; na chegada do turno quando o SDK a nomeou, ou quando a medição a achou |
+| `import.completed` / `import.failed` | Uma importação por arquivo terminou, com as contagens e os códigos de erro, nunca uma linha; só para os endpoints da fonte que importou. Uma importação parcial é `completed` com `rejected` maior que zero |
+| `export.completed` / `export.failed` | Uma execução da exportação contínua terminou |
+| `erasure.completed` | Um apagamento terminou, com os ids apagados e as execuções de exportação que já os continham |
+| `usage.budget_reached` | O gasto de IA da extração chegou ao teto diário do espaço, e a memória das conversas espera o dia seguinte (UTC). Sai uma vez por dia, na primeira extração adiada, com `purpose`, `day`, `cap_micros` e `resumes_at`, e nenhum dado de cliente. As extrações adiadas voltam espalhadas pelas duas horas seguintes à reabertura do teto, não todas no primeiro segundo, e cada chamada reserva o custo estimado antes de sair, então chamadas paralelas param no teto juntas. O teto do contrato e o gasto do dia estão em [`GET /v1/usage/budget`](/api/usage-budget) |
+| `agent_memory.note_created` | Uma nota da [memória do agente](/concepts/agent-memory) foi criada, por um agente ou pela aprovação de uma proposta |
+| `audit.root` | A raiz de Merkle dos comprovantes de um dia foi ancorada, com a raiz e a contagem do índice dos [registros de turno](/concepts/turn-records) guardados no dia (`turns.root`, `turns.count`) quando o espaço os grava. Só digests e contagens |
+| `receipt.recorded` | Os elos da corrente de comprovantes que o gravador acabou de guardar (fatia, dia, `seq`, `prev_hash` e `hash`), para a sua própria cadeia de auditoria. Nunca o que foi lido |
+| `turn.flagged` | Um registro de turno ficou na camada guardada por uma marca (`error`, `guard_acted`, `handoff`, `assertion_failed`, `synthetic`, `incomplete` ou `negative_feedback`): só ids e as marcas. Funcionalidade `turns` |
+| `data_issue.opened` | Um [problema de dados](/api/data-issues) abriu (campo nulo, valor fora do vocabulário, valor inválido, fonte atrasada, queda de cobertura, deriva de esquema, divergência, conflito de regra, tipo não declarado, campo retido, teto de IA do dia atingido, lote guardado para nova tentativa, limite do que a Niadra infere sozinha), com os nomes, a contagem e as referências, sem dado pessoal |
+| `object.value_revised` | Um [valor computado](/concepts/object-types#valores-computados-e-objetos-derivados) ganhou uma versão nova: o objeto, o nome do valor, a versão, a que ela substitui e a regra, nunca o valor. Funcionalidade `state` |
+| `object.expired_by_input` | Um objeto derivado venceu porque um insumo dele mudou: o objeto, os insumos e o objeto de origem |
+| `object.timer_due` | Um temporizador de um objeto tipado disparou: o objeto, o temporizador, o id do disparo, o que ele substitui, quando venceu e quando disparou |
+| `object.watch_fired` | Um objeto compartilhado que um cliente observa atendeu à condição do watch: o objeto, o watch e `revalidated`, se a condição foi conferida sobre um valor que a fonte confirmou pelo [worker de resolução](/guides/resolver-worker#revalidação-de-watch); nunca um valor, no máximo uma vez por hora por watch |
+| `type.drift` | Um tipo declarado derivou: a conferência de `niadra types derive --check` trouxe uma impressão digital diferente da declaração, e o tipo pede aviso (`drift: alert`). Sai uma vez por [problema de dados](/concepts/object-types#problemas-de-dados), quando ele abre, com o tipo, as contagens do que mudou e o campo quando `changes.fields` nomeia um só; nunca um nome novo, um valor ou uma definição. Funcionalidade `state` |
+| `content.flagged` | A triagem marcou o conteúdo de um terceiro num campo de conteúdo: o objeto, o campo e a referência, nunca o texto. Uma pessoa do papel `security` o libera por [`POST /v1/content/{ref}/release`](/api/content-release) |
+| `review_request.created` / `review_request.resolved` | Um titular pediu a revisão de uma decisão automatizada, ou a controladora decidiu ([o perfil revisável](/concepts/privacy#o-perfil-revisável)). Funcionalidades `signals` ou `coordination` |
+
+Endpoints, assinaturas e regras de gatilho são configuração versionada na API de controle, alterada por diffs que uma pessoa aprova. Todo endpoint pertence a uma fonte, e um evento sobre a memória só chega ao endpoint cuja fonte pode ler o item de que ele fala, pela mesma política do contexto: finalidade, audiência e o nível de verificação que a fonte alcança. Com a política inicial, o desfecho de uma conversa de saúde nunca chega ao CRM de cobrança, e `trait.added` de `overdue_invoices` só chega a fontes com a finalidade `billing`. Uma regra de gatilho só é aceita, e só dispara, se a condição e o conteúdo do aviso puderem ser lidos pela fonte do endpoint: um diff que deixaria uma regra calada é recusado quando é enviado e de novo quando é aprovado. `trait.present(overdue_invoices)` nunca chega a um sistema de marketing. As condições e os avisos contam só os itens que chegaram por handles confirmados: um episódio que veio por um [vínculo não confirmado](/concepts/identity#proteções-contra-união-errada) não completa uma recorrência nem dispara um recontato, e o webhook nunca leva o id dele. Uma confirmação, uma união ou uma separação reavaliam as regras do perfil na hora, e uma separação retira os disparos cuja evidência saiu com o handle.
+
+Um endpoint com `format` `ocsf` ou `hec` não recebe esses eventos: ele recebe o fluxo de comprovantes do espaço para o seu SIEM, assinado e com as mesmas novas tentativas. Veja [Comprovantes e auditoria](/concepts/receipts).
+
+No Console, a tela Avisos monta a regra a partir do catálogo, sem JSON: você escolhe a condição, os parâmetros e o endpoint, testa e envia para aprovação com um motivo. Uma regra em uso é ajustada ali mesmo, com o mesmo ID e a versão seguinte, e ligada ou desligada por um diff. O plano de controle confere o diff quando ele chega e de novo na aprovação, contra os documentos daquele momento, e recusa:
+
+- uma regra cujo endpoint não pode receber o aviso: é um fluxo de SIEM, não assina `trigger.fired`, é de uma fonte de análise ou de exportação, recebe um aviso de identidade sendo agente de atendimento, ou não tem finalidade nem audiência em comum com o padrão do aviso;
+- uma regra `trait.present` que nomeia um padrão desligado ou que não existe;
+- uma regra `context_use.repetition_rate` com parâmetros que a varredura não consegue ler ou com uma `source_id` que não existe no espaço;
+- um endpoint que assina um tipo de evento que a Niadra não manda: a lista aceita é exatamente a tabela acima;
+- um endpoint ou um mapeamento novo para uma fonte cortada;
+- um documento com mais de 50 regras de aviso.
+
+Só conta o que o diff introduz: um problema que já estava gravado não bloqueia outra mudança. Desligar um endpoint é uma escolha, e as regras dele esperam que ele volte. Cortar a fonte dona de endpoints, de fluxos de SIEM ou de um mapeamento funciona sempre: as chaves param na hora, e esses objetos saem junto com ela da configuração da célula (as entregas pendentes terminam com `endpoint_disabled`, os webhooks do mapeamento são recusados, e as regras de aviso apontadas para eles deixam de valer). Os documentos continuam com eles, como histórico.
+
+### O desfecho de cada atendimento
+
+Para o seu CRM registrar como cada atendimento terminou, assine `conversation.outcome`, `open_item.closed` e `action.recorded`. Nenhum deles leva o texto da conversa.
+
+```json
+{
+  "id": "0192f8d1-2a40-7b3c-8d4e-5f6a7b8c9d0e",
+  "type": "conversation.outcome",
+  "created_at": "2026-09-23T14:21:07+00:00",
+  "tenant": "0192f0a0-1b2c-7d3e-8f40-5a6b7c8d9e01",
+  "subject": { "pseudonym": "p_kvkv3okp7vnw3mqs", "kind": "person" },
+  "data": {
+    "episode_id": "0192f8c9-7d10-7e2f-9a3b-4c5d6e7f8091",
+    "version": 1,
+    "session_id": "0192f8b4-1c20-7a3b-8c4d-5e6f7a8b9c0d",
+    "conversation_id": "wa-8812",
+    "source_id": "0192f5a0-0000-7000-8000-00000000c001",
+    "channel": "whatsapp",
+    "intent": "complaint",
+    "category": "billing",
+    "outcome": "pending",
+    "by": "extraction",
+    "started_at": "2026-09-23T14:00:12+00:00",
+    "ended_at": "2026-09-23T14:19:40+00:00",
+    "as_of": "2026-09-23T14:19:40+00:00",
+    "open_item_ids": ["0192f8c9-7d11-7f40-8b5c-6d7e8f90a1b2"]
+  },
+  "links": { "open": "/v1/history/items/0192f8c9-7d10-7e2f-9a3b-4c5d6e7f8091" }
+}
+```
+
+`conversation.outcome` sai quando a memória de uma conversa ou tarefa fica pronta (`by: extraction`, com as pendências que ela deixou abertas em `open_item_ids`) e quando uma correção muda o desfecho (`by: feedback`, com `version` maior). Leva os rótulos das suas listas fechadas, como intenção, categoria normalizada e desfecho, nunca o resumo nem a resolução. `conversation_id` é o id da conversa no seu sistema e vem nulo quando parece um telefone, um e-mail ou um id do WhatsApp.
+
+`open_item.closed` diz qual pendência fechou (`open_item_id`, `owner`, `object`, `expected_operation`, `due_at` e, em `opened_in`, a sessão e a fonte que a abriram) e o que a fechou, em `closed_by`: `kind` `action`, com `action_id` e `operation`, quando foi a ação de um agente; `system_event`, com `event_id`, quando foi um evento do sistema de registro; `conversation`, com `session_id`, quando uma conversa posterior resolveu; ou `feedback`. `links.open` abre a linha do tempo do objeto ou, sem objeto, a memória do perfil. `open_item.reopened` desfaz um fechamento quando a sessão da ação que fechou teve um turno marcado como injeção e a ação foi posta em quarentena (`reason: closing_action_quarantined`, com o `action_id`).
+
+## O catálogo de gatilhos
+
+| Condição | Dispara quando |
+|---|---|
+| `promise.overdue(days)` | Uma promessa da empresa está vencida há o número de dias informado (0 por padrão), sem ação que a feche. Um prazo sem hora ("até o dia 3") vale até aquele dia acabar no fuso do espaço |
+| `open_item.due(lead_hours)` | Uma pendência aberta vence nas próximas `lead_hours` horas (24 por padrão) |
+| `trait.present(name, value)` | Um perfil tem o padrão da regra `name`, com o valor `value` quando informado |
+| `sentiment.drop(sessions, drop)` | O sentimento da última sessão caiu `drop` (0,5 por padrão) abaixo da média das `sessions` anteriores (3 por padrão) |
+| `identity.ambiguous` | Um handle do perfil ficou ambíguo por ligar perfis demais, como o tablet compartilhado de uma loja |
+| `fact.contradicted_by_system_event(within_days)` | Uma ação declarada nos últimos `within_days` dias (7 por padrão) não foi confirmada pelo sistema de registro dentro da janela |
+| `recontact(hours, same_category)` | O cliente voltou por conta própria em até `hours` horas (72 por padrão), pela mesma categoria, ou por qualquer uma com `same_category: false` |
+| `context_use.repetition_rate(above, window_days, min_questions, source_id)` | Uma fonte perguntou de novo, nos últimos `window_days` dias, mais do que a fração `above` do que perguntou |
+| `source.silent(minutes)` | Uma fonte passou `minutes` minutos (30 por padrão) sem mandar eventos |
+| `source.gap(min_missing, share)` | O SDK de uma fonte diz ter mandado mais do que chegou: entre ontem e hoje, pelo menos `min_missing` eventos (10 por padrão) e mais que `share` do enviado (5%) nunca chegaram nem foram recusados. Dispara uma vez por fonte e dia, com as contagens no aviso |
+
+Condições novas entram pelo catálogo do produto, nunca por texto livre. Uma regra dispara no máximo uma vez por sujeito por janela (24 horas por padrão), e a mesma evidência nunca dispara a mesma regra duas vezes; o teto é de 100 disparos por minuto por espaço, e um espaço tem no máximo 50 regras de gatilho, ligadas ou não. As condições sobre um perfil são avaliadas logo depois que a memória dele muda; os prazos e as condições sobre uma fonte, a cada 5 minutos. Um disparo atrasado, mais de 2 horas depois de a condição passar a valer (ou o que `late_after_minutes` disser), sai marcado como `late` ou é suprimido, conforme a regra.
+
+### Condições sobre uma fonte
+
+`source.silent`, `source.gap` e `context_use.repetition_rate` falam de uma fonte, não de um cliente. O sujeito do aviso é a fonte (`"kind": "source"`, com o id dela em `pseudonym`), e a varredura de 5 minutos avalia as três.
+
+- `source.silent` observa as fontes que mandaram eventos nos últimos 30 dias. Cada silêncio é uma ocorrência própria: a fonte que volta e cala de novo avisa de novo.
+- `context_use.repetition_rate` lê a medição diária de [Aproveitamento do contexto](/concepts/context-use). Dispara quando, nos últimos `window_days` dias (7 por padrão, até 90), as perguntas repetidas passam da fração `above` (0,2 por padrão) das perguntas da fonte, com pelo menos `min_questions` perguntas (30 por padrão) para o número valer. Sem `source_id`, cada fonte é observada por si. O grupo de controle de um experimento fica de fora, porque nunca recebeu o contexto. Um período acima do limite avisa uma vez, contado do dia em que começou; se a taxa cair e voltar a subir, sai um aviso novo. O aviso traz em `data.detail` as perguntas (`questions`), as repetidas (`repeated`), a taxa (`rate`), o limite (`above`), a janela (`window_days`) e o dia em que o período começou (`above_since`), e `links.open` aponta para `/v1/context-use?source_id=...`. Parâmetros que a varredura não consegue ler, ou uma `source_id` que não existe no espaço, são recusados quando o diff é enviado e quando é aprovado.
+
+<Tip>
+Antes de ligar uma regra, rode um teste a seco por [`POST /v1/triggers/dry-run`](/api/triggers-dry-run): a regra em teste traz `rule_id`, `condition`, `params`, o `endpoint_id` de destino, `window_hours` (24 por padrão, até 90 dias) e `late_policy` (`deliver_marked` ou `suppress`). A resposta diz para quantos dos clientes ativos nos últimos 30 dias (`subjects_evaluated`) a condição vale agora (`would_fire`), com uma amostra de até 10, e traz `target_problem` quando a fonte do endpoint não pode ler o conteúdo do aviso. Para `source.silent` e `context_use.repetition_rate`, o teste avalia as fontes do espaço como a varredura as veria agora. O teste confere a condição; a janela e a deduplicação só valem nos disparos de verdade, e nada é disparado. Ajuste os parâmetros antes de acionar qualquer pessoa. Pede o papel `integration` ou uma chave `admin`.
+</Tip>
+
+Exemplo: "avisar o CRM um dia depois de uma visita técnica perdida". Quando a visita remarcada da Marina passa um dia do prazo sem ação que a feche, a Niadra manda `trigger.fired` para o endpoint do CRM, e o agente do seu CRM remarca a visita.
+
+## Como é uma entrega
+
+As entregas seguem o formato aberto **Standard Webhooks**.
+
+```json
+{
+  "id": "0192f8d0-7e31-7a4b-9c5d-3e4f5a6b7c8d",
+  "type": "trigger.fired",
+  "created_at": "2026-09-23T15:05:00+00:00",
+  "tenant": "0192f0a0-1b2c-7d3e-8f40-5a6b7c8d9e01",
+  "subject": { "pseudonym": "p_kvkv3okp7vnw3mqs", "kind": "person" },
+  "data": {
+    "firing_id": "0192f7e0-3a41-7b52-8c63-4d5e6f708192",
+    "rule_id": "overdue-visit",
+    "rule_version": "4",
+    "condition": "promise.overdue",
+    "window_key": "24h:20719",
+    "late": false,
+    "membership_version": 7,
+    "as_of": "2026-09-23T15:04:58+00:00",
+    "evidence": [{ "kind": "open_item", "id": "0192f7a2-8c41-7e3a-9b5d-2c4e6f8a0b13" }]
+  },
+  "links": { "open": "/v1/profiles/0192f7a0-3b2e-7d41-8c5a-2e9f4b7a1c03" }
+}
+```
+
+O corpo leva ids, a regra e a versão, estado e ponteiros para as evidências. **Nunca** leva conteúdo de conversa. O sujeito é o pseudônimo e o tipo do cliente, nunca telefone, e-mail ou número de documento. `links.open` é a rota da API que abre o que o aviso aponta: o perfil, a memória, a linha do tempo de um objeto, um episódio ou a medição de uma fonte. Ela só funciona com uma credencial do seu espaço que tenha o escopo para isso.
+
+Toda entrega traz três cabeçalhos:
+
+- `webhook-id`: único por mensagem e igual em todas as tentativas. Use para deduplicar.
+- `webhook-timestamp`: segundos Unix. Recuse o que estiver a mais de 5 minutos do seu relógio.
+- `webhook-signature`: `v1,` seguido do HMAC-SHA256 em base64 de `{webhook-id}.{webhook-timestamp}.{corpo}`. Durante a rotação do segredo, duas assinaturas separadas por espaço valem ao mesmo tempo.
+
+## Confira a assinatura
+
+O segredo é gravado uma vez, pelo Console ou por [`PUT /v1/secrets/webhook/{id}`](/api/secrets), e começa com `whsec_`; a chave é a parte em base64 depois do prefixo. Confira sobre o corpo cru, antes de interpretar o JSON.
+
+<CodeGroup>
+```python Python
+import base64
+import hashlib
+import hmac
+import time
+
+
+def verify(secret: str, headers: dict[str, str], body: bytes) -> bool:
+    msg_id = headers["webhook-id"]
+    timestamp = headers["webhook-timestamp"]
+    if abs(time.time() - int(timestamp)) > 300:
+        return False
+    key = base64.b64decode(secret.removeprefix("whsec_"))
+    signed = f"{msg_id}.{timestamp}.".encode() + body
+    expected = base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode()
+    for candidate in headers["webhook-signature"].split(" "):
+        version, _, signature = candidate.partition(",")
+        if version == "v1" and hmac.compare_digest(signature, expected):
+            return True
+    return False
+```
+```typescript TypeScript
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+export function verify(secret: string, headers: Record<string, string>, body: string): boolean {
+  const id = headers["webhook-id"];
+  const timestamp = headers["webhook-timestamp"];
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false;
+  const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
+  const expected = createHmac("sha256", key).update(`${id}.${timestamp}.${body}`).digest("base64");
+  return headers["webhook-signature"].split(" ").some((candidate) => {
+    const [version, signature] = candidate.split(",");
+    if (version !== "v1" || !signature || signature.length !== expected.length) return false;
+    return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  });
+}
+```
+</CodeGroup>
+
+## Garantias de entrega
+
+- **Pelo menos uma vez.** Uma mensagem pode chegar mais de uma vez; deduplique pelo `webhook-id`.
+- **Sem garantia de ordem.** As mensagens podem chegar fora de ordem; cada evento traz `as_of` e versão para você ordenar.
+- **Novas tentativas** com recuo exponencial, de 30 segundos até 4 horas entre elas, por até 24 horas. Depois disso, a entrega vai para a fila de mortos, visível no Console, e é apagada 7 dias depois de criada.
+- **Endpoint que falha sem parar há 24 horas**, sem nenhum sucesso, deixa de receber: as entregas novas para ele vão direto para a fila de mortos com o erro `endpoint_failing_24h`. Um reenvio manual que dê certo o reabre.
+- **Saída controlada.** Toda chamada para fora sai só por HTTPS e não segue redirecionamento. O endereço é resolvido e conferido a cada tentativa, e a conexão vai ao endereço conferido. Endereços privados, de loopback, link-local (inclusive o de metadados da nuvem), CGNAT, reservados e multicast são recusados.
+
+## O feed de avisos
+
+Quem prefere puxar em vez de receber lê os mesmos eventos por [`GET /v1/notifications`](/api/notifications): os corpos dos webhooks, do mais antigo para o mais novo, por cursor, só ids e ponteiros. Cada item tem os campos de uma entrega (`id`, `type`, `created_at`, `tenant`, `subject`, `data` e `links`); o `id` é o do evento, e uma entrega de webhook do mesmo evento tem o id próprio dela, então quem lê os dois deduplica pelo id do evento. Sem cursor, o feed começa do início; `next_cursor` é onde a próxima consulta começa, e uma consulta sem nada novo responde o mesmo cursor. Os eventos ficam 7 dias. Um evento dirigido a um endpoint, ou sobre um item de memória que só algumas fontes podem ler, chega só aos webhooks dele, então o feed leva o que qualquer fonte do espaço pode ver, e nunca o texto de uma conversa. Qualquer chave de fonte lê o feed, sejam quais forem os escopos dela. O feed é a funcionalidade `notifications` do espaço, desligada por padrão e ligada no documento `features` por um diff aprovado do papel `security`; num espaço sem ela, a rota responde 404.
+
+<CodeGroup>
+```python Python
+page = niadra.api.notifications(cursor=cursor, limit=100)
+for event in page.items:
+    handle(event.type, event.data)
+cursor = page.next_cursor  # keep it between polls
+```
+```typescript TypeScript
+const page = await niadra.api.notifications({ cursor, limit: 100 });
+for (const event of page.items) handle(event.type, event.data);
+cursor = page.next_cursor; // keep it between polls
+```
+</CodeGroup>
+
+## Responder a uma entrega
+
+Responda com qualquer 2xx rápido e faça o trabalho de forma assíncrona. Uma entrega fica `pending`, `delivered`, `failing` enquanto tenta de novo, ou `dead`. Essas rotas pedem uma pessoa do Console com o papel `integration` (os disparos aceitam também `analysis`) ou uma chave de escopo `admin`. Para inspecionar entregas, use [Entregas de webhook](/api/webhook-deliveries); para mandar de novo uma entrega morta, com o mesmo `webhook-id`, use [Reenviar uma entrega](/api/webhook-redeliver). Para conferir um endpoint ou um fluxo de SIEM antes de depender dele, [Enviar uma entrega de teste](/api/webhook-endpoint-test) manda, uma vez e assinada como as outras, uma entrega do tipo `webhook.test`: o envelope de sempre com `data: {"test": true}`, ou um evento OCSF marcado como teste para o SIEM. Ela aparece na lista de entregas. Os disparos, com a regra, a versão e as evidências, estão em [Disparos de gatilho](/api/trigger-firings).
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Padrões" href="/concepts/patterns">
+    os sinais que `trait.present` pode observar.
+  </Card>
+  <Card title="Webhooks dos seus sistemas" href="/guides/system-webhooks">
+    o outro sentido, eventos chegando.
+  </Card>
+  <Card title="Aproveitamento do contexto" href="/concepts/context-use">
+    a taxa de repetição por trás de `context_use.repetition_rate`.
+  </Card>
+  <Card title="Comprovantes e auditoria" href="/concepts/receipts">
+    comprovantes entregues ao seu SIEM pelo mesmo mecanismo.
+  </Card>
+</CardGroup>

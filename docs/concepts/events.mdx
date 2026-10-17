@@ -1,0 +1,274 @@
+---
+title: "Eventos e o lote"
+description: "Mensagens, eventos de sistema e ações, enviados em lote, idempotentes e com erro por item."
+---
+
+A memória omnichannel da Niadra nasce de eventos. Tudo o que acontece com um cliente, em qualquer canal, plataforma ou sistema, entra na Niadra pela mesma porta, como um evento: o que ele disse, o que um sistema registrou, o que um agente fez. Cada evento traz o canal, quem falou e a hora em que aconteceu, e é a partir deles que a Niadra monta uma memória só de cada cliente, para qualquer agente ler. O conteúdo nunca é editado depois. Correção é evento novo, e apagamento é uma operação à parte, com comprovante.
+
+## Três tipos de evento
+
+O campo `kind` diz o que o evento registra:
+
+| `kind` | O que é | Exemplo |
+|---|---|---|
+| `message` | Algo dito ou enviado numa conversa. É o padrão. | Marina escreve no WhatsApp às 14h02 que o técnico não apareceu |
+| `system_event` | Uma mudança num sistema de registro, com `canonical_type` | O ERP emite `invoice.credited` às 14h06 |
+| `action` | O que um agente fez num sistema, com o bloco `action` | O agente de cobrança lança o crédito de 40 na fatura 0823 |
+
+Cada evento traz o `channel` (`whatsapp`, `voice`, `app`, `email`, `erp`, `crm`, `ticket`), quem falou em `speaker` (`customer`, `ai_agent`, `human_agent` ou `system`), o momento em `occurred_at` e pelo menos um handle, sujeito ou objeto que diz de quem ou do que ele fala. Texto livre de dentro de um sistema, como a descrição de um ticket ou o corpo de um e-mail, entra como `message` num canal próprio.
+
+A ordem da memória é a de `occurred_at`, nunca a de chegada. Uma ressincronização do WhatsApp que reenvia mensagens antigas cai no lugar certo. Carimbo de relógio fora da tolerância é corrigido pela hora de chegada e marcado.
+
+## O lote
+
+Todo evento entra por `POST /v1/batch`. Um lote aceita até **500 itens**, com até **1 MB por item** e **2,5 MB por lote**, e mistura itens de vários tipos pelo campo `type`:
+
+| `type` | Para quê |
+|---|---|
+| `event` | Mensagem, evento de sistema ou ação |
+| `identify` | Afirma que dois ou mais handles são do mesmo sujeito |
+| `verify` | Eleva o nível de verificação de uma conversa ou tarefa |
+| `conversation.ended` | Fecha a sessão agora, sem esperar a inatividade; o `occurred_at` do fim é a hora que vale, então mande a hora real em que a conversa acabou |
+| `task.ended` | Fecha a sessão de uma tarefa de agente interno, na hora do `occurred_at` dele |
+| `handoff` | Registra a transferência para um humano ou outro agente |
+| `heartbeat` | Contadores do SDK, que medem a cobertura de cada fonte |
+
+O evento é gravado antes da resposta. Um lote feito só de turnos de conversa é mascarado e preparado no processo e depois cifrado e gravado num comando só, na tabela de entrada do espaço, junto com as chaves de idempotência: a resposta sai daí, e os workers em tempo real gravam o resto (conversa, identidade, sessão) logo depois, na ordem de chegada, pelo mesmo código da transação completa. A camada ao vivo é escrita enquanto essa linha entra, então uma leitura que chega com o lote já encontra o turno em `live`. A resposta também guarda, no armazém de estado, o que cada turno prova para a conversa dele (a plausibilidade de um turno do cliente, o atestado de rede de uma ligação) até o worker gravar a linha: uma leitura de `context()` logo depois do primeiro turno de uma conversa nova sai no nível que o canal provou, não em V0. Um lote com qualquer outro tipo de item (evento de sistema, ação, `verify`, `identify`, fim de conversa) passa pela transação completa, que antes grava o que foi respondido e ainda esperava. Você raramente monta o lote na mão: os SDKs guardam os eventos numa fila local e enviam em lotes, sem bloquear o agente.
+
+Antes de gravar, a ingestão retém o número de cartão, o código de segurança, a senha e as credenciais de URL que houver no texto, e deixa um marcador no lugar (`[retido:cartão ****1234]`); a resposta conta o que reteve por tipo em `masked`. Protocolo, pedido, CEP, valor e data nunca são tocados. Veja [o que nunca é gravado](/concepts/privacy#cartões-códigos-de-segurança-e-senhas-nunca-são-gravados).
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+
+niadra = Niadra(channel="whatsapp")
+
+niadra.track({
+    "conversation_id": "wa-8812",
+    "idempotency_key": message["id"],  # o id da mensagem no provedor
+    "handles": [phone("+14155550123")],
+    "speaker": {"role": "customer"},
+    "content": {"text": "The technician never showed up. I am calling you."},
+})
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+
+niadra.track({
+  channel: "whatsapp",
+  conversation_id: "wa-8812",
+  idempotency_key: message.id, // o id da mensagem no provedor
+  handles: [handles.phone("+14155550123")],
+  speaker: "customer",
+  text: "The technician never showed up. I am calling you.",
+});
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/batch" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "items": [
+    {
+      "type": "event",
+      "kind": "message",
+      "idempotency_key": "wamid.HBgLMTQxNTU1NTAxMjMVAgASGBQzQUQ",
+      "channel": "whatsapp",
+      "conversation_id": "wa-8812",
+      "handles": [{"type": "phone_e164", "value": "+14155550123"}],
+      "speaker": {"role": "customer"},
+      "content": {"type": "text", "text": "The technician never showed up. I am calling you."},
+      "occurred_at": "2026-09-22T17:02:11Z"
+    }
+  ]
+}'
+```
+</CodeGroup>
+
+## Idempotência
+
+Todo item carrega um `idempotency_key`. Use o id da mensagem no provedor sempre que houver um: provedores de canal reenviam webhooks por dias, e o mesmo id nunca vira dois eventos. Quando não há id, o SDK gera um UUIDv7, que também ordena por tempo.
+
+A deduplicação é pelo id, nunca por semelhança de conteúdo. Duas mensagens curtas iguais ("ok", "sim") são duas mensagens. Um item repetido volta contado em `duplicates`, sem erro.
+
+## Um item ruim não derruba o lote
+
+O lote responde **200** quando todos os itens entraram e **207** quando algum foi recusado, sempre com o resultado por item. O que passou conta em `accepted`, o que já existia conta em `duplicates`, e cada item recusado aparece em `errors` com a posição e o código:
+
+```json
+{
+  "accepted": 498,
+  "duplicates": 1,
+  "errors": [
+    { "index": 17, "code": "verification_not_allowed", "detail": "V4 is above the ceiling of this source" }
+  ]
+}
+```
+
+A validação acontece em dois tempos: a borda confere só a forma do envelope, e cada item é conferido depois. As regras de forma, que os SDKs também aplicam antes de enviar:
+
+- mensagem precisa de texto, transcrição ou referência de mídia;
+- evento de sistema precisa de `canonical_type`, como `invoice.credited`;
+- ação precisa do bloco `action`, e o bloco só vale quando `kind` é `action`;
+- todo evento precisa de ao menos um handle, sujeito ou objeto.
+
+Um item acima de 1 MB volta com o código `too_large`. Um corpo acima de 2,5 MB, ou um lote com mais de 500 itens, é recusado inteiro com 422 `invalid_input`.
+
+O SDK tenta de novo com recuo em falha de rede, 429 e 503, e nunca repete um 4xx de validação.
+
+## Conversas, tarefas e sessões
+
+O `conversation_id` é seu: pode ser o thread do WhatsApp, que dura meses, ou o id da chamada. A Niadra divide cada conversa em **sessões**, janelas de atividade: turnos separados por menos que a inatividade do canal (cerca de 20 minutos no WhatsApp, 30 no app) são a mesma sessão. Uma sessão que ninguém encerrou fecha depois de 3 minutos sem turnos e vira memória nessa hora; um turno da mesma atividade a reabre, e ela é extraída de novo quando ficar quieta outra vez: a cada reabertura a espera dobra (3, 6, 12 minutos), nunca além da inatividade do canal, para uma conversa lenta não ser extraída a cada resposta. `conversation.ended` fecha a sessão na hora. Em voz, envie `conversation.ended` ao desligar, com a hora real do fim: a sessão guarda essa hora, e é ela que decide de que lado um turno tardio cai. Um fim que chega antes dos turnos dele não se perde: fica guardado por 30 dias e fecha a sessão assim que eles chegam. Um turno reenviado com a mesma chave de idempotência é ignorado. A memória data uma conversa pelo último turno dela, não pela hora em que o servidor fechou a sessão, e resolve as datas relativas das falas ("amanhã", "dia 30") contra esse dia. Uma chamada costuma ter dois ids, o da plataforma e o do tronco: mande o segundo em `conversation_aliases`.
+
+Agente interno usa `task_id` no lugar da conversa. A tarefa fecha com `task.ended` ou depois de 10 minutos sem atividade. Os SDKs cuidam disso com `conversation()` e `task()`, que emitem o fim quando o bloco termina. Para saber se uma conversa ou tarefa já virou memória, [`POST /v1/ingest/status`](/api/ingest-status) (o id no corpo, nunca na URL) responde `open` (ainda recebe turnos), `processing` (fechada, extração na fila ou rodando, ou extraída e a memória ainda a aplicando), `ready` (extraída e aplicada: uma leitura de contexto feita nesse instante já a vê, no pacote e no delta e nos encaixes de uma conversa fixada), `failed` (um episódio-modelo fica no lugar e a passagem noturna extrai de novo) ou `unknown`, com os horários e o status da última extração, nunca conteúdo (depois de um turno tardio anterior ao fim, o estado volta a `processing` e depois a `ready`; um turno posterior ao fim mostra `open`, porque é uma sessão nova); nos SDKs, `ingest_status()` / `ingestStatus()`, depois de um `flush()` quando os turnos foram por `track()`. A resposta traz também `masked`: quantos cartões, códigos de segurança, senhas e segredos a ingestão reteve dos eventos dessa conversa ou tarefa, por tipo.
+
+Quando uma sessão fecha, os turnos dela seguem legíveis na hora (a camada ao vivo os serve a toda leitura), e a extração espera 8 segundos pelas outras sessões do mesmo cliente que fecham junto: o passo que fecha a sessão não chama modelo, só agenda a extração para depois da janela, e a sessão mais nova a fechar leva as outras que esperavam (até 8 por chamada, da última hora, as que veem o cliente pelas mesmas identidades; as demais seguem na chamada seguinte). A janela pega uma importação de histórico ou um cliente que escreve e depois liga. A IA da Niadra responde primeiro, uma vez pelo lote inteiro, sobre o texto já mascarado: se cada sessão curta (até duas mensagens, até 200 caracteres, sem outro tipo de evento) foi só uma pergunta geral respondida na hora (horário, preço, regra, uma segunda via enviada: nada ficou pendente, nada se soube do cliente), e se alguma mensagem tenta instruir o sistema ou revela uma categoria especial de dado pessoal. Uma sessão respondida na hora fica com os próprios turnos, com a categoria que essa triagem deu, e nunca chega à extração; um cumprimento sem conteúdo também fica com as próprias falas como resumo ("Cliente: Oi, tudo certo?"), para o agente ver que o cliente procurou, sem um desfecho que ninguém julgou. O resto do lote é uma chamada de extração à IA da Niadra, com esquema fechado e validação dura, que nomeia primeiro os assuntos do lote e depois o episódio de cada sessão; nada nela nomeia documento, cartão, conta ou senha: nem o modelo de PII, nem as palavras ao redor de um número, nem uma palavra dessas em qualquer ponto de um turno. Nada do que foi dito é cortado para caber numa chamada: um lote que passa do que uma chamada lê, ou um turno mais longo que uma parte (30 mil caracteres), é lido em janelas, em ordem. Cada parte de um turno longo vai marcada com a posição dela, as partes se sobrepõem em 2 mil caracteres, os últimos turnos inteiros de uma janela são lidos de novo na seguinte, e as respostas das janelas se juntam por sessão, cada entrada uma vez só e com as evidências somadas. O que a extração aprende (resumo, solução, valores, pendências, instruções) é guardado inteiro, sem corte por tamanho. Só um lote que a triagem sinaliza tem os turnos checados um a um contra injeção, e só então os textos que a memória guarda passam pela checagem de categoria especial. Uma troca curta que fixa um valor (um id, um valor, uma data, um código, um CEP) é sempre memória, por mais curta que seja: os valores vêm da passagem por regra, como em toda sessão. O resumo e a solução de cada episódio guardam identificadores, valores, datas, códigos e endereços exatamente como foram ditos ("protocolo 4471 enviado", nunca "número de protocolo enviado"), e nunca o número de documento, de cartão ou de conta bancária do cliente. O resumo, a solução, as descrições das pendências e o rótulo do assunto saem no idioma em que o cliente escreveu, mesmo quando não é o do espaço (o do espaço só quando o cliente não escreveu nada); os rótulos fixos do contexto seguem o idioma do espaço. A extração nomeia o **assunto** da conversa: uma chave curta em inglês, de duas ou três palavras, com a coisa específica e o que aconteceu com ela (`delivery_failed`, `internet_down`, `tow_late`), e um rótulo com essa chave nas palavras do cliente. As chaves das conversas do mesmo cliente nos últimos 90 dias vão no prompt, e as sessões de um lote sobre o mesmo problema dividem uma entrada, então o mesmo problema dito de outro jeito ganha a mesma chave, e duas grafias da mesma chave (`delivery_failed`, `failed_delivery`) são fundidas na que já existe; uma chave feita de uma palavra genérica (service, product, support), ou uma chave ou um rótulo com dígito ou marcador, é descartada, e uma conversa sobre conteúdo sensível não guarda assunto ([o que a extração nunca guarda](/concepts/privacy#o-que-a-extração-nunca-guarda)). A [contagem por assunto](/concepts/context#esqueleto-e-encaixes-por-turno) lê essa chave. Um prazo que o cliente diz ("preciso até o dia 24", "até sexta") vira uma pendência da empresa com essa data de vencimento: o modelo é instruído a gravá-la, e uma passagem por regra sobre os turnos do cliente, em português, inglês e espanhol, completa a pendência sem data que cita o turno ou acrescenta uma ("Prazo pedido pelo cliente") quando o modelo a deixou de fora. A regra resolve o dia contra a data do turno no fuso do espaço (um dia do mês é o próximo daquele dia, um dia da semana o seguinte), até 120 dias à frente, e só numa frase que pede algo: "a internet ficou fora até o dia 24" não é prazo, nem "até 24 horas".
+
+Uma mensagem nova entra na camada quente antes de a API responder o lote, já no `live` do próximo contexto de outro canal. Ação e evento de sistema passam pela transação completa e chegam ao contexto pela recompilação do perfil, que os workers rodam em seguida; o [benchmark](https://niadra.com/benchmark) mede esses tempos na região.
+
+## Mídia e dado tardio
+
+Mídia nunca viaja dentro do evento. Reserve um upload em [`POST /v1/media/uploads`](/api/media-uploads), com `content_type`, `size_bytes` (até 500 MB), o `sha256` dos bytes e, sempre que souber, o `subject` dono do arquivo: assim o arquivo fica guardado sob aquela pessoa, e apagá-la apaga o arquivo mesmo que nenhum evento aponte para ele. A resposta traz `upload_url`, `upload_headers` e `expires_at`. Envie os bytes com `PUT` para `upload_url` com **exatamente** os cabeçalhos de `upload_headers`: o armazenamento recusa qualquer outro byte. O texto de um arquivo só é lido quando o espaço lista o tipo em `media.extract_text_from` (vazio por padrão): `application/pdf`, `image/jpeg`, `image/png` e os três tipos do Office, `application/vnd.openxmlformats-officedocument.wordprocessingml.document` (DOCX), `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (XLSX) e `application/vnd.openxmlformats-officedocument.presentationml.presentation` (PPTX). O tipo vem dos bytes do arquivo, nunca do `content_type` declarado. Toda a leitura acontece dentro do servidor de modelos da célula, num processo filho por documento, e nenhum arquivo sai da região: de um PDF sai a camada de texto de cada página, e uma página digitalizada, sem camada de texto, é renderizada a 200 dpi e lida por OCR; JPEG e PNG são lidos por OCR, com as caixas reconhecidas agrupadas em linhas; de DOCX, XLSX e PPTX sai um parágrafo por linha e uma linha por linha de tabela. Um arquivo do Office com macros ou com um projeto VBA é recusado, assim como um ZIP com mais de 2.000 entradas ou mais de 100 MiB descomprimido. Um arquivo vai até 20 MiB e é lido inteiro, em janelas de 50 páginas (planilhas ou slides), cada uma começando onde a anterior parou. Nada do texto é cortado: um texto com mais de 100 mil caracteres vira vários turnos derivados, em ordem, cada um dizendo qual parte (`part`) de quantas (`parts`) ele é. O texto lido mantém as quebras de linha, então uma linha de tabela fica numa linha só; o redator e a regra de documento de identidade leem as quebras como espaços e decidem como sempre decidiram. O texto passa pelo redator antes da extração e entra como turno derivado, marcado `extracted_from` (`pdf_text`, `pdf_ocr`, `ocr` ou `office`); um arquivo cujo texto traz um documento de identidade nunca é guardado. Depois mande o evento com `content.media_ref` e `content.media_sha256`. Os SDKs fazem os três passos numa chamada.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+
+niadra = Niadra(channel="whatsapp")
+marina = phone("+14155550123")
+
+# Reserves the upload, PUTs the bytes with the exact headers, returns the reference
+media = niadra.upload_media(voice_note_bytes, "audio/ogg", subject=marina)
+
+if media:
+    niadra.track({
+        "conversation_id": "wa-8812",
+        "handles": [marina],
+        "speaker": {"role": "customer"},
+        "content": {
+            "type": "audio",
+            "media_ref": media.media_ref,
+            "media_sha256": media.media_sha256,
+            "transcript": "The technician never showed up. I am calling you.",
+        },
+    })
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+const marina = handles.phone("+14155550123");
+
+// Reserves the upload, PUTs the bytes with the exact headers, returns the reference
+const { data: media } = await niadra.uploadMedia({ data: voiceNote, content_type: "audio/ogg", subject: marina });
+
+if (media) {
+  niadra.track({
+    channel: "whatsapp",
+    conversation_id: "wa-8812",
+    handles: [marina],
+    speaker: "customer",
+    content: {
+      type: "audio",
+      media_ref: media.media_ref,
+      media_sha256: media.media_sha256,
+      transcript: "The technician never showed up. I am calling you.",
+    },
+  });
+}
+```
+```bash cURL
+BASE=https://acme-prod.us-east-2.api.niadra.com
+
+# 1. Reserve the upload
+curl -X POST "$BASE/v1/media/uploads" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" -H "Content-Type: application/json" \
+  -d '{"content_type": "audio/ogg", "size_bytes": 48213, "sha256": "'"$(shasum -a 256 note.ogg | cut -d" " -f1)"'",
+       "subject": {"type": "phone_e164", "value": "+14155550123"}}'
+# => {"media_ref": "...", "upload_url": "https://...", "upload_headers": {"Content-Type": "audio/ogg", ...}, "expires_at": "..."}
+
+# 2. PUT the bytes with every header of upload_headers, exactly as returned
+curl -X PUT "$UPLOAD_URL" -H "Content-Type: audio/ogg" -H "x-amz-checksum-sha256: <value from upload_headers>" --data-binary @note.ogg
+```
+</CodeGroup>
+
+Dado que chega depois, como a transcrição completa de uma chamada, é evento novo, não atualização. Numa sessão fechada por `conversation.ended` ou `task.ended`, um turno cujo `occurred_at` é igual ou anterior ao do fim, chegue quando chegar, entra na sessão, que fecha de novo como `ended` sem esperar inatividade: a extração roda de novo, e o episódio dela ganha uma versão nova, que o [item aberto](/concepts/history) lista em `versions`. Um turno posterior ao fim abre uma sessão nova na mesma conversa, e a memória derivada dela entra ao lado da anterior. Numa sessão fechada por silêncio, vale a regra de antes: um turno que chega até 30 minutos depois do fechamento (ou até a inatividade do canal, quando maior, como no e-mail), e cai dentro dessa inatividade desde o último turno dela, a reabre; mais tarde que isso, abre uma sessão nova.
+
+## Valores fixados
+
+O que uma sessão fixa e não é fato sobre o cliente também vira memória própria: um número de protocolo, ticket, pedido, registro ou comprovante, um CEP, um valor, uma data, um código. Cada um é guardado como item tipado (`protocol`, `ticket`, `order`, `record`, `receipt`, `postal_code`, `amount`, `date`, `code`), com quem o disse, em que canal, em que sessão e quando, então "o protocolo que vocês me passaram por e-mail" é respondido por regra: tipo `protocol`, canal `email`, o mais recente. A extração devolve os valores como foram escritos nos turnos; uma rede determinística lê os mesmos turnos e guarda o que ela achar (um token de três ou mais dígitos, tipado pela palavra que o antecede, em português, inglês ou espanhol), então uma sessão que o portão pulou ou cuja extração falhou ainda guarda o seu protocolo ou o CEP novo.
+
+Três vetos, que valem para os dois caminhos: nunca um número de documento, cartão ou conta bancária, nem senha ou código de verificação (a palavra ao lado veta o token, e uma palavra de documento o veta de até seis palavras antes; "ID" nomeia um documento, como em "o ID é" e "my ID number", a não ser que uma palavra de valor o qualifique, como em "ID do pedido" e "order ID"; um número que passa no dígito verificador de documento ou cartão é descartado seja qual for a palavra); nunca o que voltou de uma redação, a não ser um CEP; nunca um tipo que a lista não tem. Cartão, código de segurança e senha nem chegam aos dois caminhos: a ingestão os retém antes de gravar e a extração recebe só o marcador.
+
+Entre valores do mesmo tipo, vale o mais recente; entre afirmações do mesmo momento, a origem desempata: sistema de registro, agente humano, agente de IA, cliente, nessa ordem. Um registro do sistema em vigor supera os valores do outro lado ditos até aquele momento, com a aresta `supersedes`; um dito depois do registro fica ao lado dele. A [busca no histórico](/concepts/history) acha um item pelo valor, e o [pacote de acesso](/concepts/privacy) do titular traz os valores fixados.
+
+## Orientação de extração
+
+O esquema do espaço diz o que a extração pode gravar: predicados, categorias, intenções, desfechos. O documento de configuração `extraction-guidance`, escrito e aprovado pelo papel de integração como o esquema, diz o que ela deve focar e deixar de fora nas palavras da empresa: instruções livres (até 2.000 caracteres), uma lista `include` de temas para captar com cuidado e uma `exclude` de temas para deixar de fora (até 20 cada), e o mesmo por fonte, em `sources`, por id ou nome, somando ao do espaço como os predicados por fonte do esquema. A orientação entra no prompt depois de todas as regras que ela não pode mudar (evidência para todo item, os predicados do espaço, dado sensível só sob predicado sensível), na parte do prompt que fica em cache, e uma orientação alterada reextrai as sessões recentes; um espaço sem ela mantém o prompt de sempre.
+
+## Âncoras nos eventos do sistema
+
+Uma pergunta como "o que eu relatei depois da vistoria" é lida contra o evento de sistema do próprio cliente, sem modelo: a palavra de tempo ("depois de", "antes de", "desde", "after", "since", "después de") e a palavra do evento ("vistoria", "entrega", "troca do cartão") casam com um tipo canônico, e o último evento desse tipo do cliente (ou o primeiro, quando a pergunta diz) dá a data que vira janela. As palavras vivem na configuração do espaço, em `event_anchors` (a inicial cobre vistoria, entrega, coleta, troca do cartão, visita técnica, instalação, fatura e pagamento, em português, inglês e espanhol), e uma [regra de mapeamento](/guides/system-webhooks) pode nomear as palavras do evento que ela mapeia em `anchor_terms`. Uma âncora sem evento não filtra nada.
+
+## Cobertura das fontes
+
+O SDK envia um `heartbeat` periódico com quantos eventos mandou. A Niadra mostra o que o SDK diz ter mandado ao lado do que chegou, e marca como `silent` a fonte que passa 30 minutos sem mandar evento. O contexto informa essa cobertura em `coverage`, e uma fonte muda pode disparar um [gatilho](/concepts/triggers-and-webhooks). [`GET /v1/sources/coverage`](/api/sources-coverage) mostra cada fonte dia a dia, por até 90 dias: o que o SDK diz que mandou (`sent`), o que chegou (`received`), o que foi recusado (`rejected`) e o que chegou com um tipo que o seu mapeamento não cobre (`unmapped`).
+
+## Qual contexto o agente usou
+
+Quando um agente responde, o SDK carimba o turno dele com `context_stamp`: o `etag` do contexto que entrou no prompt e `injected_at`, o momento em que entrou. É assim que o [aproveitamento do contexto](/concepts/context-use) separa o contexto que chegou tarde do que chegou e não foi usado. Dentro de um `conversation()`, os SDKs carimbam sozinhos quando você chama `mark_injected()` em Python ou `markInjected()` em TypeScript; só mande o carimbo à mão quando montar os eventos você mesmo.
+
+O turno de um agente pode levar também `backing`, o que a conferência de lastro do SDK achou na resposta: quantos números, datas, códigos e valores ela afirmou, quais deles nenhuma fonte que o agente tinha sustenta (o pacote, os registros do sistema, as palavras do cliente, os resultados de ferramenta que ele registrou) e que [linhas de guarda](/concepts/context#linhas-de-guarda-e-o-portão-de-intenção) ela contrariou, pelos ids curtos; tipos e contagens, nunca um valor. A memória conta isso por agente e por fornecedor em [`GET /v1/context-use`](/api/context-use) e manda o webhook `guard.violated` na chegada do turno.
+
+
+Um evento também pode dizer até quando vale o que afirma, em `valid_until`: uma oferta válida até uma data, uma condição temporária. Depois desse momento, os fatos que ele deu saem do contexto e da busca; `show_expired` na busca ainda os encontra.
+
+```json
+{
+  "type": "event",
+  "idempotency_key": "call-4471-t2",
+  "channel": "voice",
+  "conversation_id": "call-4471",
+  "handles": [{"type": "phone_e164", "value": "+14155550123"}],
+  "speaker": {"role": "ai_agent"},
+  "content": {"text": "Hi Marina, I can see the $40 credit on your August bill."},
+  "context_stamp": {"etag": "\"cp1-9f2c4e\"", "injected_at": "2026-09-22T17:07:04Z"},
+  "occurred_at": "2026-09-22T17:07:06Z"
+}
+```
+
+## Arquivos: semear identidade ou trazer histórico
+
+Para volume que não cabe no caminho da conversa, [`POST /v1/ingest/files`](/api/ingest-files) recebe um arquivo inteiro de até 512 MB, com o escopo `track`, e responde **202** com um `import_id`:
+
+- `text/csv` semeia identidade. O cabeçalho nomeia tipos de handle (`phone_e164`, `email`, `system_id`...), com `<type>_scope` para o namespace, `<type>_2` a `<type>_9` para mais valores do mesmo tipo e os opcionais `idempotency_key`, `occurred_at` e `subject_kind`. Cada linha vira um `identify` com o método `system_import`, sob as mesmas proteções de qualquer outro.
+- `application/x-ndjson` traz histórico: cada linha é um item de `POST /v1/batch`, validado do mesmo jeito. Cada conversa importada precisa do próprio `occurred_at` em cada evento e do próprio `conversation.ended`: a memória data a conversa pelo último turno dela, não pela chegada do arquivo, e as datas relativas das falas são resolvidas contra esse dia.
+
+```bash
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/ingest/files" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: text/csv" \
+  --data-binary @crm-customers.csv
+```
+
+Acompanhe a importação por [`GET /v1/ingest/files/{import_id}`](/api/ingest-file): `status` (`queued`, `running`, `completed`, `failed`), `records`, `accepted`, `duplicates`, `rejected` e os 100 primeiros erros de linha, que trazem o número da linha e nunca o valor.
+
+## Correções
+
+Uma correção também é evento. [`POST /v1/feedback`](/api/feedback) recebe uma `action`, e cada ação pede os próprios campos: `retract_fact` pede `fact_id`; `correct_fact` pede `fact_id` e `value`; `resolve_open_item` pede `open_item_id`; os ids são os UUIDs puros que a busca e a linha do tempo listam, e um id com prefixo é recusado; `conversation_outcome` pede `conversation_id` e `value`. Um pedido sem eles é recusado com 422, em vez de ser gravado e ignorado. A resposta tem o formato da resposta do lote. [`POST /v1/feedback/batch`](/api/feedback-batch) recebe até 500 correções numa chamada, cada uma com a própria chave de idempotência: 200, ou 207 com um erro por item recusado, como o lote. Os dois SDKs têm `feedback()` e `feedback_batch()` / `feedbackBatch()`. Uma retratação ou correção errada é desfeita pelo papel `security`, com [`POST /v1/facts/{fact_id}/restore`](/api/facts-restore): o fato volta como era, a correção que o substituiu é retratada e o histórico do fato guarda cada passo; agentes não têm essa ação. Um evento de feedback é linhagem, nunca evidência: ele conta a história do fato, mas só os eventos do cliente o sustentam, então um apagamento leva o fato mesmo que a empresa o tenha corrigido ou restaurado.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Identidade e verificação" href="/concepts/identity">
+    como os handles viram um cliente só.
+  </Card>
+  <Card title="Sistemas, objetos e ações" href="/concepts/systems">
+    eventos de ERP e ações que fecham pendências.
+  </Card>
+  <Card title="Enviar um lote" href="/api/batch">
+    a referência completa de `POST /v1/batch`.
+  </Card>
+</CardGroup>

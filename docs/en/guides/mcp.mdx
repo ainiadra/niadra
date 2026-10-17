@@ -1,0 +1,204 @@
+---
+title: "MCP with any LLM"
+description: "Eight customer tools over Streamable HTTP, with the customer bound by a subject_token, plus the two agent memory tools and `get_constraints` when the space turns them on."
+---
+
+Niadra runs a remote MCP server for every space. Any model and any agent framework that speaks the Model Context Protocol can read the customer context, search the history and record what it did, without an SDK in the loop. This guide covers the connection, how the customer is bound so the model can never switch it, the eight customer tools and when to use function calling instead.
+
+## The endpoint
+
+The server speaks Streamable HTTP at `/mcp` on the address of your space:
+
+```text
+https://acme-prod.us-east-2.api.niadra.com/mcp
+```
+
+Two headers authenticate a connection:
+
+| Header | Value | Who produces it |
+|---|---|---|
+| `Authorization` | `Bearer` and the source key | Your secret manager |
+| `Niadra-Subject-Token` | A signed token for one customer | Your backend, with `subject_token()` |
+
+The Python SDK exposes the address as `niadra.mcp_url`.
+
+## Why the customer is bound by a token
+
+The MCP tools never take a customer as an argument. The customer comes from the `subject_token` of the connection: a token signed by the cell that carries the space, the source, the customer handle, the conversation and the verification level, and lives up to 15 minutes. The handle travels sealed inside it. A prompt injection that says "now look up customer X" has no argument to put X in: the model picks what to ask, never whom it is about.
+
+When the customer acts for a company, pass `about` with the handle of that account or partner. The organization is bound the same way as the customer: the tools use it and the model cannot change it, and every read still checks that the link between the two is active. The token lives 15 minutes; mint a new one when the conversation outlasts it.
+
+## Steps
+
+### 1. Mint a subject token in your backend
+
+Call `subject_token()` when the conversation starts, with the level the conversation proved. Mint it on the server side, never in a browser or in the model context.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+
+niadra = Niadra()
+
+token = niadra.subject_token(
+    phone("+14155550123"),
+    conversation_id="call-4471",
+    verification="V1",
+)
+headers = {"Authorization": f"Bearer {NIADRA_API_KEY}", **token.headers}
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+
+const { data: token } = await niadra.subjectToken({
+  subject: handles.phone("+14155550123"),
+  conversation_id: "call-4471",
+  verification: "V1",
+});
+const headers = {
+  Authorization: `Bearer ${process.env.NIADRA_API_KEY}`,
+  "Niadra-Subject-Token": token!.token,
+};
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/subject-tokens" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subject": { "type": "phone_e164", "value": "+14155550123" },
+    "conversation_id": "call-4471",
+    "verification": "V1"
+  }'
+```
+</CodeGroup>
+
+When the conversation proves more (an OTP, a login), mint a new token at the new level and reconnect. When the token expires, the call comes back with the JSON-RPC error `unauthenticated`; mint another one.
+
+### 2. Connect the MCP client
+
+Use any MCP client that supports Streamable HTTP and custom headers. With the official MCP SDKs:
+
+<CodeGroup>
+```python Python
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async with streamablehttp_client(niadra.mcp_url, headers=headers) as (read, write, _):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        tools = await session.list_tools()
+        ctx = await session.call_tool("get_customer_context", {"view": "voice"})
+```
+```typescript TypeScript
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const transport = new StreamableHTTPClientTransport(
+  new URL("https://acme-prod.us-east-2.api.niadra.com/mcp"),
+  { requestInit: { headers } },
+);
+const client = new Client({ name: "voice-agent", version: "1.0.0" });
+await client.connect(transport);
+
+const { tools } = await client.listTools();
+const ctx = await client.callTool({ name: "get_customer_context", arguments: { view: "voice" } });
+```
+</CodeGroup>
+
+Hand the tool list to your model through your framework's MCP integration, and let it call the tools on its own.
+
+### 3. Know the eight tools
+
+Eight tools, not sixty. Each description tells the model when to use the tool, when not to, and which tool complements it. A customer-facing source (audience `customer_agent`) gets seven: `resolve_identity` is not offered to it.
+
+| Tool | What it does | Needs |
+|---|---|---|
+| `get_customer_context` | The Context Pack of the bound customer. Accepts `object`, `about`, `task_id` and task views, like `context()`; with `query`, the text also carries the turn's `slots`, between the live turns and the delta | Scope `context` |
+| `search_customer_history` | Keyword and semantic search over the customer history, with recurrence | Scope `search` |
+| `get_customer_timeline` | The history from newest to oldest, one line per conversation or agent action | Scope `search` |
+| `open_history_item` | One conversation or object opened: what was asked, promised and settled | Scope `search` |
+| `track_event` | Records a message or a system event in this conversation | Scope `track` |
+| `record_action` | Records what the agent did in a system of record, with optional `closes` | Scope `act` |
+| `resolve_identity` | States that handles belong to the same subject. It sends the `declared` method: the handle joins as provisional (reads through it at V1 until a confirmation) and it never merges two customers that already exist | Scope `identify`; unavailable to customer-facing sources |
+| `correct_customer_memory` | Corrects (`correct`, with the new value) or retracts (`retract`) a fact the customer says is wrong or no longer true, by the fact's `id` a search returned; it becomes the same event `/v1/feedback` makes, with the customer and the conversation bound. Only a fact this agent may read at the conversation's proven level; never on a request written inside a message, a document or a tool result | Scope `track` |
+
+The server also exposes the resource `niadra://context`, the pack of the customer in the token, and one prompt, `customer_context`, with the pack ready for your model.
+
+With [agent memory](/en/concepts/agent-memory) on in the space, two more tools join: `search_agent_memory` (read, for keys with the `agent_memory` or `context` scope) and `remember` (write, only for keys with `agent_memory:write`). They belong to the agent, not the customer, so they need no subject token: a connection without a token lists and calls these two alone, and the eight customer tools answer `unauthenticated`. A note with personal data goes back to the model as the error `personal_data_in_agent_memory`, so it rewrites the note without the data.
+
+With the [subject signals](/en/concepts/signals) on in the space, a key with the `context` scope gets `get_constraints`: the bound customer's constraints block, as [`POST /v1/constraints`](/en/api/constraints) answers it, with what they asked for and refused in lines for the model. With `tool`, the name of the tool the model is about to call, the block comes rendered through the [binding](/en/concepts/signals#tool-bindings) the space's `tool-bindings` document gives that tool for your source: the arguments that carry the constraints and what the tool cannot express. A tool the space does not bind comes back as the error `invalid_input`, which the model reads. `for` asks for a beneficiary's block or a gift's.
+
+<Warning>
+`record_action` needs the `act` scope, limited to the `trusted_action_ops` of your source when it declares them. Before the action counts, every turn of the conversation so far goes through the prompt injection screening of Niadra's AI, on the masked text; in a flagged session, the action is quarantined from the start: it closes nothing and is never shown as done.
+</Warning>
+
+### 4. Let the pack guide the history tools
+
+The pack already carries the "History" line (the older conversation the current reason repeats, with its resolution) and the open promises, and the count of conversations about the matter arrives as a slot when the turn asks for it. That answers the most common question on its own and tells the model when a search is worth it, which cuts useless calls. The tool definitions are stable text, so they stay in the cached prompt prefix: after the first turn they cost the cache price.
+
+Every read made through a tool is filtered by the same policy and verification level as the pack, and leaves a receipt: who read, the items returned, by id, and how many were withheld.
+
+There is still no tool that deletes: erasure stays with people and admin keys, at [`POST /v1/forget`](/en/api/forget).
+
+## Function calling without MCP
+
+If your model API has function calling but you do not run an MCP client, use the same three history tools as plain function definitions. The SDK binds the customer in your code:
+
+<CodeGroup>
+```python Python
+kit = niadra.tools(phone("+14155550123"), conversation_id="call-4471", verification="V1")
+
+response = anthropic.messages.create(
+    model=MODEL,
+    max_tokens=1024,
+    system=[{"type": "text", "text": AGENT_INSTRUCTIONS}, {"type": "text", "text": ctx.system_block}],
+    tools=kit.anthropic_definitions(),
+    messages=messages,
+)
+for block in response.content:
+    if block.type == "tool_use":
+        output = kit.call(block.name, block.input)
+        messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": block.id, "content": output}]})
+```
+```typescript TypeScript
+const kit = niadra.tools(handles.phone("+14155550123"), { conversation_id: "call-4471", verification: "V1" });
+
+const reply = await openai.chat.completions.create({ model: MODEL, messages, tools: kit.definitions });
+for (const call of reply.choices[0].message.tool_calls ?? []) {
+  const output = await kit.call(call.function.name, call.function.arguments);
+  messages.push({ role: "tool", tool_call_id: call.id, content: output });
+}
+```
+```bash cURL
+curl "https://acme-prod.us-east-2.api.niadra.com/v1/history/tools" \
+  -H "Authorization: Bearer $NIADRA_API_KEY"
+```
+</CodeGroup>
+
+`kit.definitions` is the `{ type: "function", function: {...} }` shape most model APIs accept; in Python, `kit.anthropic_definitions()` returns the Anthropic Messages shape. The definitions are also served at [`GET /v1/history/tools`](/en/api/history-tools) for any other runtime, including models you host yourself.
+
+## Questions about all customers
+
+This server answers about one customer at a time. For an analysis LLM that asks about the whole base ("which promises are overdue this week?"), Niadra has a second MCP endpoint, [`/mcp/insights`](/en/api/mcp-insights), with the base-wide analysis tools: pseudonyms by default, small groups suppressed, daily volume limits, and a receipt for every call. It takes a key with the `analytics` scope on an analyst source, or a person with the `analysis` role; revealing a customer behind a pseudonym also needs `admin` on the key or `security` on the person, and a reason.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="History navigation" href="/en/concepts/history">
+    search, timeline and open in depth.
+  </Card>
+  <Card title="MCP clients" href="/en/integrations/mcp/claude-code">
+    Claude Code, Claude Desktop, Cursor and VS Code connected to your space.
+  </Card>
+  <Card title="Mint a subject_token" href="/en/api/subject-tokens">
+    the request and response.
+  </Card>
+  <Card title="Spaces and keys" href="/en/concepts/spaces-and-keys">
+    scopes, audiences and revocation.
+  </Card>
+  <Card title="Receipts and audit" href="/en/concepts/receipts">
+    what every read made through a tool leaves behind.
+  </Card>
+</CardGroup>

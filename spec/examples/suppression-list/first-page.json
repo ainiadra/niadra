@@ -1,0 +1,25 @@
+{
+  "salt_id": "ss_0199a3b0",
+  "reset": false,
+  "items": [
+    {
+      "id": "0199a1d0-7700-7a10-8b20-000000000001",
+      "key": "artBgq3okzeNZ3ZtbJSsKtr1JqULKXhkJeIg-433n-s",
+      "purpose": "marketing",
+      "channel": null,
+      "since": "2026-09-20T10:00:00Z",
+      "until": null,
+      "removed": false
+    },
+    {
+      "id": "0199a1d0-7700-7a10-8b20-000000000002",
+      "key": "tLUSZKaZgzy0yDs44PzVPO5222brxpuEgkJ8NlRPsCc",
+      "purpose": "collection",
+      "channel": "email",
+      "since": "2026-09-28T09:00:00Z",
+      "until": "2026-10-05T09:00:00Z",
+      "removed": false
+    }
+  ],
+  "next_cursor": "c_0199a3b0_2"
+}

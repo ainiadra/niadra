@@ -1,0 +1,184 @@
+---
+title: "Health agents"
+description: "A health plan operator with a sales agent: a quote derived from the lead's data, which expires the moment one input changes, a fee one source reports wrong, beneficiaries with separate signals, and a handoff to the human broker with an outcome."
+---
+
+This guide builds, with synthetic examples, what a health plan operator turns on in Niadra for an agent that quotes plans and hands the closing to a human broker. In health, the quote is a function of the data of whoever asks, the data is sensitive, and the person asking often buys for someone else. Each part below is a feature of the space, turned on by itself.
+
+## What the sector asks for
+
+- A quote depends on the city, the ages and the product type: when one of those changes, the quote expires right away, not when the deadline passes.
+- One of the sources reports the enrollment fee wrong, and the operator knows it: the right value comes from another source.
+- The agent quotes for a dependent, for the parents, for a group: each beneficiary's signals stay apart, and health data never becomes affinity.
+- The closing belongs to a human broker; the agent hands the conversation over with the package and gets the outcome back.
+
+## 1. The type: the derived quote
+
+The quote is a **customer** type with `nature: derived`: a function of the inputs it names, and Niadra expires it when one of them changes.
+
+```json
+{
+  "type": "health_plan_quote",
+  "ownership": "subject",
+  "nature": "derived",
+  "mirror_of": { "system": "pricing", "derived_by": "declaration", "drift": "alert" },
+  "inputs": ["lead.city", "lead.state", "lead.ages", "lead.household", "turn.product_type", "campaign.discount_validity"],
+  "fields": {
+    "price_full": { "type": "money", "role": "price_full", "sensitivity": "none", "claim": { "allowed": true, "class": "money", "nature": "computed" } },
+    "price_discounted": { "type": "money", "role": "price_discounted", "claim": { "allowed": true, "class": "money", "nature": "computed" } },
+    "enrollment_fee": { "type": "money", "logic": "tri", "role": "enrollment_fee", "unobserved_blocks": ["decide:close"], "claim": { "allowed": true, "class": "money", "nature": "computed" } },
+    "waiting_period_days": { "type": "duration", "claim": { "allowed": true, "class": "duration", "nature": "computed" } }
+  },
+  "sources": {
+    "quote_api": { "kind": "pull", "precedence": 1, "known_defects": [{ "field": "enrollment_fee", "use_source": "budget_document" }] },
+    "budget_document": { "kind": "pull", "precedence": 1, "authoritative_for": ["enrollment_fee"] },
+    "curated_table": { "kind": "batch", "precedence": 2, "active_when": "config.discount_source == 'table'", "empty_means": "absent" }
+  },
+  "purposes": {
+    "display": { "on_stale": "serve_with_age" },
+    "claim": { "on_stale": "serve_with_prohibitions", "prohibitions": ["affirm_price"] },
+    "decide": { "on_stale": "structured_refusal", "reason": "stale_quote", "action": "requote" }
+  }
+}
+```
+
+The quote API reports the enrollment fee wrong, and the type declares it: the field is a `known_defect` for that source, and the read serves the value of the budget document; while no source reported it, `enrollment_fee` is `unobserved`, and that blocks `decide:close`, a task of the operator the agent's code honors. A `decide` read of a quote expired by an input carries the structured refusal `stale_quote` with the action `requote`, beside the values: the operator's tool answers "the quote expired, quote again", and Niadra never decides for it. The `lead` is a customer type with city, state, ages and household, marked `sensitivity: health` where it applies.
+
+## 2. The agent's turn
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+from niadra.turns import tool
+
+niadra = Niadra(channel="whatsapp")
+BUILD = Niadra.build(prompts={"sales": "v9"}, model="gpt-4.1")
+
+
+@tool("quote", provenance=lambda r: [{"ref": f"health_plan_quote:pricing:{r['quote_id']}",
+                                      "fields": {"price_full": r["price_full"], "price_discounted": r["price_discounted"]},
+                                      "provenance": {"source": "live", "source_observed_at": r["observed_at"], "scope": "customer"}}])
+def quote(city: str, ages: list[int], product_type: str) -> dict:
+    return pricing.quote(city=city, ages=ages, product_type=product_type)
+
+
+with niadra.conversation("wa-2201", subject=phone("+5511900001234"), agent_id="sales") as conversation:
+    conversation.customer("How much is a plan for my parents, 62 and 65, in Campinas?")
+    with conversation.turn(build=BUILD) as frame:
+        context = conversation.context(include=["constraints", "state"])
+        frame.interact({"kind": "attribute", "name": "household.ages", "value": [62, 65], "source": "stated", "for": "beneficiary:parents"})
+        found = quote("Campinas", [62, 65], "family")
+        verdict = conversation.verify_claim(f"health_plan_quote:pricing:{found['quote_id']}", "price_full", found["price_full"])
+        reply = conversation.claims.guard_text(model(prompt_with(context, found, verdict)), context="chat")
+        conversation.agent(reply)
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+const BUILD = Niadra.build({ prompts: { sales: "v9" }, model: "gpt-4.1" });
+const quote = Niadra.tool("quote", (q: QuoteArgs) => pricing.quote(q), {
+  provenance: (r) => [{ ref: `health_plan_quote:pricing:${r.quote_id}`, fields: { price_full: r.price_full, price_discounted: r.price_discounted }, provenance: { source: "live", source_observed_at: r.observed_at, scope: "customer" } }],
+});
+
+const convo = niadra.conversation({ subject: handles.phone("+5511900001234"), channel: "whatsapp", conversation_id: "wa-2201" });
+convo.customer("How much is a plan for my parents, 62 and 65, in Campinas?", { idempotency_key: inbound.id });
+await convo.turn({ build: BUILD }, async () => {
+  const ctx = await convo.context({ include: ["constraints", "state"] });
+  const found = await quote({ city: "Campinas", ages: [62, 65], product_type: "family" });
+  const verdict = await convo.verifyClaim(`health_plan_quote:pricing:${found.quote_id}`, "price_full", found.price_full);
+  const guarded = await convo.claims.guardText(await model(promptWith(ctx, found, verdict)), { context: "chat" });
+  convo.agent(guarded.text);
+});
+```
+</CodeGroup>
+
+"For my parents" is a **beneficiary**: the stated ages go to `beneficiary:parents`, and the signals of that quote never become an attribute of the person asking; the constraints block of a turn for the parents carries their entries. Health data never becomes affinity: from an interaction with a sensitive object Niadra keeps only the type and a count. `verify_claim` says whether the price may be stated now; a quote expired by an input (the city changed on the next turn) answers `claim_safe: false`, and the agent quotes again instead of repeating the value. In TypeScript, the interactions travel as batch items ([Signals](/en/concepts/signals#interactions)).
+
+## 3. The claim contract
+
+```json
+{
+  "version": "2026-09-29.1",
+  "languages": ["pt", "es"],
+  "categories": [
+    {
+      "id": "price",
+      "detect": { "classes": ["money"], "roles": { "price_full": ["sai por", "mensalidade", "por mês", "al mes"], "price_discounted": ["com desconto", "promocional", "con descuento"], "enrollment_fee": ["taxa de adesão", "adesão", "cuota de ingreso"] } },
+      "evidence": { "value": { "same_role": true, "fresh_for": "claim", "type": "health_plan_quote" } },
+      "natures": { "computed": "check", "quoted": "verbatim", "model": "block" },
+      "actions": { "default": "warn", "contexts": { "chat": "rewrite_if_unequivocal", "proposal": "block" } }
+    },
+    {
+      "id": "waiting_period",
+      "detect": { "classes": ["duration"], "terms": ["carência", "carencia"] },
+      "evidence": { "value": { "type": "health_plan_quote", "value": "waiting_period_days" } },
+      "actions": { "default": "warn", "contexts": { "proposal": "block" } }
+    },
+    {
+      "id": "coverage_promise",
+      "detect": { "terms": ["cobre", "está coberto", "tem cobertura", "cubre"] },
+      "evidence": { "tool": "check_coverage" },
+      "actions": { "default": "warn", "contexts": { "proposal": "block" } }
+    }
+  ],
+  "negative_corpus": { "version": "2026-09-29", "phrases": ["A carência varia conforme o procedimento.", "Posso cotar para 2 dependentes?", "A mensalidade depende da faixa etária."] },
+  "outputs": { "immutable": ["proposal"], "mutable": ["chat"] }
+}
+```
+
+"The monthly fee comes to R$ 511.06" is checked against the quote's `price_full` in the turn, within the type's claim age; a price the model said with no quote in the turn is blocked. "It covers physiotherapy" without a `check_coverage` call is a coverage promise with no lookup, marked in the chat and blocked in a proposal, which is immutable: the whole proposal goes to a person. "Can I quote for 2 dependents?" and "the waiting period varies by procedure" never trigger. See [Claims](/en/concepts/claims).
+
+## 4. The handoff to the broker
+
+The closing belongs to a human broker. The agent creates a [handoff](/en/concepts/coordination#handoffs) with the package compiled at the broker's verification level, and the person is held at the `transfer_pending` level until the outcome, so the operator's retention agent does not contact them in between.
+
+<CodeGroup>
+```python Python
+from niadra.models.coordination import HandoffCreate, HandoffOutcome
+
+handoff = niadra.api.create_handoff(HandoffCreate(
+    subject=phone("+5511900001234"), target="closing_desk", agent="sales", level="V1",
+    reason="quote accepted for two dependents; closing needs a person",
+), idempotency_key=f"handoff-{conversation.conversation_id}")
+
+# Later, from the broker's tool
+niadra.api.handoff_outcome(handoff.handoff_id, HandoffOutcome(outcome="closed_won"), idempotency_key=f"outcome-{handoff.handoff_id}")
+```
+```typescript TypeScript
+const handoff = await niadra.api.createHandoff(
+  { subject: handles.phone("+5511900001234"), target: "closing_desk", agent: "sales", level: "V1", reason: "quote accepted for two dependents; closing needs a person" },
+  { idempotency_key: `handoff-${convo.id}` },
+);
+
+// Later, from the broker's tool
+await niadra.api.handoffOutcome(handoff.handoff_id, { outcome: "closed_won" }, { idempotency_key: `outcome-${handoff.handoff_id}` });
+```
+</CodeGroup>
+
+The outcome (`closed_won`, `closed_lost`, `no_answer`, the vocabulary the `coordination` document declares) ends the hold, enters the memory as the broker's `handoff.outcome` action on the handoff object (the next agent sees "closed by the broker") and feeds the suppressions the space maps: a `closed_lost` on price may suppress `retention` for 90 days. A handoff without an outcome by `expected_by` reads as expired. [Outcome measurement](/en/concepts/outcomes) attributes the signed proposal to the agent that quoted through the `assisted_handoff` method, probable, with the band said beside it.
+
+## 5. Privacy
+
+The lead, the quote and the beneficiaries' signals are health data: the space's policy releases them only for the `sales` purpose of the sales agents, at V1 when it is the person themselves who states them ([the mirror rule](/en/concepts/privacy#the-mirror-rule)), and never to an analysis source. The inferences about the person live in the [reviewable profile](/en/concepts/privacy#the-reviewable-profile), and a request to review an automated decision (a refused quote, for instance) goes to the operator's data protection officer with the explanation built from receipts. Erasing the person erases the quote, the signals of every beneficiary and their turns.
+
+## What stays off
+
+Everything above ships on: `state` brings the derived quote and the structured refusals; `signals`, the beneficiaries and the block; `claims` and `turns`, the contract and the record; `coordination`, the handoff with its outcome; `measurement`, the attribution of the closing.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Object types and state" href="/en/concepts/object-types">
+    derived objects, known defects and the structured refusal.
+  </Card>
+  <Card title="Signals and constraints" href="/en/concepts/signals">
+    beneficiaries and what never becomes affinity.
+  </Card>
+  <Card title="Coordination" href="/en/concepts/coordination">
+    handoffs, ownership and the outcome that feeds the memory.
+  </Card>
+  <Card title="Privacy" href="/en/concepts/privacy">
+    sensitive data, the mirror rule and the reviewable profile.
+  </Card>
+</CardGroup>

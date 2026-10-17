@@ -1,0 +1,109 @@
+---
+title: "Incident response"
+description: "Roles, severities, what detects, the response steps, customer notification within the contract's deadline and the review afterwards. A plan sized for today's Niadra."
+---
+
+This is the plan Niadra runs when something goes wrong: a leak, a loss of isolation, an outage, a backup that failed. It is written for the Niadra of 30/09/2026, in which one person operates the platform and receives the alerts. There is no on-call rota, and the plan does not pretend there is.
+
+## Roles
+
+| Role | Who | What they do |
+|---|---|---|
+| Incident lead | The founder | Receives the alert or the report, sets the severity, runs the response, decides containment and recovery, writes the timeline and the review |
+| Customer communication | The founder | Notifies each affected customer's security contact within the contract's deadline and sends the updates |
+| Customer contact | The person the contract names (the data protection officer or the security contact), with escalation addresses and phone numbers | Receives the notice, decides what your company tells the authority and the data subjects, asks Niadra for what it needs |
+| Providers | AWS (account support) and the support of Niadra's AI | Engaged by Niadra when the cause is on their side |
+
+Niadra is the processor: your company, the controller, decides on communication to the data protection authority and to the data subjects. Niadra gives the facts, the counts and the timeline for that decision.
+
+## Severities
+
+| Severity | What it is | Examples | First action |
+|---|---|---|---|
+| **S1** | Confidentiality or integrity of customer data affected, or possibly affected | A read across spaces; a source or data key exposed; a receipt chain that does not match the sealed copy; personal data found in a log; unauthorized access to the AWS account or the machine | Contain within minutes: revoke keys, cut access, preserve evidence. Notify the affected customers within the contract's deadline |
+| **S2** | Data API or Console down or answering wrongly for more than one customer | Machine or database down; server errors above the threshold; stale outbox or queue; lost receipts | Restore service; notify the affected customers if the outage exceeds what the contract allows |
+| **S3** | Degradation with no loss of data or confidentiality | Context or ingestion acknowledgement latency above target; a failed backup; Niadra's AI slow or down, with new memory delayed; AI budget spent | Fix in the next working hours; record it |
+| **S4** | Suspicion with no confirmed impact | A report through the responsible disclosure channel; an alert that did not confirm; a blocked attempt | Investigate; decide whether it becomes S1 to S3 |
+
+An incident goes up in severity when the investigation shows more than the alert said; it never goes down before the review.
+
+## What detects
+
+- **Automated alerts.** The 21 rules in `deploy/k8s/charts/niadra/files/alerts.yaml`, with severity `page` (calls now: context latency above 100 ms at p95, ingestion acknowledgement above 80 ms, object event above 10 s, server errors, stale outbox, intake backlog, a queue with tasks and no consumer, lost receipts, failing state store, failing space database) and `ticket` (memory ready above 60 s, measurement above 90 s, dead tasks, AI budget spent, queue backlog, failing cache, space directory drift, orphan space database, pending deletion receipt, failed or stale backup). Alertmanager sends them to the SNS topic `niadra-alerts`, with a confirmed e-mail subscription, grouped by rule and severity and repeated every 4 hours while they last; an optional webhook receives the same. The kube-prometheus-stack rules of severity `critical` and `warning` (a pod restarting in a loop, a deployment short of its replicas, a metrics target down, node disk and memory) take the same path.
+- **The receipt chain check.** [`GET /v1/receipts/verify`](/en/api/receipts-verify) checks a space's chain and the sealed copy outside the database (`anchor_copy_matches`, `anchor_locked`); any customer with the `security` role can run it, and a mismatch is S1.
+- **The responsible disclosure channel.** [niadra.com/.well-known/security.txt](https://niadra.com/.well-known/security.txt): the Enterprise form with the "Security" interest, read by the founder.
+- **Provider notices.** AWS notifies the account by e-mail and through its health dashboard; Niadra's AI through its provider's status page and through errors on the calls, which the cell counts as AI unavailability.
+- **A customer's report.** Through the contract's direct contact or the Enterprise form.
+
+What it does not detect on its own, by name: a vulnerability published after the last merge in a dependency already in production (the dependency audit runs before every merge, not on a schedule), a vulnerability in the system packages of the images (they are not scanned), and misuse of a valid credential within its scopes (it shows in the receipts, which the customer and Niadra can read, but no one is alerted by it).
+
+## The steps
+
+1. **Receive and classify.** The alert or the report reaches the founder. Within one hour during business hours, and as soon as read outside them, they open the incident record (time, source, what is known) and set the severity.
+2. **Contain.** For S1: revoke the suspect source keys through the control plane (the cut takes effect within seconds); change the passwords and the second factor of the people involved; rotate the platform's secrets (`deploy/scripts/bootstrap-secrets.sh`) and, if the master key is in doubt, change the key policy in KMS and rotate the data keys of the affected spaces (`python -m niadra.entrypoints.keys_cli rotate --space`); if needed, stop the machine (`deploy/scripts/pause.sh`), which takes the API and the Console down and preserves disk, address and backups. For S2: restore service first, with the previous release when the new one is the cause (`helm rollback`, as `on-ops.sh` does by itself after a deploy that fails its check).
+3. **Preserve evidence.** Logs stay 30 days in CloudWatch Logs; the receipts and the chain stay in the database and in the audit bucket (write-once, five years); CloudTrail keeps the calls to the account. Before any cleanup, the founder exports what the incident touches (the period's logs, the spaces' receipts, the chain check) to a prefix of the cell bucket.
+4. **Investigate.** Which path, since when, which spaces, which data subjects and which data. The receipts' lineage answers "who read what" per space; `context-use` and the history say what each agent received.
+5. **Notify the affected customers** (below).
+6. **Eradicate and recover.** Fix the cause by pull request, with a test that reproduces it, and deploy through the normal path (`release` and the machine); restore data through the runbooks where needed (below).
+7. **Close and review** (below).
+
+## Customer notification
+
+- **Deadline.** The contract's. With no deadline in the contract, Niadra notifies within 24 hours after confirming an S1 or S2 that touches your company's data or service, and sooner when the customer needs to act (one of its keys exposed, for example).
+- **To whom.** The security contact the contract names, through the channel it set (e-mail and, for S1, phone).
+- **What the first notice says.** What happened, since when, which spaces and which data classes are involved, what Niadra has already done, what the customer needs to do, and when the next update comes. What is not yet known is said as "not yet known".
+- **Updates.** Every 24 hours until closure, or sooner when something changes.
+- **Final report.** In writing, within 5 business days after closure: timeline, cause, affected data and data subjects (counts and classes; the ids are available to the customer through the API), what was fixed and what changes to prevent a repeat.
+
+Notifying the data protection authority and the data subjects is your company's decision, as the controller; Niadra delivers what it needs to meet its legal deadlines.
+
+## Recovery
+
+| Scenario | How it comes back | Where it is |
+|---|---|---|
+| A new release broke production | Roll back to the previous release; automatic when the end-to-end check fails and the release changed no schema, otherwise by the founder's decision | `deploy/scripts/on-ops.sh` |
+| One space corrupted or deleted by mistake | Restore that space alone from the nightly backup, without touching the others; the erasures the backup does not know run again | `server/README.md`, "Runbook: restore one space" |
+| The whole database lost | Restore the instance from RDS's automated backup (one day of retention today) or each database from the nightly backups (35 days) | `deploy/README.md`, "Databases" |
+| Machine or zone lost | Recreate the stack from the template and deploy the released version; the fixed address and the disk survive the machine | `deploy/scripts/stack.sh`, `deploy.sh` |
+| A worker pool stopped | Kubernetes restarts the pod by itself; if it does not come back, restart the pool's deployment. Writes and reads keep answering, and the intake and the queues drain once a consumer is back, with no manual step | `deploy/README.md`, "When a worker pool or the database stops" |
+| Database unreachable | Check the instance's status and PgBouncer; once the database is back, the writes the SDKs repeated with the same key go in once, with no manual step. A lost instance follows the "whole database lost" row | `deploy/README.md`, "When a worker pool or the database stops" |
+| A space's data key in doubt | Rotate the key (a new version; old rows keep opening with theirs) | `niadra.entrypoints.keys_cli rotate --space` |
+
+The recovery time in production has not been measured; the restoration of the backups is tested every Sunday by the nightly job. The two scenarios in the middle of the table were measured on a local cell (below).
+
+## Technical drill of 30/09/2026
+
+On 30/09/2026, a technical drill of this plan ran on a local cell, with synthetic data: not on production, with no customer, and without the founder, run by a coding agent following the steps above. Two scenarios, with continuous write and read traffic:
+
+- **The workers killed for 60 s.** Writes and reads kept answering; the intake and the queues drained within 5 s of the workers' return, and a conversation closed during the failure became memory 17 s later. No acknowledged event lost or duplicated (598 of 598).
+- **The database unreachable for 60 s.** No write acknowledged during the failure, and the reads that needed the database failed; the first write was acknowledged 1 s after it came back. No acknowledged event lost or duplicated (483 of 483), including those repeated with the same key.
+
+The times come from a development machine, not the region. The drill found three gaps: no rule saw a queue without a consumer (fixed by the `QueueWithoutConsumer` rule, which takes effect at the next deploy); a database outage shorter than 10 minutes pages no one; and a read with the database unreachable answers 500 instead of 503. The last two are open. The full review, with the timelines, the notice text that would have gone to the customer and the data, is in an internal report, available under a confidentiality agreement.
+
+## After the incident
+
+Within 5 business days after closure, the founder writes the review: the timeline, the cause, what worked and what did not in detection and response, and the changes, each with a pull request or a dated task. When the cause was a defect, a test that reproduces it enters the suite before the fix. When the cause was a process, the process changes on this page. Affected customers receive the review; the others receive a summary when the change touches them.
+
+## Limits of this plan
+
+- One person. Outside business hours, the time to the first action is the time until the founder reads the alert; alerts repeat every 4 hours until resolved, and arrive by e-mail.
+- No penetration test. The only drill of the plan was technical, on a local cell (above); none on production or with the person on call.
+- A database outage shorter than 10 minutes raises no alert: the lag gauges depend on the database and freeze during the outage, and `ServerErrors` waits 10 minutes.
+- The dependency audit runs before every merge: an advisory published after that only shows up at the next merge, and the images are not scanned.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Threat model" href="/en/security/threat-model">
+    what each control covers and what is left out.
+  </Card>
+  <Card title="Security questionnaire" href="/en/security/questionnaire">
+    the answers to the review's questions.
+  </Card>
+  <Card title="Receipts and audit" href="/en/concepts/receipts">
+    the trail the investigation reads.
+  </Card>
+  <Card title="Privacy, erasure and export" href="/en/concepts/privacy">
+    retention, erasure and what stays protected by design.
+  </Card>
+</CardGroup>

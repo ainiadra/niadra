@@ -1,0 +1,268 @@
+---
+title: "Object types and state"
+description: "Types declared or derived from your database, freshness per field, four logical values, the read purpose, computed values, timers and shared objects."
+---
+
+Your company's agents work on the company's own state: a sale, a lawsuit, a proposal, a hospitalization, an order, an item on a shelf. An **object type** describes one such kind once, so that the memory and every agent read it the same way: which fields it has and how sure each value is, where each value comes from and which source wins, how old a value may be before it may no longer be claimed, what its lifecycle is, when its timers fire, and what a reader may ask of it.
+
+A type is inferred by Niadra from what your systems send, with no configuration, or declared by your company, or derived from your own database schema and confirmed by a person. A declaration always wins over what was inferred. It always mirrors a system of yours: the memory reflects that system and points out drift, and is never the barrier that enforces the company's rules. The official value stays in your system.
+
+This page covers the type registry and typed state reads. [Business objects](/en/concepts/systems#business-objects) no system has sent yet keep working as before: derived state from system events, with `as_of` and the timeline.
+
+## Turning it on and off
+
+Typed state is the space's `state` feature. Every feature starts on: a space that changed nothing uses them all. The `features` configuration document lists what stays on, and a space turns one off through an approved diff in the Console or the [control API](/en/api/control/config-diffs), by the `security` role. In a space without the feature, the routes on this page answer 404, as if they did not exist, and a context read that asks for the `state` block gets the context without it. `GET /v1/sdk/profile` tells the SDK what is on.
+
+Types live in the `object-types` document, of the `integration` role. A change to a field's sensitivity, access or personal data, to a source's licence or to a type's purposes is a privacy decision: besides `integration`, it needs the approval of the `security` role.
+
+## The format of a type
+
+A type is a JSON document in the space's `object-types` document. The main members:
+
+| Member | What it says |
+|---|---|
+| `type`, `version` | The name, lowercase ASCII (up to 40 characters), and the declaration's version. Every object keeps the version it was written under |
+| `ownership` | `subject` (a customer's: an order, a lawsuit, a proposal), `shared` (met by many customers: an item, a court, a hospital of a network) or `agent` (an agent's working state, see [Working memory](/en/concepts/agent-state)) |
+| `nature` | `observed` (the default) or `derived`: a function of `inputs`, as a quote is a function of the lead's data |
+| `mirror_of` | The system of yours the type mirrors: `system`, `derived_by` (`declaration`, `introspection` or `observation`), the `fingerprint` of the schema an introspection read and `drift` (`alert` or `ignore`) |
+| `key` | The natural key in the sources' payloads, a `fingerprint` expression that identifies one observation across sources, if any, the `variant`, and, optionally, in `match` the shape of a key a conversation writes: [object memory](/en/concepts/object-memory) already finds the customer's object by the written value without it |
+| `fields` | The fields, by name: type, logic, observers, role, claim policy, attribute, freshness, completeness, sensitivity, access, personal data, `track_changes` and `label`, the field's name in words, which the [constraints block](/en/concepts/signals#the-constraints-block)'s text uses |
+| `values` | The values your company computes (a deadline, a price, a waiting period) and Niadra keeps as versioned facts |
+| `sources` and `union` | The sources, with precedence, authority, scope, known defects and licence, and how they combine per field |
+| `states`, `lifecycle` | The states and the transitions, the forbidden ones, the latches and the outcome |
+| `timers` | When each timer is due and what it does |
+| `refetch` | The reasons to read the object again, with a priority and a budget |
+| `purposes` | What a read of each purpose does with stale data |
+| `readings` | Named readings, for when two readers ask different questions with the same word |
+| `relations`, `derived_fields` | Related objects by role and fields computed over them |
+| `working_set` | In a shared type, what brings an object into the working set and how long it stays |
+| `retention` | Per class of data, how long it is kept |
+
+The [object type reference](/en/concepts/object-type-reference) holds the rest of the format: how each field type travels, every member of a field, what the server refuses in a type and the expression language. A short example, a shared store item:
+
+```json
+{
+  "type": "item_variant",
+  "ownership": "shared",
+  "mirror_of": { "system": "ecommerce", "derived_by": "declaration", "drift": "alert" },
+  "key": { "natural": ["variant_id"] },
+  "working_set": { "enter_on": ["presented", "engaged", "watched"], "leave_after": "30d" },
+  "fields": {
+    "available": {
+      "type": "bool", "logic": "tri",
+      "freshness": { "class": "volatile", "max_age": "30s", "claim_max_age": "5s" },
+      "claim": { "allowed": true, "class": "quantity", "nature": "observed" },
+      "track_changes": true
+    },
+    "price_sale": {
+      "type": "money", "role": "price_sale",
+      "freshness": { "class": "price", "max_age": "60s", "claim_max_age": "15s" },
+      "claim": { "allowed": true, "class": "money", "nature": "observed" }
+    }
+  },
+  "sources": {
+    "platform_live": { "kind": "pull", "precedence": 1, "authoritative_for": ["available", "price_sale"] },
+    "search_snapshot": { "kind": "tool_observation", "precedence": 2 }
+  },
+  "purposes": {
+    "display": { "on_stale": "serve_with_age" },
+    "claim": { "on_stale": "serve_with_prohibitions", "prohibitions": ["affirm_availability", "affirm_price"] },
+    "decide": { "on_stale": "serve_with_age" }
+  }
+}
+```
+
+## Declared or derived
+
+A company that keeps its state in PostgreSQL already wrote much of a type: the columns, the values a `CHECK` allows, the enumerations, the foreign keys. The SDKs' `niadra types derive` command reads that catalog inside your company, proposes the type and lists what a person must look at before submitting it (columns that became no field, `CHECK`s that are not a list, triggers, foreign keys without a relation). The catalog, the proposal and the review never leave your company through the tool; only the schema fingerprint, a SHA-256 over the normalized catalog, and the counts of what changed do. See [Derive types from your database](/en/guides/derive-types).
+
+A derived type keeps in `mirror_of.fingerprint` the fingerprint of the catalog it read. The same command, with `--check`, reads the catalog again and says whether it **drifted**: fields added, removed or retyped, states and relations that changed, the key that changed. Without `--no-send`, it reports the fingerprint and the counts to [`POST /v1/types/fingerprint`](/en/api/types-fingerprint): for a type with `drift: alert`, Niadra opens a [data issue](#data-issues) of kind `drift`, or counts one more occurrence in the open one, and sends the `type.drift` webhook once per issue, when it opens; for a type with `drift: ignore`, it answers `drift: true` and opens nothing. Niadra also points out drift without the tool, **by observation**: a field or a transition seen in the sources that the type does not declare, or a value outside the vocabulary, opens the same data issue, and never refuses what your system did; a new field already reaches agents, see [Fields the type does not declare](#fields-the-type-does-not-declare). The observation covers every path that writes an object: an event, a push, a snapshot or what a tool showed of it, for the customers' objects and the shared ones. A shared object's push through [`POST /v1/objects/push`](/en/api/objects-push) is still decided on the working set's hot copy with no database statement: a field or a state the type does not declare is noticed there, and its `drift` issue opens with the next consolidation, about a second later. The same finding counts once an hour per server process while its issue stays open, and again at once after the issue is acknowledged. The fingerprint check of `niadra types derive --check` adds what the traffic does not show, such as a removed field; run it in your CI or on a schedule, as in [Derive types from your database](/en/guides/derive-types).
+
+## Types inferred from traffic
+
+In a space that declared nothing, Niadra reads the types from what your systems of record send, in events and in [`POST /v1/objects/push`](/en/api/objects-push), and serves them to agents within a minute. Nothing a customer-facing agent writes, and no record of Niadra's own (a handoff, a commitment), becomes a type.
+
+- **The type** is born on its first object, mirroring the system that sent it.
+- **The states** are the values of the `state` field, in the order they appear; a state is final when at least 5 objects stayed in it for 14 days.
+- **A relation** to another type is born when a field's values matched the key of that type's objects 3 times, and never a third type's.
+- **The due date** is a date field named like a deadline (`due`, `deadline`, `vence`, `prazo` and similar), with at least 3 values, most of them after the event's date; it gets the notice 48 hours before.
+- **The identifier** is a text field with at least 3 values, every one specific enough to name an object and none held; a customer who writes it in the conversation names the object.
+- **The names** of fields and codes get words in the space's language ("Valor da causa", "situação em andamento"), written by Niadra's AI from the name and the record types it appears in (a hearing's `held` state becomes "realizada", held as in took place, not "retido", held as in detained), never from a value; a word written before the types were known is asked for again with them, and a declared label wins.
+
+Each field's kind follows the majority of its values, and one malformed value does not change a type. The limits per space are 50 types, 100 fields per type and 50 states per type; what goes past them is still stored and served as it came, and each limit reached or name that cannot become an identifier shows as a note. What Niadra inferred is recorded as a configuration change by the author `niadra:observed`, which the Console shows as "Inferred by Niadra", with nothing to approve. A type your company declares stops being inferred: the declaration holds.
+
+## Fields the type does not declare
+
+A field your system sends that the type does not declare reaches agents the same way a declared field does, with no configuration: the object's line says it by its name in the space's words (`held_on` becomes "Held on" in an English space, "Realizado em" in a Portuguese one), a date in the space's date format and a yes or no in the space's words. Declaring the field stays possible, and optional: to give it a label, mark it personal or sensitive, rule its access or track its changes. A declared field always goes by its declaration.
+
+Until it is declared, a new field is **held** from agents when it may be personal data or a third party's free text:
+
+- **Personal data.** The value has the shape of a person's contact or document (an e-mail, a phone, a personal document number), whatever the field's name; or the name says it holds a person's contact, document, address or birth date (`telefone_cliente`, `endereco`) and the value is a text; or the name says it holds a name and says whose, when it is a customer's or a third party's (`cliente_nome`, `nome_paciente`), or the value reads as a person's full name (`"name": "Maria da Silva"`). A product's name (`"product_name": "Dipirona 500 mg"`) is served, and so is the name of your company's own professional on the matter (`responsible_lawyer_name`, `gerente_nome`). A number or a date is never held by the field's name alone, and a company's registration number is not a person's data.
+- **Free text.** A text longer than 200 characters, or of several lines, is a third party's words (a court's order, a ticket's body). It reaches a model only as a declared content field does, inside the envelope after its scan, so it is held until declared in `content.fields`.
+
+A held field stays in the object's state, and your company's reads see it as it came; an agent's read lists it in `withheld`, with `access` for personal data and `scan` for free text. Each new field opens a [data issue](#data-issues): `drift` for what already reaches agents, which is only a record, and `field_held` for what was held, which asks for the declaration.
+
+## Four logical values
+
+Every value carries one of four logical values, and "not checked" never becomes "no":
+
+| Logical value | Meaning |
+|---|---|
+| `yes` | Present: a source or an observer affirmed it (for a boolean, true) |
+| `no` | Known and negative: false for a boolean; for any other field, **absent** (the source affirmed there is none), possibly with the absence's name, such as `sem_prazo` |
+| `unobserved` | Nobody observed it, or the valid observation ended |
+| `known_defect` | The source answered, and the type declares that this field of that source comes wrong |
+
+`unobserved` and `known_defect` are **unknown**. A comparison with an unknown value is unknown, and so is its negation. A `logic: "tri"` field declares who may observe it (`machine`, `human` or `source:<name>`), under which rule, for how long the observation stays valid and who overrides whom: a person's check holds forever and beats the machine's, when the type says so. The same field declares what a value nobody observed **blocks**: `model_read`, `derive`, `claim` or a task of yours, such as `decide:close`. Niadra applies two of those blocks itself, `claim` and `decide`; the others arrive in `blocked` on the read, for your code to act on.
+
+## Freshness and the read purpose
+
+Each field has a freshness class and, optionally, a maximum age and a maximum age for claiming. Without `max_age`, a `volatile` field is stale after 30 seconds, `price` after 60 seconds, `semi` after 1 hour and `stable` after 7 days; a `none` field never goes stale. Freshness is never stored: every read computes it against the declaration in force, so a new declaration applies to every object at once.
+
+Every read names its **purpose**: `display` (the default), `claim` or `decide`. A read never refuses a stale value: it comes with its age, and what changes is what comes with it.
+
+| Purpose | With stale data |
+|---|---|
+| `display` | Serves it with the age (`status: stale`, `age_s`) |
+| `claim` | Serves it with the type's **prohibitions**: what may not be claimed with this data, such as `affirm_price` or `affirm_no_new_activity`. It is what the [claim contract](/en/concepts/claims) checks |
+| `decide` | Serves it with the age, or with a **structured refusal** (`refusal`, with `reason` and `action`, such as "the quote is out of date: quote again"), for your company's tool to answer. Niadra never decides for you |
+
+A value is **safe to claim** (`claim_safe`) only when the type allows claiming it, its logical value is `yes` or `no`, its status is `fresh` within `claim_max_age`, it came from a `live` observation or from the system of record itself (never from a snapshot or a cache), it is not masked, its content is clean, the derived object did not expire by an input and no unknown field blocks `claim`. The prohibitions arrive on every read in which a served claimable value is not safe, and `claim_safe` says which.
+
+## What a read returns
+
+[`POST /v1/state/read`](/en/api/state-read) takes the objects' references (`type`, `namespace`, `id`, and the `variant` when the key has one), the fields and named readings it wants, and the purpose. Each object comes back with `state`, `latches`, `outcome`, `axes`, `fields`, `values`, `timers`, `readings`, `prohibitions`, `declared_gaps`, `withheld`, `refetch`, `refusal` and `blocked` (and, in a context read, `memory`: what the participants said about it, see [Object memory](/en/concepts/object-memory)); each field, with `v`, `logic`, `status`, `age_s`, `observed_at`, `src`, `observer`, `valid_at`, `known_at`, `claim_safe`, and `was` when the type tracks changes. The answer's schema is on [the route's page](/en/api/state-read). A read with warm state makes no database query.
+
+`known_at` is when Niadra first knew the value and never moves, even when a revision changes the value: what is new stays new. `valid_at` is when the value became true in the world, on the time axis the type declares for it. A late value moves a field only when its `valid_at` is newer than the field's, and still enters the object's history.
+
+In the SDKs, the shortest path is the `state` block of the context, read in the same round trip as the pack:
+
+<CodeGroup>
+```python Python
+context = conversation.context(include=["state"])
+for obj in (context.state.objects if context.state else []):
+    price = obj.fields.get("price_sale")
+    if price and not price.claim_safe:
+        print(obj.prohibitions)  # what the agent may not affirm with this data
+```
+```typescript TypeScript
+const ctx = await convo.context({ include: ["state"] });
+for (const obj of ctx.state?.objects ?? []) {
+  const price = obj.fields.price_sale;
+  if (price && !price.claim_safe) console.log(obj.prohibitions); // what the agent may not affirm with this data
+}
+```
+</CodeGroup>
+
+The context's `state` block uses the `display` purpose: the customer's objects of the declared types, the shared objects they showed interest in, what changed since they saw them (`changes_since_seen`, against the values the interface showed) and `text`, the view as short lines for the turn block (a line names what its object belongs to by its type's to-one relations, so a hearing says its case: `- hearing cases:h-1 (of legal_case cases:case-9): ...`; an object's own line says, after its state and outcome, the dates its timers count from, then the fields the type tracks with `track_changes`, by their `label`, and only then the next timer, as a reminder: `- deadline cases:d-1: state open; due_on 13/10/2026; reminder notice_48h 11/10/2026 00:00`), after `slots` and never inside the pinned body of the context, so the cached prefix keeps its bytes. See [Context and views](/en/concepts/context#blocks-by-include). [`POST /v1/state/view`](/en/api/state-view) returns the same view on its own, for the purpose you ask for.
+
+The `state` block passes the same **verification gate** as the pack that comes with it: a customer's object enters only where its system line would, by the same policy, and the interests and what changed since they were seen enter only when the pack held nothing back until identity is verified further, because a block cannot tell which conversation a line came from. In a conversation at V0, or in one that has not yet proven the level the policy asks for, the block comes back with nothing about the customer. [`POST /v1/state/view`](/en/api/state-view) and [`POST /v1/state/read`](/en/api/state-read) are program reads, with their own receipt and no pack beside them, and are not gated. See [Blocks by `include`](/en/concepts/context#blocks-by-include).
+
+`degraded: true` says the state came from a fallback (the database when the hot copy did not answer, the SDK's local copy when Niadra is out of reach), with the real ages. A failure never becomes `unobserved`.
+
+The same code, with the worker and the check of a claim, is in [`examples/object_state.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/object_state.py) and [`examples/object-state.ts`](https://github.com/ainiadra/niadra-sdk-ts/blob/main/examples/object-state.ts).
+
+## Computed values and derived objects
+
+A deadline, a price or a waiting period is computed by your company's rule, named by reference (`prazo_forense@v9`): Niadra keeps the rule's name, never its logic. The value enters as a **fact with versions**: a new version is born when the value, the rule or the hash of the inputs changes, names the version it supersedes and goes out as the `object.value_revised` event, with the object's reference, the value's name and the versions, never the value. Each value declares the rule's gaps (`declared_gaps`, such as a municipal holiday or a court's ordinance), which an agent must state when it claims the value, and which way they err (`gap_effect`). An absence has a name (`absent_as`, such as `sem_prazo`): never zero, never null.
+
+A `derived` type names its inputs, fields of other objects or parameters of the turn (`lead.city`, `turn.product_type`). When a field that is an input of a derived object moves, every object that depends on it turns `expired_by_input` in one step, `expired_by` names the inputs and the `object.expired_by_input` event tells. An expired object never has a value safe to claim, and a `decide` read of it carries the refusal. A quote expires the moment one of its inputs changes, not when the deadline passes. A new read of the derived object after the expiry brings it back to `current`, bound to the inputs it names.
+
+## Lifecycle and timers
+
+The state is the newest `state` reported in the world, translated by the source's vocabulary (`lifecycle.outcome.vocabularies`). In a type that declares its states, a state outside the list is not served; in a type inferred from traffic, every state the system sends is served and feeds the inference. The **latches** keep the first time the object reached a state, even when it leaves it: "was paid" and "is paid now" are two readings of one object. The **outcome** is the state when it is final, `expired_without_outcome` when the type's deadline passed with no final state, or the provisional state; it is what the [outcome measurement](/en/concepts/outcomes) reads. A transition with `erase_derived` seals the object: the named fields leave when it enters the state, and every read carries `blocked` for `model_read` and `derive`.
+
+Niadra does not enforce the lifecycle: an agent's declaration of a transition it may not make is recorded as refused, and a source's transition outside the declaration is drift, pointed out and never refused.
+
+A **timer** is armed at the moment its `due` expression gives, from the rule and the values of the moment, and moves when that moment moves; the due time is computed again on every read. It fires once per firing, at most 5 minutes late (sooner when it is due within the hour), and a late firing says how late. A timer that notifies sends the `object.timer_due` webhook, with the object, the timer, the firing's id, the one it supersedes, when it was due and when it fired. When a value that armed an already fired timer is revised to another due time, the timer fires again, and the new firing names the one it supersedes: one notice per fact and per version. A timer may also ask for a field to be read again (`refresh(<field>)`) or make a transition the clock may make.
+
+## Shared objects
+
+A `shared` type (an item, a network hospital, a court) exists in Niadra only while something references it. An object enters the **working set** when a turn presents it, the customer engages with it, watches it or commits to it, as `working_set.enter_on` allows, and leaves after `leave_after` without a reference, unless a **watch** holds it. A watch is a customer's explicit request to be told when a shared object meets a condition (a `watch` interaction, with its consent event and an expression over the fields, such as `available == yes`); when a write moves the object and the condition holds on a value that came live from the source, `object.watch_fired` goes out, with the object, the watch and `revalidated`, never a value, at most once an hour per watch. An inferred interest never raises a notice.
+
+When the condition holds on a value that did **not** come live from the source (a snapshot, a cache, a tool's observation), Niadra does not tell the customer yet: it asks your [resolver worker](/en/guides/resolver-worker#watch-revalidation) to read the object again, with the reason `watch_revalidation`, and the worker's push with the request's `request_id` decides, even when the values are not newer than the ones held: `object.watch_fired` goes out with `revalidated: true` only when the condition still holds on live values. With no fresh value (no worker took requests in the last ten minutes, the budget refused, the worker released the request or it was given up), the type's `refetch.unconfirmed_watch` decides: `fire`, the default, tells with `revalidated: false`; `drop` tells nothing. A type with no `refetch`, or that lists `watch_revalidation` in `never`, asks nothing, and `fire` applies at once.
+
+The system of record pushes state through [`POST /v1/objects/push`](/en/api/objects-push): up to 1,000 items, each with the reference, the source's **version**, the fields and the provenance (`live`, `snapshot` or `cache`, with `source_observed_at`). Each field keeps, per source, the latest observation; a field moves only when the item's version is greater than the one that last wrote it, so a retried request is `stale_version`, and a source never reuses a version for other content. A shared object's item is decided against the working set's hot copy, with no database statement (`applied`), and written within a second with the same rule; an object outside the set is `out_of_set`, and a push never brings it in. When the hot copy does not answer, the push answers 503 with `Retry-After`: nothing was kept, and a retry is harmless by the version rule. A customer's object item is `recorded`: accepted as a system event in one statement. [`POST /v1/objects/snapshot`](/en/api/objects-snapshot) reconciles a whole shared type, as NDJSON, with the `snapshot` provenance, which may be shown and never claimed. The read serves the value the type's `union` picks (`first_authoritative_live`, `first_by_precedence`, `union`, `min`, `max`, `latest` or `divergence`, which raises a notice when two implementations of one rule disagree).
+
+What a tool's result showed is state too, when the [turn record](/en/concepts/turn-records) carries the provenance: the tool is the source, and the time its source observed the value is the version. An observation without provenance is display only; one of scope `customer` or `context` never feeds a shared object; a cache hit inside the tool is not a new observation; an object missing from a result is not a state, because absence proves nothing.
+
+### Values, timers and derived objects on a shared object
+
+A shared type may declare `values`, `timers` and a lifecycle, as a customer's type does: a plan's promotion that ends on a date the operator's rule computes, an item's launch that turns it `active` on its own. After the second in which it writes what the pushes moved, Niadra plans the objects of those types that changed, within five more seconds, by the same rule as a customer's object:
+
+- a value gets a new version when the value or the rule changes, with `object.value_revised`; the same value pushed again under a greater version is no revision;
+- timers are armed from the rule and fire with `object.timer_due`; one that already fired fires again, naming the firing it supersedes, when the value that armed it is revised to another due time, and `transition(<from>-><to>)` comes in as an observation of the `clock` source, by the version rule;
+- a read of a shared object carries the values' versions, the latches and the timers, from the same hot copy as the fields, with no database statement;
+- an object that leaves the working set takes its armed timers with it.
+
+A customer's derived object may take a field of a shared object as an input: a lead's quote that uses a plan's price table. The quote's push names the plan in `inputs` (`{"plan": "health_plan:operator:p-12"}`), and the plan enters the working set as `related` when its type admits that reference; otherwise the plan's pushes stay out of the set and the quote never expires by it. When the plan's table takes a new value (not only a new version), every quote bound to it expires in one statement, with `expired_by: ["plan.price_table"]` and `object.expired_by_input`, a few seconds after the push. A value Niadra had never seen for that field counts as a change: the quote may have been computed from another one, and expiring early is the safe side.
+
+A shared type may be `derived` too: a product's best offer, a function of a plan's price table. Its push names the inputs in `inputs`, as a customer's quote does, but only shared objects count as inputs (a customer's object is never an input of a shared one). It keeps its `derived_status` as a customer's derived object does: it expires with `expired_by_input` and `object.expired_by_input` when an input takes a new value, and is `current` again with a push observed after the change.
+
+### Derived fields of a composite object
+
+A composite object (a look, a kit) declares `relations` with the path (`via`) to its pieces' ids and `derived_fields` over them: `all` and `any` say whether a condition (`where`, in the piece type's terms) holds for every piece or for some, `count` counts the pieces it holds for, and `min` and `max` compare the `field` they name. For example, `{"all_pieces_available": {"agg": "all", "over": "pieces", "where": "available == yes"}}`.
+
+A composite that does not name its pieces declares a **reverse relation**: `match` names the field of the related objects that holds the value at `via`. A lawsuit finds its notices by its case number, `{"notices": {"type": "notice", "via": "case_number", "match": "case_number", "many": true}}`, and `{"open_deadlines": {"agg": "count", "over": "notices", "where": "state == 'open'"}}` counts them. The related type is a customer's type that declares that field; each write of one of its objects keeps a keyed digest of the field's value (never the value), and a read finds the related objects by it: one database statement the first time, none while warm, at most 50. A related object that no longer holds the value, or that is gone, leaves the relation at the next read. A composite with no value at `via` does not know its related objects, so its derived fields over them are left out of the read.
+
+- They are computed at every read, from the pieces' hot copies, with no database statement, and never stored: a piece that changes changes the next read.
+- Each is served in `derived` with `v`, `logic` (`yes`, `no` or `unobserved`), `over` (the pieces counted), `unknown` (the ones not known) and, when it is not `yes`, `pieces_out`: the first 10 pieces that kept it from `yes`, as `type:namespace:id` (for `all` and `any` the ones the condition does not hold for or that are not known, for `count`, `min` and `max` the ones not known). A relation reads up to 50 related objects per read; when it names more, the first ones are read, the rest count as not known, and the field comes out with `partial: true`: `over` and `unknown` are at least what they say, and an answer the ones read already decide (`any` with one that holds, `all` with one that fails) is still given.
+- A piece out of the working set, a substitute (a `status_field` other than `exact`), or one whose data the condition reads was not observed is not known, and leaves the result `unobserved` unless the known ones decide it: one `no` decides `all`, one `yes` decides `any`. A piece the `required_field` marks optional is left out.
+- The look brings its pieces into the working set as `related`, when it enters and when its pieces change, where their type admits that reference.
+- A derived field that reads a field of the piece the reader may not read is left out, and `withheld` names it with `access`; derived fields are never evidence for a claim.
+- The state block's lines say them only when the space's `object-types` document turns on `derived_fields_in_text` (off by default), and name the pieces out: `- look loja:l-1: all_pieces_available no (out: item_variant loja:v-2); pieces_count 3`. The JSON read always carries them.
+
+### Re-reading by your worker
+
+Niadra never calls a system of yours. When a value must be read again (a claim waits on it, a timer is due, someone watches the object), it evaluates the type's `refetch.reasons`, admits the request within the budget (one per object and reason in the period, the type's `min_interval`, the paid budget in the company's unit, reserved beforehand) and leaves it in [`GET /v1/state/refresh-requests`](/en/api/state-refresh-requests). Your **resolver worker** takes the requests, reads each object with your function for that type and sends what it read through `POST /v1/objects/push`, which settles the request. The budget is in your company's unit (a paid call), never in money. See [The resolver worker](/en/guides/resolver-worker).
+
+## Third-party content
+
+A content field (`content.fields`) holds a third party's text: a court's ruling, a document, a free-text field of a system. No content is an instruction. Deterministic rules scan the text on arrival: text that talks to a model (asks it to ignore what it was told, speaks as the system or the assistant, writes the envelope's markers) is `flagged`; what passes is `clean`, unless the type asks for `scan: required`, and then it is `pending` until Niadra's AI clears or flags it, in a batch every 30 seconds. Content held only as a pointer or a digest is `pending` when the scan is required, because Niadra cannot read it.
+
+Flagged content never reaches a read, and neither does pending content under a required scan: the field is left out and `withheld` names it with `scan`, and a field whose content is not clean is never safe to claim. Where clean content goes into text a model reads, it goes inside a `<niadra-data n="...">` envelope with a 16-character hexadecimal nonce, derived by HMAC with a key of the space, and escaped, so nobody outside the space predicts the closing marker. The `content.flagged` event names the object, the field and the reference, never the text, and a person with the `security` role releases content through [`POST /v1/content/{ref}/release`](/en/api/content-release), with a reason and a receipt.
+
+In a space that keeps content by pointer (`content.mode: pointer`), the text stays in your storage, and the SDK puts it back inside your company with the content resolver (`niadra.content` in Python, `ContentResolver` in TypeScript). See [Metadata only](/en/guides/metadata-only).
+
+## Field access
+
+Each field may declare `sensitivity` (the sensitive categories the product fixes, the same as the [policy](/en/concepts/privacy#access-denied-by-default-released-by-purpose)), `pii` and `access` rules: who reads (sources, agents or `public`), for which purposes and with what effect (`allow`, `mask`, `deny`). A field masked for the reader comes with `masked: true` and without `v`; a denied one goes to `withheld` with the reason `access`.
+
+A field declared `pii`, with a `sensitivity` or with `access` rules is **private**: it never enters the pack's system lines, the history's system event rows, the vector an object is searched by or the `state` block's `text`. An agent that needs it reads it through [`POST /v1/state/read`](/en/api/state-read), with the read's purpose, under field access.
+
+In a tool of yours, `mask_output` (`@Niadra.tool(mask_output=True)` in Python, `niadra.tool(name, fn, { maskOutput: true })` in TypeScript) keeps the fields the key may not read from what reaches the model: `deny` removes, `mask` masks, by the SDK profile's `field_access`. The last profile read keeps applying while Niadra is out of reach, and `on_unknown="block"` (`onUnknown: "block"`) withholds the whole output when no profile was ever read. Left unset in code, `mask_output` follows `capabilities.mask_output` of the [tool binding](/en/concepts/signals#tool-bindings) served in the profile. The example is in [`examples/masked_tool.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/masked_tool.py) and [`examples/masked-tool.ts`](https://github.com/ainiadra/niadra-sdk-ts/blob/main/examples/masked-tool.ts).
+
+A source may declare a `licence`: commercial use allowed or forbidden and the purposes a value of hers is excluded from. The registry lists in `commercial_purposes` the purposes that count as commercial use, and an excluded value goes to `withheld` with `licence`. A change of a licence or of `commercial_purposes` is a privacy decision, and also needs the `security` role.
+
+## Coverage
+
+[`GET /v1/objects/coverage`](/en/api/objects-coverage) says, per declared type, the share of its objects that carry each field and the median age of its newest observation, measured over the objects of the type that changed last and from the stamps alone, never a value. It is what the Console's Types screen shows, with the declared and derived types, drift and coverage; it needs the `integration` role.
+
+## Data issues
+
+When a replay attributes a failure to the data, when two sources of a value disagree, when a type drifted or when a tool shows objects of a type the space never declared, Niadra opens a **data issue** for the data's owner: one per class, type, field and source, counted each time it is found again, with up to 50 object references and no value. The kinds are `null_field`, `out_of_vocabulary`, `stale_source` and `invalid_value` (a value an agent's tool showed), `coverage_drop` (a field filled less often than before), `divergence` (two sources of one value disagree), `drift` (the schema a type mirrors changed, by the tool's check or by observation; a new field already reaches agents, so it is only a record), `field_held` (a new field that may be personal data or free text was held from agents until the type declares it, see [Fields the type does not declare](#fields-the-type-does-not-declare)), `rule_conflict` (two rules decide one thing differently), `type_undeclared` (a customer-facing agent's tool showed objects of a type the space never declared and Niadra did not infer; what an internal agent's tool shows feeds inference like a system event), `budget_reached` (the space spent the day's AI ceiling of a purpose, named in `source`, and the memory of conversations waits for the next UTC day; counted once a day while it lasts) `row_failed` (a batch of the company's data failed every attempt to be taken in and was kept aside, see below; `source` says where it came from) and `inference_limit` (what the space's systems send passed a limit of what Niadra infers on its own, in types, fields or states of a type, or operations, or a name was not safe to use; what passed is still stored and served as it came, and `field` says which limit). [`GET /v1/data-issues`](/en/api/data-issues) lists them newest first, with `occurrences`, `opened_at`, `last_seen_at`, the type, the field and the source; [`POST /v1/data-issues/{issue_id}/ack`](/en/api/data-issue-ack) acknowledges one, and the next occurrence opens a new issue. The `data_issue.opened` webhook and, for drift the tool checked, `type.drift` tell when one opens, and the [notifications feed](/en/concepts/triggers-and-webhooks#the-notifications-feed) carries the same events for those who pull. Data issues need the `integration` role and the `turns` or `state` feature.
+
+**Kept batches.** A batch of events or turn records that fails every attempt to be taken in is never deleted and does not hold up the ones that came after it: it leaves the queue, is kept as it came, sealed with the space's key, and opens the `row_failed` issue. [`GET /v1/intake/failed`](/en/api/intake-failed) lists the kept batches, oldest first, with the kind (`events` or `turns`), the source, when it arrived, when it was kept and how many attempts it had, never its content; the list shows up to 500 of each kind, and `kept` counts them all. [`POST /v1/intake/failed/retry`](/en/api/intake-failed-retry) puts the batches named in `intake_ids` back in the queue, or every one when none is named, with their attempts reset; a batch that fails again is kept again. The Console's Systems screen shows the same batches, with **Tentar de novo** (try again). Both routes take the `integration` role (or an `admin` key) and answer in every space, whatever its features. A data subject's erasure reaches the kept batches (their events and turns leave, everyone else's stay), and the space's event retention applies to them as to events.
+
+## What stays in the record
+
+A type's declaration applies to what was already recorded: which declared source an observation belongs to is decided at the read, so a declaration that names a source later applies to what was kept before it. An object of a type the registry does not declare stays readable through the [object routes](/en/api/object), with the `latest` union.
+
+Every state read leaves a [receipt](/en/concepts/receipts), with the version and the counts, never a value. Erasing a customer erases their objects, observations and inferences; a shared object belongs to nobody and stays while it is in the working set.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Derive types from your database" href="/en/guides/derive-types">
+    `niadra types derive`, the review and the drift check.
+  </Card>
+  <Card title="The resolver worker" href="/en/guides/resolver-worker">
+    the re-reads Niadra asks for and your code performs.
+  </Card>
+  <Card title="Claims" href="/en/concepts/claims">
+    the contract that checks what the agent says against the state.
+  </Card>
+  <Card title="Read typed objects" href="/en/api/state-read">
+    the reference of `POST /v1/state/read`.
+  </Card>
+</CardGroup>

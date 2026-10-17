@@ -1,0 +1,82 @@
+---
+title: "Semantic Kernel"
+description: "The customer's memory in a kernel: a thread for the ChatCompletionAgent, prompt filters and the kit as a KernelPlugin."
+---
+
+`NiadraKernel` brings three pieces: `register(kernel)` adds the `niadra` plugin and two filters (prompt rendering and function invocation) to the kernel, `thread()` is a `ChatCompletionAgent` thread, and `plugin` is the kit as a `KernelPlugin`. Python only.
+
+## Install
+
+```sh
+pip install 'niadra[semantic-kernel]'   # semantic-kernel 1.44.1 or newer, below 2
+```
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | With a `ChatCompletionAgent`, `memory.thread()` is the agent's thread: on every read the pack (after the agent's own notes, with `agent_memory=`) comes first, which the agent places right after its instructions; then the stored messages; then the `turn_block` at the end. Only the conversation is stored; the Niadra messages are made fresh on every read. With a prompt function (`kernel.invoke_prompt`, `kernel.invoke(function, ...)`), the prompt rendering filter places the same things in the rendered prompt. When you call a chat service yourself, `await memory.chat_history(history)` gives a copy with them |
+| Turns | The thread records the user's messages as the customer's turns and the assistant's text as the agent's, with its usage and model; with a prompt function, the filters record the last user message of the prompt and the function's answer |
+| Tools | `memory.plugin` is a `KernelPlugin` named `niadra` whose functions are the history tools, with the kit's names, descriptions and JSON Schemas, bound to the customer. Semantic Kernel shows the model a function as `plugin-function`: `niadra-search_customer_history` |
+| Verification | `conversation.verify()` before the first context |
+| Handoff | `transferred_to_agent()` and `transferred_to_human()` record a transfer, in a group chat or an orchestration that hands over, or an escalation to a person |
+
+## Minimal example
+
+```python
+"""A Semantic Kernel ChatCompletionAgent with the customer's memory as a thread, filters and a plugin."""
+
+import asyncio
+
+from semantic_kernel import Kernel
+from semantic_kernel.agents import ChatCompletionAgent
+from semantic_kernel.connectors.ai import FunctionChoiceBehavior
+from semantic_kernel.connectors.ai.open_ai import OpenAIChatCompletion
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.semantic_kernel import NiadraKernel
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    memory = NiadraKernel(niadra.conversation("thread-81", subject=phone("+5511912345678")))
+    agent = ChatCompletionAgent(
+        service=OpenAIChatCompletion(ai_model_id="gpt-4.1"),
+        kernel=memory.register(Kernel()),
+        name="acme",
+        instructions="You are Acme's agent.",
+        function_choice_behavior=FunctionChoiceBehavior.Auto(),
+    )
+    thread = memory.thread()
+    response = await agent.get_response(messages="Where is my replacement lid?", thread=thread)
+    print(response.content)
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+
+The same code is in `examples/semantic_kernel_agent.py`.
+
+## Agent memory
+
+`NiadraKernel(conversation, agent_memory=True)` puts the agent's own notes before the customer's context and adds the two tools to the plugin. See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- Works with `Niadra` and `AsyncNiadra` conversations.
+- Nothing here stops the kernel: with Niadra slow or down, the prompt goes out without the pack and a tool answers that the history is unavailable.
+- The extra installs a pre-release of `azure-ai-agents`, which `semantic-kernel` 1.44 requires.
+- Tested against `semantic-kernel` 1.44.1 with the chat service replaced by a fake and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Microsoft Agent Framework" href="/en/integrations/agent-framework">
+    the context provider of AutoGen's successor.
+  </Card>
+  <Card title="Agent memory" href="/en/concepts/agent-memory">
+    the agent's own working notes.
+  </Card>
+</CardGroup>

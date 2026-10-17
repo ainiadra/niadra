@@ -1,0 +1,8 @@
+{
+  "decision": "handoff_to",
+  "decision_id": "0199a3b6-3d00-7e5f-8a71-8c9d0e1f2a05",
+  "valid_for_s": 30,
+  "reasons": [
+    "owner_active"
+  ]
+}

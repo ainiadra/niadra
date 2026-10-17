@@ -1,0 +1,116 @@
+---
+title: "Metadata only"
+description: "Record turns and content with the values in your own storage: Niadra keeps the pointer and the hash, and replay, claim verification and third-party content keep working inside your company."
+---
+
+Some companies cannot let tool arguments, results or the documents an agent wrote leave their own infrastructure: the text of a lawsuit, a quote with health data, a contract. The `pointer` mode serves that without losing what the record gives: the SDK writes each value to **your bucket**, with your credentials, and sends Niadra only the pointer and the digest. Niadra keeps the turn's frame (what was read, called, claimed and decided, with the pins) and never a value; replay and claim verification read the values back inside your company, by digest.
+
+## The three modes
+
+| Mode | What leaves your company | What Niadra keeps | Replay |
+|---|---|---|---|
+| `stored` | The values, encrypted; the text leaves go through the events' masking rules and, with `pii_model`, through the personal data model | The whole record | Yes |
+| `pointer` | The pointer (`s3://...`) and the SHA-256 of each value | The frame, the pointers and the digests | Yes, inside your company |
+| `hash_only` | Only the SHA-256 | The frame and the digests | No; statistics and structural assertions |
+
+The mode is space configuration, in the `recording` document (the `integration` role): a default mode and, optionally, one per source. A source may always keep less than the space allows, never more: a turn sent in a mode that keeps more is refused with `content_mode_refused`, and the SDK sends it again with digests only. Changing the mode to one that keeps more also needs the `security` role. A bronze record, from [OpenTelemetry](/en/guides/opentelemetry), is `hash_only` by default.
+
+## Turning on `pointer` mode in the SDK
+
+The SDK picks the mode in this order: `content_mode` of the turn options, when you fix it; `pointer` as soon as a store is configured; the mode the space's recording names for the source; `stored`. The upload runs on the sender, in the background, never on the agent's path.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra
+
+niadra = Niadra()
+niadra.turns.store(s3_bucket="s3://acme-agent-turns/prod")  # boto3, with your credentials from the environment
+# or any callable put(key, data) -> pointer
+niadra.turns.store(put=lambda key, data: my_store.write(key, data))
+```
+```typescript TypeScript
+import { Niadra } from "@niadra/sdk";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+
+const niadra = new Niadra();
+const s3 = new S3Client({});
+niadra.turns.store(async (key, data) => {
+  await s3.send(new PutObjectCommand({ Bucket: "acme-agent-turns", Key: `prod/${key}`, Body: data, ContentType: "application/json" }));
+  return `s3://acme-agent-turns/prod/${key}`;
+});
+```
+</CodeGroup>
+
+Each value goes to `<turn_id>/<blob>.json`, as canonical JSON (RFC 8785), and the pointer returned enters the record next to the digest. A record whose blobs could not all be written leaves as `hash_only`, `partial`, instead of waiting. The digest is the SHA-256 of the value's canonical JSON, so the same value has the same digest in any producer; before computing it, the SDK may apply the normalizers the space's recording declares, to drop an order id or a timestamp that changes on every call, so a call's `args_hash` matches across replays.
+
+## What Niadra still sees
+
+The frame: the turn, the agent, the kind, the times, the build and the pins, what was read by version, the calls with their name, `args_hash`, latency and state, the typed state observations with their provenance (the values of observed fields are part of the frame, because they are your objects' state, not content), the interactions, the claim verdicts, the coordination decisions and effects, the ids of the conversation's events and the flags. What Niadra does not see: the arguments, the results, the text of the reads, the documents written. A `pointer` or `hash_only` record is taken even with Niadra's storage unavailable, because the frame is all of it; deduplication by `turn_id` happens once the storage is back.
+
+## Replay inside your company
+
+In a [replay](/en/guides/replay-in-ci), the case carries the record with the pointers and the digests, and the runner reads each pointer with the SDK's **content resolver**, with your credentials, and checks the digest before using it: a value that cannot be read or does not match is an infrastructure error, never a failing assertion.
+
+<CodeGroup>
+```python Python
+import boto3
+
+s3 = boto3.client("s3")
+
+
+def fetch(pointer: str) -> bytes:
+    bucket, key = pointer.removeprefix("s3://").split("/", 1)
+    return s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+
+
+niadra.content.register(fetch)  # the Replayer reads pointers through it
+```
+```typescript TypeScript
+import { GetObjectCommand } from "@aws-sdk/client-s3";
+
+niadra.content.register(async (pointer) => {
+  const [bucket, key] = pointer.replace("s3://", "").split(/\/(.+)/);
+  const object = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  return await object.Body!.transformToString();
+});
+```
+</CodeGroup>
+
+The pack of the time is the blob of the record's `pack` read, read the same way. The case also carries the conversation's history masked, so the runner has everything it needs without any recorded value passing through Niadra on the way back.
+
+## Third-party content by pointer
+
+The same holds for the [content fields](/en/concepts/object-types#third-party-content) of declared types: with `content.mode: pointer`, a court's text or a document stays in your storage, and a state read carries only the `content` marker (`mode`, `sha256`, `pointer`, `scan`). `niadra.content.fill(context)` fills the state view with the texts, checking each digest, and the text enters the prompt inside the `<niadra-data>` envelope, like any third-party content. Content by pointer stays `pending` when the type requires a scan (`scan: required`), because Niadra cannot read it: the scan, in that case, is yours, or the type uses `scan: rules` over what arrives in clear.
+
+## Counterfactual and anchors
+
+The [tool counterfactual](/en/concepts/outcomes#the-tool-counterfactual) runs the recorded calls live inside your company and reports positions and overlaps only, so it works the same in any mode. The [claim contract](/en/concepts/claims#the-text-anchor)'s text anchor compares the quote with the document the runner has in hand, put back by pointer.
+
+## What stays with Niadra in each mode
+
+| | `stored` | `pointer` | `hash_only` |
+|---|---|---|---|
+| Turn frame, pins, flags | yes | yes | yes |
+| Tool arguments and results | encrypted and masked | pointer and digest | digest |
+| Text of the context read | encrypted | pointer and digest | digest |
+| Typed state observations | yes | yes | yes |
+| Claim verdicts, decisions, effects, interactions | yes | yes | yes |
+| The day's index for your audit chain | yes | yes | yes |
+| Retention | the tier's; erasing a person erases their turns by the conversation's prefix | the tier's at Niadra; in your bucket, yours | the tier's |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Turn records" href="/en/concepts/turn-records">
+    the content modes and the SDK's queue.
+  </Card>
+  <Card title="Replay in your CI" href="/en/guides/replay-in-ci">
+    the runner that reads the pointers back.
+  </Card>
+  <Card title="The resolver worker" href="/en/guides/resolver-worker">
+    the content resolver and the state one.
+  </Card>
+  <Card title="Privacy" href="/en/concepts/privacy">
+    where each copy lives and for how long.
+  </Card>
+</CardGroup>

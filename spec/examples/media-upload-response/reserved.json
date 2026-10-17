@@ -1,0 +1,9 @@
+{
+  "media_ref": "med_0192b8a5c4e37d1f9a2b6c8d0e4f1a3b_0192b8a6d1f07c3e8b5a9d2c4e6f8a1b",
+  "upload_url": "https://acme-media.s3.sa-east-1.amazonaws.com/media/5f0c2e1a-7b3d-4c9e-8a1f-2d3b4c5e6f70/0192b8a5-c4e3-7d1f-9a2b-6c8d0e4f1a3b/0192b8a6-d1f0-7c3e-8b5a-9d2c4e6f8a1b?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20260922T170702Z&X-Amz-Expires=900&X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost%3Bx-amz-checksum-sha256&X-Amz-Signature=3c1d9e7f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c5d",
+  "upload_headers": {
+    "Content-Type": "audio/wav",
+    "x-amz-checksum-sha256": "nyxNjhp7PG1eTzorHA2ej3prXE0+LxoLnI1+b1pLPC0="
+  },
+  "expires_at": "2026-09-22T17:22:02Z"
+}

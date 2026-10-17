@@ -1,0 +1,97 @@
+---
+title: "Working memory"
+description: "An agent's working state between turns, with a declared schema: written by code, never by a model, maskable, exportable and erasable with proof."
+---
+
+An agent's code keeps a small working state between turns: the step of a form, the offer it showed, the cart it is building, which sub-agent is on which part. Kept by the agent alone, that state is lost when the process restarts and invisible to your company's governance. Kept as an opaque blob in a memory, it can be neither masked nor erased with proof. **Working memory** is that state with a declared schema: Niadra does not interpret what it means, but knows its fields, so it can mask, retain, export and erase each one.
+
+It differs from [agent memory](/en/concepts/agent-memory), the working notes about the trade, which never speak of a customer and may enter the prompt. Working memory speaks of a conversation, a task, an object or a customer, and never enters a prompt.
+
+## Turning it on and off
+
+Working memory is the space's `agent_state` feature, on by default; a space turns it off in the `features` document, by the `security` role. The agent's key needs the `agent_state` scope. The schema is a type with `ownership: agent` in the `object-types` document ([Object types](/en/concepts/object-types)): the type named like the agent or, when the registry declares exactly one type of that ownership, that one; without one, no field is declared, and every write is refused with `not_declared_field`.
+
+## The schema and the scope
+
+The type declares its fields like any type, `pii`, `sensitivity` and retention included, and an `agent_state` section:
+
+| Member | What it says |
+|---|---|
+| `scope` | What one state belongs to: `conversation`, `task`, `object` or `subject` |
+| `write` | The modes allowed: `cas`, `merge_by_key` or both (the default) |
+
+```json
+{
+  "type": "shopping_assistant_state",
+  "ownership": "agent",
+  "fields": {
+    "step": { "type": "enum" },
+    "offer": { "type": "string" },
+    "cart_note": { "type": "text", "pii": true }
+  },
+  "agent_state": { "scope": "conversation", "write": "both" },
+  "retention": { "state": "30d", "cart_note": "7d" }
+}
+```
+
+A state is named by its scope (`kind` and `id`: the conversation's or the task's id, the object as `type:namespace:id`, or the canonical form of one of the customer's handles) and by the agent that writes it. The scope travels in the body, never in a URL, because a conversation id can look like a phone number, and Niadra keeps it only as a keyed hash. The state is written by code, never by a model: Niadra does not offer it as a model's tool in any protocol, it never enters a context or an extraction, and the Console shows its size, version and dates, never its content (the profile's working memory tab, and [`GET /v1/profiles/{profile_id}/agent-state`](/en/api/profile-agent-state)).
+
+## Writing
+
+[`PUT /v1/agent-state`](/en/api/agent-state-write) takes the scope, the agent, the mode, `if_version` and `body`, and `subject` when the scope does not name the customer, so the erasure and the subject's data package find the state.
+
+- **Compare-and-swap** (`cas`): `body` is the whole new state, and the write applies only when the stored version is `if_version` (0 when the state must not exist yet); otherwise the answer is 412 `agent_state_conflict` and nothing changes. A field left out of `body` is gone.
+- **Merge by key** (`merge_by_key`): each top-level field of `body` replaces that field whole, with no deeper merge; a field written as exactly `{"$delete": true}` is removed; the fields `body` does not name stay. Sub-agents writing different fields in parallel never lose each other's writes, and a removed field never comes back unless someone writes it again. With `if_version`, the merge applies only at that version.
+
+Every stored write adds 1 to the version, which starts at 1. The answer is `{stored, version, reason}`. A field the schema does not declare is refused (`stored: false`, `reason: not_declared_field`), and a `pii` field is masked at write by the space's rules. A state is kept whole, with no size cap: Niadra never stores part of a state or drops a write because the state grew. The only bound is the request's own size, and a body over it is refused with an error before anything is stored, with the previous state untouched. The check order is the version (412) and the declared fields.
+
+<CodeGroup>
+```python Python
+state = conversation.agent_state.get()  # version 0 and an empty body before the first write
+written = conversation.agent_state.put({"step": "sizes", "offer": "familia-plus"})  # merge_by_key by default
+if not written.stored:
+    print(written.reason)  # not_declared_field or conflict
+
+# Compare-and-swap of the whole state, at the version read
+written = conversation.agent_state.put({"step": "checkout"}, mode="cas", if_version=state.version)
+# Remove one field, keep the others
+conversation.agent_state.put({"offer": {"$delete": True}})
+```
+```typescript TypeScript
+import { DELETE } from "@niadra/sdk";
+
+const state = await convo.agentState.get(); // version 0 and an empty body before the first write
+const written = await convo.agentState.put({ step: "sizes", offer: "familia-plus" }); // merge_by_key by default
+if (!written.stored) console.log(written.reason); // not_declared_field or conflict
+
+// Compare-and-swap of the whole state, at the version read
+await convo.agentState.put({ step: "checkout" }, { mode: "cas", ifVersion: state.version });
+// Remove one field, keep the others
+await convo.agentState.put({ offer: DELETE });
+```
+</CodeGroup>
+
+## Reading
+
+[`POST /v1/agent-state/read`](/en/api/agent-state-read) with the scope and the agent returns `body`, `version` and `updated_at`; a state never written reads as an empty body at version 0. **A writer reads its own writes**: after a `stored: true` at version N, every later read of the same scope and agent returns N or a newer version, even across Niadra's two stores, and a read never waits for the database. The SDK keeps, per scope and agent, the last version it wrote or read, and serves the higher of that and what it reads. With Niadra out of reach, it keeps the version locally and sends the write again later with the same `if_version`; a compare-and-swap that then conflicts is reported to the code (the `conflicts` property of `agent_state` in Python and of `agentState` in TypeScript), never merged in silence. In a replay, the state starts empty and the writes stay with the runner.
+
+## Retention and erasure
+
+A state is kept until the agent's type sets a retention: `retention.state` says how long it stays after its last write (any duration; `while_in_working_set` keeps it 30 days after its last write), and `valid_until` comes back null while no retention is set. A field may be kept for less (`retention.<field>`), counted from its own last write: an expired field is never served, leaves the state with the next write and Niadra removes it from what it stores. Erasing a customer erases the states of their scope and the ones naming them in `subject`; erasing a conversation erases the states of that conversation's scope. The subject's data package carries their states, by declared field.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Object types and state" href="/en/concepts/object-types">
+    the type with `ownership: agent` that gives the schema.
+  </Card>
+  <Card title="Agent memory" href="/en/concepts/agent-memory">
+    the notes about the trade, which enter the prompt and never speak of a customer.
+  </Card>
+  <Card title="Write working memory" href="/en/api/agent-state-write">
+    the reference of `PUT /v1/agent-state`.
+  </Card>
+  <Card title="Privacy" href="/en/concepts/privacy">
+    the erasure and the subject's data package.
+  </Card>
+</CardGroup>

@@ -1,0 +1,60 @@
+---
+title: "Claude Desktop"
+description: "Your space's MCP server in Claude Desktop, through the mcp-remote bridge, which sends the key and the subject token as headers."
+---
+
+The space's MCP server requires two headers, `Authorization` and `Niadra-Subject-Token`. Claude Desktop's connector screen takes a URL and OAuth credentials, with no field for a custom header, so the connection goes through the `mcp-remote` bridge, a local MCP server that forwards each request to the remote address with the headers you configure. Use a key of the **sandbox** space (`nia_sk_test_...`), never a `live` one.
+
+## What the connection needs
+
+| Header | Value | Where it comes from |
+|---|---|---|
+| `Authorization` | `Bearer` and the source key | The Console, under **Agents and keys**, in the sandbox space |
+| `Niadra-Subject-Token` | A signed token that binds the connection to a test customer | [`POST /v1/subject-tokens`](/en/api/subject-tokens), with the same key; valid for 15 minutes |
+
+## Connect
+
+In `claude_desktop_config.json` (Settings > Developer > Edit Config):
+
+```json
+{
+  "mcpServers": {
+    "niadra": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://acme-sandbox.us-east-2.api.niadra.com/mcp",
+        "--header",
+        "Authorization:${NIADRA_AUTH}",
+        "--header",
+        "Niadra-Subject-Token:${NIADRA_SUBJECT_TOKEN}"
+      ],
+      "env": {
+        "NIADRA_AUTH": "Bearer nia_sk_test_us-east-2_acme-sandbox_...",
+        "NIADRA_SUBJECT_TOKEN": "<token from POST /v1/subject-tokens>"
+      }
+    }
+  }
+}
+```
+
+The header value goes through an environment variable, with no space in the argument: it is the form `mcp-remote` documents for Claude Desktop, which splits arguments on spaces. Restart Claude Desktop; the tools show up in the conversation's tools menu.
+
+## Limits
+
+- The token lasts 15 minutes: once it expires, the customer tools answer `unauthenticated`. Mint another, replace it in `env` and restart Claude Desktop. The two agent memory tools work without a token, when the space turns them on.
+- `mcp-remote` is an npm package maintained outside Niadra; it needs Node installed.
+- The customer is always the token's. The server answers `POST` only.
+- Every tool call leaves a receipt in the space.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="MCP with any LLM" href="/en/guides/mcp">
+    the tools, the token and what each one requires.
+  </Card>
+  <Card title="Claude Code" href="/en/integrations/mcp/claude-code">
+    the direct connection, without a bridge.
+  </Card>
+</CardGroup>

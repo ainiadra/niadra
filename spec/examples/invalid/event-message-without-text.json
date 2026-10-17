@@ -1,0 +1,1 @@
+{"idempotency_key": "k1", "channel": "whatsapp", "handles": [{"type": "email", "value": "m@example.com"}], "speaker": {"role": "customer"}, "content": {"type": "text", "text": ""}, "occurred_at": "2026-09-22T14:02:11Z"}

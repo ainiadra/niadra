@@ -1,0 +1,5 @@
+{"version": "cv_8f2c41d9a07b",
+ "attributes": [{"id": "z1", "name": "size.pants", "value": "38", "confidence": 0.9, "source": "kept",
+                 "apply": "always"}],
+  "text": "<restrições>\n- pants: 38\n</restrições>"
+}

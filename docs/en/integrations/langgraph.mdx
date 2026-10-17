@@ -1,0 +1,84 @@
+---
+title: "LangGraph"
+description: "The customer's memory in a LangGraph agent, as create_agent middleware, with nothing in the graph's state."
+---
+
+`NiadraMiddleware` wraps every model call of the agent built by `langchain.agents.create_agent`: the pack goes into the system message, the turns are recorded and the history tools come along. Python only; in JavaScript, LangGraph.js uses `withNiadraContext()` from [LangChain](/en/integrations/langchain).
+
+## Install
+
+```sh
+pip install 'niadra[langgraph]'   # langgraph 1.2, langchain 1.4 and langchain-core 1.6 or newer, below 2
+```
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | The pack is appended to the system message, which keeps your instructions first, and the `turn_block` goes after the messages. Nothing is written to the graph's state: the checkpointer never stores a pack |
+| Turns | The customer's messages are recorded before the call, keyed by their position in the conversation (the history the checkpointer replays is never recorded twice); the model's answer, with its `usage_metadata`, after it |
+| Tools | The middleware brings the history tools (and the agent memory tools) as its own `tools`, so `create_agent` offers them without you listing them |
+| Verification | `conversation.verify()` before invoking the agent |
+| Handoff | `transferred_to_agent()` and `transferred_to_human()` record the transfer; call them where the graph hands the conversation over |
+
+For the older `langgraph.prebuilt.create_react_agent`, pass `pre_model_hook=pre_model_hook(conversation)`: it gives the model the same messages through `llm_input_messages`, again without touching state; record the turns with the `NiadraCallbackHandler` from `niadra.integrations.langchain`.
+
+## Minimal example
+
+```python
+"""A LangGraph agent (langchain.agents.create_agent) with the customer's memory as middleware."""
+
+import asyncio
+
+from langchain.agents import create_agent
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.langgraph import NiadraMiddleware
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    async with niadra.conversation("thread-81", subject=phone("+5511912345678")) as conversation:
+        agent = create_agent(
+            "openai:gpt-4.1",
+            system_prompt="You are Acme's agent.",
+            middleware=[NiadraMiddleware(conversation)],
+        )
+        result = await agent.ainvoke(
+            {"messages": [{"role": "user", "content": "Where is my replacement lid?"}]}
+        )
+        print(result["messages"][-1].content)
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+
+The same code is in `examples/langgraph_agent.py`.
+
+## Agent memory
+
+`NiadraMiddleware(conversation, agent_memory=True)` puts the agent's own notes right before the customer's context and adds `search_agent_memory` (and `remember`, with `write`) to the tools. See [Agent memory](/en/concepts/agent-memory).
+
+## Turn records
+
+With the `turns` feature on in the space (it ships on), the `NiadraMiddleware` with `turns=True` records each agent run as a [turn record](/en/concepts/turn-records): `before_agent` opens the turn, `wrap_tool_call` records each tool call by the provider's id and `after_agent` closes it with the model calls and their tokens. In LangGraph.js, the `NiadraCallbackHandler` of `@niadra/sdk/langchain` with `turns: true` does the same. In a [replay](/en/guides/replay-in-ci), the graph's tools answer from the record in Python, and in JavaScript the ones passed through `recordTools()`. A turn never waits for Niadra and never repeats the conversation's text.
+
+## Limits
+
+- No `BaseStore` of its own: Niadra is not the graph's state store.
+- No separate node for LangGraph.js: `withNiadraContext()` in `@niadra/sdk/langchain` already gives the model node its context without writing it into the graph's checkpointed state.
+- Nothing here fails the agent: with Niadra slow or down, the model call goes on without the pack.
+- Tested against `langgraph` 1.2 and `langchain` 1.4 with a fake chat model and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="LangChain" href="/en/integrations/langchain">
+    the runnable and the callback handler, in Python and in JavaScript.
+  </Card>
+  <Card title="Internal agents" href="/en/guides/internal-agents">
+    tasks, objects and actions that close open items.
+  </Card>
+</CardGroup>

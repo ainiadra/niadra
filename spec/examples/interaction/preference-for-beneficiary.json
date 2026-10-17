@@ -1,0 +1,10 @@
+{
+  "kind": "preference",
+  "for": "beneficiary:dep-1",
+  "attr": "plan.network",
+  "op": "not_in",
+  "values": ["rede-x"],
+  "strength": "must_not",
+  "scope": "session",
+  "source": "tool_args"
+}

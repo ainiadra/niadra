@@ -1,0 +1,1 @@
+{"kind": "action", "idempotency_key": "k2", "channel": "billing", "handles": [{"type": "email", "value": "m@example.com"}], "speaker": {"role": "ai_agent"}, "occurred_at": "2026-09-22T14:06:00Z"}

@@ -1,0 +1,18 @@
+{
+  "type": "event",
+  "kind": "action",
+  "idempotency_key": "billing-agent/credit/0823",
+  "channel": "billing",
+  "task_id": "task-dispute-0823",
+  "handles": [{"type": "system_id", "value": "C-1042", "scope": "crm"}],
+  "object_refs": [{"type": "invoice", "namespace": "erp", "id": "0823"}],
+  "speaker": {"role": "ai_agent", "id": "billing-agent"},
+  "occurred_at": "2026-09-22T14:06:00-03:00",
+  "visibility": "public",
+  "action": {
+    "operation": "credit",
+    "result": "40.00 BRL credited on the August invoice",
+    "purpose": "billing_dispute",
+    "closes": {"object": {"type": "invoice", "namespace": "erp", "id": "0823"}, "operation": "credit"}
+  }
+}

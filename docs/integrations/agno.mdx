@@ -1,0 +1,80 @@
+---
+title: "Agno"
+description: "A memória do cliente num agente do Agno, como instruções dinâmicas, Functions e hooks de run."
+---
+
+`NiadraAgno` entrega `instructions` (uma instrução dinâmica com o contexto), `tools` (o kit como `Function`s do Agno) e os hooks `pre_hook` e `post_hook` que registram os turnos. Só em Python.
+
+## Instalar
+
+```sh
+pip install 'niadra[agno]'   # agno 3.0.11 ou mais novo, abaixo da 4
+```
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | `instructions` é uma instrução dinâmica: as suas instruções primeiro, depois as notas do agente (com `agent_memory=`), o contexto e o `turn_block`, lidos a cada run. Com uma conversa de `AsyncNiadra` ela é uma coroutine function, então use `arun` |
+| Turnos | `pre_hook` registra a entrada do run como turno do cliente e `post_hook` a resposta como turno do agente, com o uso e o modelo do run |
+| Ferramentas | `tools`: `Function`s do Agno com os nomes, descrições e esquemas do kit, amarradas ao cliente |
+| Verificação | `conversation.verify()` antes do run |
+| Transbordo | `transferred_to_agent()` e `transferred_to_human()` registram a transferência, num time que delega ou na passagem para uma pessoa |
+
+## Exemplo mínimo
+
+```python
+"""An Agno agent with the customer's memory as instructions, tools and hooks."""
+
+import asyncio
+
+from agno.agent import Agent
+from agno.models.openai import OpenAIChat
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.agno import NiadraAgno
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    memory = NiadraAgno(
+        niadra.conversation("thread-81", subject=phone("+5511912345678")),
+        instructions="You are Acme's agent.",
+    )
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4.1"),
+        instructions=memory.instructions,
+        tools=memory.tools,
+        pre_hooks=[memory.pre_hook],
+        post_hooks=[memory.post_hook],
+    )
+    print((await agent.arun("Where is my replacement lid?")).content)
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+
+O mesmo código está em `examples/agno_agent.py`.
+
+## Memória do agente
+
+`NiadraAgno(conversation, instructions=..., agent_memory=True)` põe as notas do próprio agente entre as suas instruções e o contexto do cliente e acrescenta as duas ferramentas. Veja [Memória do agente](/concepts/agent-memory).
+
+## Limites
+
+- A memória e o armazenamento do próprio Agno continuam do Agno; a Niadra é a memória da empresa sobre o cliente.
+- Nada aqui derruba o run: sem contexto, `instructions` devolve só o seu texto.
+- Testado contra `agno` 3.0.11 com o modelo substituído por um fake e a Niadra no emulador.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Navegação do histórico" href="/concepts/history">
+    as três ferramentas que o agente recebe.
+  </Card>
+  <Card title="Memória do agente" href="/concepts/agent-memory">
+    as notas de trabalho do próprio agente.
+  </Card>
+</CardGroup>

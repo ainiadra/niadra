@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/suppression-list.v0.json",
+  "title": "Niadra Suppression List v0",
+  "description": "A page of changes to the list of subjects not to be contacted, keyed per reading source. See spec/suppression-list.md.",
+  "$defs": {
+    "ContactWindow": {
+      "additionalProperties": false,
+      "description": "The local hours a suppression applies in (the suppression-list spec, 6.1): from `from` up to `to`, in the IANA zone `tz`, on the ISO weekdays `days` (1 is Monday; null for every day). A window whose `to` is not after its `from` crosses midnight and belongs to the day it starts on.",
+      "properties": {
+        "from": {
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "title": "From",
+          "type": "string"
+        },
+        "to": {
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "title": "To",
+          "type": "string"
+        },
+        "tz": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Tz",
+          "type": "string"
+        },
+        "days": {
+          "anyOf": [
+            {
+              "items": {
+                "maximum": 7,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 7,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Days"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "tz"
+      ],
+      "title": "ContactWindow",
+      "type": "object"
+    },
+    "Suppression": {
+      "additionalProperties": false,
+      "description": "One entry of the suppression list: `key` is the subject's handle keyed with the reading source's salt (the suppression-list spec); `removed` takes the entry `id` out of the reader's copy. The reason stays with the producer: a vendor learns that it may not contact, never why.",
+      "properties": {
+        "id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "key": {
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "purpose": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}$",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "channel": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,39}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channel"
+        },
+        "since": {
+          "format": "date-time",
+          "title": "Since",
+          "type": "string"
+        },
+        "until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Until"
+        },
+        "window": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContactWindow"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "removed": {
+          "default": false,
+          "title": "Removed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "key",
+        "purpose",
+        "since"
+      ],
+      "title": "Suppression",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "salt_id": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Salt Id",
+      "type": "string"
+    },
+    "reset": {
+      "default": false,
+      "title": "Reset",
+      "type": "boolean"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/Suppression"
+      },
+      "title": "Items",
+      "type": "array"
+    },
+    "next_cursor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Next Cursor"
+    }
+  },
+  "required": [
+    "salt_id",
+    "items"
+  ],
+  "type": "object"
+}

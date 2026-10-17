@@ -1,0 +1,18 @@
+/*
+ * Neutral grays, as in the Agno documentation. Mintlify mixes the primary color
+ * (the brand's olive green) into every gray, and the dark background came out greenish.
+ * The brand color stays only where it has a job: links, the active menu item and buttons.
+ */
+:root {
+  --gray-50: 250 250 250 !important;
+  --gray-100: 244 244 245 !important;
+  --gray-200: 228 228 231 !important;
+  --gray-300: 212 212 216 !important;
+  --gray-400: 161 161 170 !important;
+  --gray-500: 113 113 122 !important;
+  --gray-600: 82 82 91 !important;
+  --gray-700: 63 63 70 !important;
+  --gray-800: 39 39 42 !important;
+  --gray-900: 24 24 27 !important;
+  --gray-950: 17 17 19 !important;
+}

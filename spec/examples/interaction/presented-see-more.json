@@ -1,0 +1,13 @@
+{
+  "kind": "presented",
+  "exposure_id": "0192b3c4-6a7b-7c8d-9e0f-102132435465",
+  "list_id": "search-7f2c",
+  "list_kind": "search_results",
+  "page": 2,
+  "offset": 3,
+  "items": [
+    {"pos": 4, "ref": "item_variant:loja:222", "team": "a"},
+    {"pos": 5, "ref": "item_variant:loja:333", "team": "b"}
+  ],
+  "delivered_at": "2026-09-29T14:03:40.000Z"
+}

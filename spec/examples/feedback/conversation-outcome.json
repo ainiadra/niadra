@@ -1,0 +1,10 @@
+{
+  "idempotency_key": "0192b8a7-9d0e-7f33-a1b2-c3d4e5f6a7b8",
+  "subject": {
+    "type": "phone_e164",
+    "value": "+5511987654321"
+  },
+  "action": "conversation_outcome",
+  "conversation_id": "wa-8812",
+  "value": "resolved"
+}

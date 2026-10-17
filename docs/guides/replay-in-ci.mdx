@@ -1,0 +1,156 @@
+---
+title: "Replay no seu CI"
+description: "Rode de novo conversas reais com a memória da época, dentro da sua empresa, a cada mudança de prompt, modelo ou dados, e receba um veredito estatístico em vez de um teste que falha às vezes."
+---
+
+Um time que troca um prompt, um modelo ou os dados que um agente consulta quer saber, antes de a mudança chegar aos clientes, se o agente ainda faz o que fazia nas conversas que importaram. Rodar um turno real uma vez diz pouco: modelos não são determinísticos, e um teste que falha uma vez em cinco é ruído, a menos que falhasse menos antes. O **replay** transforma [registros de turno](/concepts/turn-records) em **cenários**, roda cada turno N vezes dentro da sua empresa e transforma as N execuções num **veredito** estatístico. A Niadra orquestra: guarda os cenários, serve cada turno como um caso com a build em que ele rodou e decide o veredito. O seu CI executa: o executor do SDK busca os valores gravados de onde eles moram, roda o agente com as ferramentas interceptadas e avalia asserções estruturais sobre o registro novo. Nenhum valor sai da sua empresa, e nada do que o agente diz num replay vai a um cliente.
+
+## Antes de começar
+
+- A funcionalidade `turns` ligada no espaço, e turnos gravados em modo `stored` ou `pointer`, com fidelidade `gold` (o SDK, não OpenTelemetry) e os pinos que o documento `recording` exige (`prompts` e `model` por padrão). Um turno `hash_only`, `bronze`, `partial` ou sem um pino exigido é guardado, mas não reproduzível: o visualizador e [`GET /v1/turns/{turn_id}`](/api/turn) dizem por quê em `replay_blockers`.
+- Uma chave com o escopo `replay`, numa fonte própria do CI; as rotas aceitam também uma pessoa com o papel `integration` ou `security`.
+- Ferramentas gravadas com `@Niadra.tool` (Python) ou `Niadra.tool` (TypeScript): é assim que o executor as intercepta.
+
+## 1. Escolha os turnos
+
+Um cenário guarda até 50 turnos e até 50 asserções. Os turnos são copiados para fora da camada deles quando o cenário é criado e ficam até um apagamento, ou `scenario_days` depois da última execução se você definir esse prazo (no mínimo 7 dias, sem máximo); um turno que saiu do armazenamento responde `replay_expired`.
+
+Três jeitos de criar um:
+
+<CodeGroup>
+```python Python
+from niadra.models.turns import ScenarioCreate, ScenarioFromReport
+
+# From turns you picked in the viewer
+scenario = niadra.api.create_scenario(ScenarioCreate(name="quote-flow", turn_ids=["01J9...", "01J9..."]))
+
+# From a bug report: the conversation's turns, with assertions suggested from the description's words
+scenario = niadra.api.scenario_from_report(ScenarioFromReport(
+    conversation_id="wa-8812", name="wrong-deadline", description="The agent stated a deadline three days off.",
+))
+```
+```typescript TypeScript
+// From turns you picked in the viewer
+const scenario = await niadra.api.createScenario({ name: "quote-flow", turn_ids: ["01J9...", "01J9..."] });
+
+// From a bug report: the conversation's turns, with assertions suggested from the description's words
+const fromReport = await niadra.api.scenarioFromReport({
+  conversation_id: "wa-8812", name: "wrong-deadline", description: "The agent stated a deadline three days off.",
+});
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/scenarios/from-report" \
+  -H "Authorization: Bearer $NIADRA_REPLAY_KEY" -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"conversation_id": "wa-8812", "name": "wrong-deadline", "description": "The agent stated a deadline three days off."}'
+```
+</CodeGroup>
+
+Sem asserções, a Niadra as **sugere** por regra, a partir do quadro de cada turno e nunca dos valores: `tool_called` para cada ferramenta que respondeu `ok`, `hard_respected` quando o turno reportou restrições aplicadas, `no_denial_with_results` quando um resultado mostrou itens, `claims_traced` e `claims_match_state` quando houve afirmações, `effect_once` quando houve efeitos, `handoff_when` quando o turno criou uma transferência e `budget` com o dobro das chamadas gravadas. De um relato, as palavras da descrição (uma negativa, um preço ou um prazo, uma promessa, algo feito duas vezes, um humano) sugerem a asserção correspondente, e a descrição é lida e nunca guardada. Uma asserção sugerida vem com `suggested: true`; ajuste, tire ou acrescente por [`PATCH /v1/scenarios/{scenario_id}`](/api/scenario-update), que soma um à versão.
+
+## 2. As asserções
+
+Cada asserção é `{id, kind, args, turn_id?}`: com `turn_id`, vale para aquele turno; sem, para todos. O executor avalia cada uma sobre o registro do turno reproduzido e o texto que ele emitiu, e o resultado é `pass`, `fail` ou `not_checked`, que nunca é falha:
+
+| Tipo | `args` | Passa quando |
+|---|---|---|
+| `tool_called` | `tool`, `min` (1) | Ao menos `min` chamadas de `tool` responderam `ok` |
+| `tool_not_called` | `tool` | Nenhuma chamada de `tool` |
+| `hard_respected` | | Toda chamada que reportou `applied` tem `violations: 0` |
+| `no_denial_with_results` | `lang` | Nenhum resultado mostrou itens, ou o texto não tem uma frase de negativa do idioma ("não temos", "esgotado", "out of stock") |
+| `claims_traced` | | Toda afirmação tem evidência |
+| `claims_match_state` | | Toda afirmação é `matched`, `quoted_found` ou `anchored` |
+| `no_promise_without_action` | `lang` | O texto não tem uma frase de promessa ("vou enviar", "te retorno"), ou o turno registrou um efeito ou uma transferência |
+| `expected_in_topk` | `ref`, `k`, `list_id` | Uma lista apresentada mostra `ref` até a posição `k` |
+| `handoff_when` | `expected` (true) | O turno criou uma transferência exatamente quando `expected` diz |
+| `effect_once` | `key` | Nenhuma chave de efeito chega a `done` duas vezes; com `key`, essa chave chega uma vez |
+| `budget` | `max_tool_calls`, `max_model_calls`, `max_tokens`, `max_cost_usd`, `max_latency_ms` | Cada contagem dada fica no limite |
+| `lexicon` | `must_include`, `must_not_include`, `lang` | O texto tem toda frase de uma lista e nenhuma da outra |
+| `tools_offered_match` | `tools` | As ferramentas oferecidas ao modelo são exatamente `tools` |
+
+## 3. Rode no CI
+
+O executor do SDK pede cada caso, confere os pinos, busca os blobs pelo digest, roda o agente com as ferramentas respondendo do registro e reporta a execução; a Niadra devolve o veredito. `--agent` nomeia uma função que cria um agente novo por execução, que recebe a entrada do caso e devolve o texto que emitiu; `--build` nomeia a build em execução, os mesmos pinos que os turnos de produção fixam.
+
+<CodeGroup>
+```sh Python
+pip install niadra
+niadra replay --agent app.agent:build_agent --build app.agent:BUILD \
+  --scenario sc_01J9... --scenario sc_01JA... --runs 5
+# 0 when the verdict is pass or flaky, 1 on regression, 2 on pin_mismatch or infrastructure_error
+```
+```sh TypeScript
+npm install @niadra/sdk
+npx niadra replay --agent ./dist/agent.js:buildAgent --build ./dist/agent.js:BUILD \
+  --scenario sc_01J9... --runs 5
+```
+```python Python (in code)
+from niadra.replay import Replayer, ReplayInput
+
+def build_agent():
+    def agent(given: ReplayInput | None = None) -> str:
+        return run_my_agent(given.text if given else "")  # tools decorated with @Niadra.tool answer from the record
+    return agent
+
+run = Replayer(niadra, build_agent, build=BUILD).run(["sc_01J9..."], runs=5)
+print(run.verdict, run.scenarios)
+```
+```typescript TypeScript (in code)
+import { Replayer } from "@niadra/sdk";
+
+const run = await new Replayer(niadra, () => (input) => runMyAgent(input.text ?? ""), { build: BUILD }).run(["sc_01J9..."], { runs: 5 });
+console.log(run.verdict, run.scenarios);
+```
+</CodeGroup>
+
+Um exemplo de workflow do GitHub Actions, com a chave de replay num segredo:
+
+```yaml
+- run: pip install niadra -e .
+- run: niadra replay --agent app.agent:build_agent --build app.agent:BUILD --scenario ${{ vars.NIADRA_SCENARIOS }} --runs 5
+  env:
+    NIADRA_API_KEY: ${{ secrets.NIADRA_REPLAY_KEY }}
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+### O que acontece numa execução
+
+- **A conferência dos pinos.** Para todo pino fora de `vary`, a build em execução e a gravada precisam ser iguais quando a gravação exige o pino, e quando os dois lados o têm. Uma diferença responde 422 `pin_mismatch`, com `pins: [{name, recorded, running}]`, e nenhum caso é servido. Para testar um prompt novo de propósito, nomeie o pino: `--vary prompts`.
+- **Os valores.** No modo `stored`, cada blob vem com o conteúdo guardado e mascarado; no modo `pointer`, o executor lê cada `pointer` com as suas credenciais, pelo resolvedor de conteúdo do SDK, e confere o digest. Um blob que não pode ser lido ou não bate é um erro de infraestrutura, contado à parte e nunca uma falha de asserção.
+- **As ferramentas.** Uma chamada cujos argumentos normalizados batem com o `args_hash` de uma chamada gravada responde com o resultado gravado, as chamadas de uma ferramenta tomadas em ordem. Uma que não bate com nenhuma só roda ao vivo quando a ferramenta foi marcada `dry_run=True` (`dryRun: true`); senão, responde vazia e conta como divergente. Uma ferramenta de framework que não foi envolvida com `tool()` nunca roda ao vivo num replay.
+- **O que o agente lê e escreve.** O contexto da época é o blob da leitura `pack` do registro; a memória de trabalho começa vazia e as escritas ficam no executor; uma pergunta de coordenação responde do registro. O registro do turno reproduzido fica com o executor, marcado `synthetic`, e nunca é enviado como turno.
+- **Os modos.** `hermetic_turn` (o padrão) roda o turno sozinho, com o contexto gravado e toda ferramenta respondendo do registro; `hermetic_conversation` roda os turnos do cenário em ordem, até a primeira divergência forte; `era_memory` roda com o contexto da época e o estado atual dos objetos que as ferramentas leem.
+- **A entrada.** Cada caso traz a mensagem do cliente que abriu o turno, mascarada, e o histórico da conversa até ali (no máximo as últimas 50 mensagens públicas dos 7 dias anteriores). `--runs` roda cada turno N vezes, numeradas a partir de 1; uma função `paraphrase` reescreve a entrada de algumas execuções, para um resultado intermitente ser confirmado com outras palavras.
+
+## 4. Leia o veredito
+
+Por asserção, sobre as execuções que concluíram e em que ela se aplicou (`not_checked` de fora): `passed` e `failed`, a **linha de base** (a mesma asserção na última execução anterior do cenário com veredito `pass` ou `flaky`; sem uma, a gravação, que passou tantas vezes quanto a execução conferiu), `drop` (a taxa de aprovação da base menos a da execução) e `p_value` (o teste exato de Fisher unilateral de que a execução falha mais que a base). `regression` é `failed >= 2`, `drop >= 0,2` e `p_value < 0,05`; `flaky` é uma falha que não chega a regressão.
+
+Por cenário: `pin_mismatch` quando alguma execução parou nos pinos; `infrastructure_error` quando nenhuma concluiu; `regression` quando alguma asserção regrediu; `flaky` quando alguma oscilou; `pass` nos demais casos. `needs_paraphrase` diz que uma asserção passou e falhou nas mesmas execuções: rode de novo com paráfrases antes de confiar. O veredito da execução é o pior dos cenários, na ordem `pass`, `flaky`, `infrastructure_error`, `pin_mismatch`, `regression`, e o comando sai com 1 só numa regressão: resultados oscilantes são listados e nunca travam.
+
+Quando uma execução falha uma asserção que lê o que as ferramentas mostraram, a Niadra confere as observações do turno gravado contra os tipos declarados e abre um [problema de dados](/api/data-issues) para o dono do dado (`null_field`, `out_of_vocabulary`, `stale_source`), com até 50 referências e nenhum valor: uma regressão que é do dado, não do agente, chega a quem pode consertar.
+
+## 5. Bissecte com o registro de mudanças
+
+[`GET /v1/changes`](/api/changes) lista o que mudou entre builds consecutivas de cada agente, do mais novo para o mais antigo: `prompt` (uma versão de prompt, pelo nome), `model`, `code` (o montador ou o esquema de uma ferramenta), `data` (o digest do corpus), `config` (uma seção da configuração do espaço que o turno leu, pelo digest dela: o contrato de afirmação, os tipos, as vinculações) e `compiler` (a versão do compilador de contexto), com `before` e `after` e quando a build nova apareceu. Uma regressão entre duas execuções aponta para as mudanças entre as builds delas.
+
+## Privacidade
+
+O caso leva o histórico da conversa mascarado e, no modo `pointer`, nenhum valor gravado: o executor os lê dentro da sua empresa. Os turnos de um cenário são dado pessoal com a finalidade `quality`, ficam `scenario_days` depois da última execução e são apagados com o resto dos turnos da pessoa. Os resultados de uma execução guardam vereditos e contagens; `error` e `detail` nunca levam dado pessoal.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Registros de turno" href="/concepts/turn-records">
+    o que um turno grava e por que ele é reproduzível ou não.
+  </Card>
+  <Card title="Só metadado" href="/guides/metadata-only">
+    replay com os valores no seu bucket.
+  </Card>
+  <Card title="Pedir um caso de replay" href="/api/replay-cases">
+    a referência de `POST /v1/replay/cases`.
+  </Card>
+  <Card title="Desfechos e atribuição" href="/concepts/outcomes">
+    o contrafactual de ferramenta, que roda pelo mesmo executor.
+  </Card>
+</CardGroup>

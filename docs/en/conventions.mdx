@@ -1,0 +1,193 @@
+---
+title: "Limits and conventions"
+description: "Versioning, authentication, idempotency, pagination, rate limits, ETag and personal data kept out of URLs."
+---
+
+The same rules apply to every route of the Niadra API: the data API of your space and the control API. Knowing them once saves you from reading them again on each endpoint.
+
+## Address
+
+Every space has a stable address, with its region in the name:
+
+```text
+https://<space>.<region>.api.niadra.com
+```
+
+The key carries the region and the space, never the cell that serves them, and the SDKs derive the address from the key. When a space moves between cells, the address stays the same; during the move and for 30 days after it, the old cell answers 421 `wrong_cell` to any key or person of the space, instead of serving what it still holds, and the SDKs retry at once on a new connection, which the edge routes to the new cell. The internal topology is never part of the contract: a space on a [dedicated cell](/en/concepts/spaces-and-keys#dedicated-environment-regulado-plan) of the Regulado plan has the same address shape.
+
+The control API, for tenants, projects, sources, keys, people, configuration and usage, lives at `https://control.api.niadra.com`. The generic webhook also answers at `https://mtls.<region>.api.niadra.com`, the address that asks for a client certificate in the handshake, for sources authenticated by `mtls`; see [System webhooks](/en/guides/system-webhooks).
+
+## Versions
+
+The version is in the path: `/v1`. A new field or a new route does not change the version, so your code must ignore fields it does not know (both SDKs do). Removing a field or changing its meaning is `/v2`, with 12 months in which both versions answer, a notice by e-mail and, on every response of the old version, `Deprecation: @<instant>` (RFC 9745), which says since when, and `Sunset: <HTTP date>` (RFC 8594), which says when it stops, exposed through CORS with the `Link` of `rel="deprecation"`. Both SDKs log a warning, once per route, when a response carries `Deprecation`. Today nothing in `/v1` has been deprecated, so no response carries those headers. The [API versioning policy](/en/security/api-versioning) says what counts as a breaking change and how the notice arrives.
+
+## Authentication
+
+| Who | How |
+|---|---|
+| Agents and systems | `Authorization: Bearer nia_sk_<live\|test>_<region>_<space>_<key_id>_<secret>`, a source key with scopes per route. |
+| People (Console, governance routes and control API) | `Authorization: Bearer <token>`, issued by [`POST /v1/auth/login`](/en/api/control/login) (e-mail, password and a TOTP code; on the first sign-in, the authenticator is set up through [`POST /v1/auth/second-factor`](/en/api/control/second-factor)) or, with the company's SSO, by [`POST /v1/auth/sso/exchange`](/en/api/control/sso-exchange), and renewed by [`POST /v1/auth/token`](/en/api/control/token). A token lives 15 minutes and names one space. Cells verify it offline against the [public keys](/en/api/control/jwks). |
+
+The login that confirms the authenticator also returns ten recovery codes, once. When the app is lost, each code works once, in `recovery_code` in place of `totp`, and the answer says how many remain in `recovery_codes_left`. Niadra keeps only an HMAC-SHA256 of each code. A person [generates new codes](/en/api/control/recovery-codes) and [changes the app](/en/api/control/second-factor-change) with the password again, and an admin [resets the second factor](/en/api/control/second-factor-reset) of someone who lost both the app and the codes. New people arrive by [invitation](/en/api/control/users-create), a single-use link to choose a password, or through the [company's SSO, over OIDC or SAML 2.0](/en/concepts/console-access). A [deactivated](/en/api/control/user-deactivate) person loses the control plane at once; a token already issued keeps working on the data API until it expires.
+
+A source key only authenticates with its secret; the `key_id` in its prefix is public. The scopes are `track`, `act`, `context`, `search`, `identify`, `admin`, `analytics`, `agent_memory`, `agent_memory:write`, `replay`, `coordinate`, `state:push` and `agent_state`; the last four apply only in a space that turned their [feature](/en/concepts/spaces-and-keys#space-features) on. See [Spaces and keys](/en/concepts/spaces-and-keys).
+
+Governance routes (identity, privacy, audit, measurement, review, triggers) accept either a person with one of the route roles or a source key with the `admin` scope. The Console roles are `admin`, `security`, `integration`, `review`, `analysis` and `vendor`; `admin` passes every role check, and a `vendor` person only sees the sources named in their role binding. Review verdicts are the exception: only a person with the `review` role records them.
+
+## Idempotency
+
+Routes that change identity or erase data take an `Idempotency-Key` header, and on them it is **required**: every identity write (create or retract an assertion, merge, unmerge, block a handle, create or end a link, accept or dismiss a suggestion), [`POST /v1/forget`](/en/api/forget) and [cutting a source in the cell](/en/api/source-revoke). Niadra keeps the key for 24 hours with a hash of the body:
+
+- the same key with the same body returns the first answer again;
+- the same key with a different body returns 409 `conflict`.
+
+The batch uses the `idempotency_key` of each item instead: the provider message id, or a UUIDv7 minted by the SDK. A repeated key is counted in `duplicates` and never stored twice, even when a webhook is resent days later.
+
+The writes of the agent features require it too: declaring, claiming, reserving an effect, creating and accepting a handoff ([coordination](/en/concepts/coordination)); promoting turns, creating a scenario and reporting a run ([turn records](/en/concepts/turn-records)); creating a legal hold, a review request and releasing content. Turn recording and state pushes use, instead of the header, each record's `turn_id` and each item's version: the same turn sent twice is one turn, and a field moves only under a greater version.
+
+## Errors
+
+Route errors answer `application/problem+json` (RFC 9457) with `type`, `title`, `status`, `detail`, `code` and `request_id`. The batch answers 200 when every item was accepted, and 207 with one error per rejected item otherwise. The full catalog is in [Errors](/en/errors).
+
+## Pagination
+
+Lists paginate by an opaque cursor, in a stable order.
+
+| Parameter | Description |
+|---|---|
+| `limit` | Items per page: up to 200 on lists, up to 100 on timelines, up to 50 on profile search and the review queue. |
+| `cursor` | The `next_cursor` of the previous page. |
+
+`next_cursor` is `null` on the last page. Never build a cursor yourself: its content may change without notice.
+
+## Rate limits
+
+Over the limit, the answer is 429 `rate_limited` with `Retry-After` in seconds. Limits apply per key, and writes (`/v1/batch`, `/v1/ingest`, `/v1/otel`, `/v1/media`, `/v1/feedback`) are counted apart from reads, so a flood of writes never cuts reads first. A 503 `unavailable` also carries `Retry-After`.
+
+A space created a few seconds ago, or one being restored, answers 503 `unavailable` with `Retry-After: 5` while its database is prepared, for up to about a minute. The SDKs send the events of their queue again on their own, keeping them queued until it works; a context or history read is not repeated and comes back empty. A client of the raw API should honour `Retry-After` and repeat the request.
+
+## Caching and ETag
+
+The context has an ETag. The same request with the same state gives the same bytes.
+
+| Route | How to ask "has it changed?" |
+|---|---|
+| `POST /v1/context` | `known_etag` in the body. When nothing changed, the answer is 200 with `not_modified: true` and no text. |
+| `GET /v1/context?profile_id=...` | `If-None-Match` header. When nothing changed, the answer is 304. |
+
+The SDKs send the ETag they hold on every context refresh.
+
+## Personal data stays out of URLs
+
+Phone numbers, e-mail addresses, documents, handles, search queries and any free text travel only in request bodies, never in paths or query strings. URLs end up in load balancer logs, firewall logs and tracing spans, outside the encryption and outside the reach of `forget`. That is why `context`, `search` and `timeline` by handle are `POST`, and why [profile search](/en/api/profiles-search) takes its query in the body. The `GET` forms of context and timeline take a profile id instead.
+
+Ids that are not personal data, such as a profile id, an item id or an object id, may appear in paths. A `conversation_id` may be the customer's phone number, e-mail address or WhatsApp id, so every read that takes one has a `POST` form, with the id in the body:
+
+| Read | `POST` form, recommended | `GET` form, which stays |
+|---|---|---|
+| Context by profile | [`POST /v1/context`](/en/api/context) with `profile_id` | [`GET /v1/context`](/en/api/context-by-profile) |
+| Timeline by profile | [`POST /v1/history/timeline`](/en/api/history-timeline) with `profile_id` | [`GET /v1/history/timeline`](/en/api/history-timeline-by-profile) |
+| Open an item | [`POST /v1/history/open`](/en/api/history-open) | [`GET /v1/history/items/{item_id}`](/en/api/history-item) |
+| Receipts | [`POST /v1/receipts/search`](/en/api/receipts-search) | [`GET /v1/receipts`](/en/api/receipts) |
+| Measurement of one conversation | [`POST /v1/context-use/conversation`](/en/api/context-use-one-conversation) | [`GET /v1/context-use/{conversation_id}`](/en/api/context-use-conversation) |
+
+The Console and the SDKs use the `POST` forms of the reads they make. The `GET` forms stay in `/v1`; if you use one of them, send an opaque conversation id from your system.
+
+## Tracing
+
+Send a W3C `traceparent` header and Niadra returns it on the response. Send `X-Request-Id` to choose the request id, or let Niadra mint one; every response carries it in the `X-Request-Id` header and in the `request_id` of an error. Quote it when you contact support.
+
+## Sizes
+
+| What | Limit |
+|---|---|
+| Items per batch | 500 |
+| Batch body | 2.5 MB |
+| One event | 1 MB |
+| Text or transcript of an event | 200,000 characters |
+| Handles per event | 16 |
+| Subjects per event | 8 |
+| Objects per event | 16 |
+| Conversation aliases | 8 |
+| Handles in one `identify` | 2 to 16 |
+| Media file | 500 MB, uploaded to a presigned URL from [`POST /v1/media/uploads`](/en/api/media-uploads), with exactly the `upload_headers` it returns. Media never travels inside an event. |
+| File import | 512 MB, `text/csv` or `application/x-ndjson`, each record up to 1 MB and a CSV header up to 64 KB. See [`POST /v1/ingest/files`](/en/api/ingest-files). |
+| Search `query` and context `query` | 2,000 characters |
+| Search answer (`max_tokens`) | 50 to 4,000 tokens; 800 by default, 300 recommended for voice |
+| Time expression of the search (`when`) | 100 characters, in Portuguese, English or Spanish |
+| Agent memory note | title of 120 characters, body of 2,000, up to 8 tags; block of 50 to 2,000 tokens, 300 by default |
+| Turn record batch | 50 records and 4 MB compressed (16 MB decompressed); a turn too large on its own leaves with its blobs reduced to hashes |
+| Replay scenario | 50 turns and 50 assertions; a counterfactual run, 5,000 cases |
+| State push | 1,000 items per call; up to 200 fields per type, 200 types per space |
+| An agent's working memory | No cap: the state is kept whole; the bound is the request's size, and a body over it is refused with an error |
+| Coordination checks in batch | 500 per call |
+| A `niadra-expr` expression | 1,024 characters, 256 tokens and 16 nested groups |
+
+A batch body over 2.5 MB, or a batch with more than 500 items, answers 422 `invalid_input`. An item over 1 MB is rejected on its own, with the item error `too_large`, and the rest of the batch goes in.
+
+## Memory never cuts
+
+The sizes above are a request's: a larger request is refused with an error, never half taken. What goes in, memory stores and learns whole, and never deletes on its own:
+
+- A long turn, e-mail or document is read in parts, in order and with overlap, never cut at its start, its end or at N characters. A file is read whole, in windows of 50 pages, and a text over 100 thousand characters becomes several turns, each with its part ([events](/en/concepts/events)).
+- Summaries, resolutions, values, open items, instructions, agent notes and links are stored whole, with no cap on how many.
+- A batch that fails every attempt is kept and can be [tried again](/en/concepts/object-types#data-issues).
+- What leaves memory leaves through an erasure the data subject asks for and through the retention the space configures, and both reach everything, kept batches included.
+
+Only a read has a size: the block that goes to the agent. When it leaves something out, it says how much and where the rest is: `left_out` in the notes block, `omitted` in the constraints block, `open_objects_more` in a handoff package, `partial` on a derived field, "mais N objetos deste cliente fora desta lista" and "mais N registros (consulte o histórico)" on the context's lines (in the space's language), "(continua no histórico)" on a long quoted text, and a cursor on the lists that come in pages. The rest is in the [history](/en/concepts/history)'s search and open.
+
+## Speed
+
+| Operation | What it does |
+|---|---|
+| `context()` | No AI model; with a warm context, no database statement |
+| History navigation (`search`, `timeline`, `open`) | No language model call; the customer's rows are reused while their memory does not change |
+| Ingestion acknowledgement | A batch of conversation turns is answered after one database statement, masked and sealed; the workers store the rest next, in order |
+| A new message in `live` | Enters the live layer before the batch is answered |
+| An action or system event in the pack | Full transaction and recompilation of the profile by the workers |
+| Memory derived from a finished conversation | An 8 second window after the end, one decision call per batch of the customer's sessions and, when a session needs it, one extraction call; the [ingest status](/en/api/ingest-status) says when it became `readable` |
+
+No LLM runs in the path of `context()` or of the navigation. The times measured in the region are on the [benchmark](https://niadra.com/en/benchmark).
+
+## Starting caps of a space
+
+| Resource | Starting cap |
+|---|---|
+| Active patterns per profile | 20 |
+| Task views | 8 per space |
+| Custom pattern rules | 25 per space, with a window up to 365 days |
+| Trigger rules | 50 per space; 100 firings per minute |
+| Webhook dead-letter queue | 7 days from when the delivery was created |
+| Continuous export | at least 1 hour apart |
+| Sampled review | 500 samples per day; kept 12 months |
+| Configuration assistant | 20 runs per month |
+| Trigger firings and export runs | kept 13 months |
+| Events of an unmapped type | the raw content is kept, outside the memory, until an erasure or the `raw_content` window you set; a new mapping can remap it |
+| Agent memory | no cap on stored notes; 20 writes per hour per agent; 200 tokens of notes in a task view with `include_agent_memory` |
+| Turn records | kept until an erasure or until the retention you set: `kept_days` (at least 7, no maximum) applies to every tier, `scenario_days` (at least 7) to a replay scenario's turns; without them, nothing expires. The kept tier takes flagged turns, promoted ones and a 5% sample of conversations |
+| Coordination | contact budgets of up to 1,000 per window; an effect key for 1 to 3,650 days, or as long as the fact exists; a decision valid for 30 seconds; a contact token of up to 120 seconds; a 90-day contact log |
+| Signals | raw interactions until an erasure or the `raw_content` window; review requests kept at least 395 days after resolution |
+| Outcomes | outcome links for 13 months; unmet demand only above 10 distinct people |
+
+These are the caps of every space today. Ask us when a use case needs more.
+
+## Names in the contract
+
+Every name in the API, the SDKs, the MCP tools, the events and the webhooks is English ASCII. Fields are `snake_case` (`conversation_id`, `occurred_at`); times are ISO 8601 with a time zone; enums use fixed lowercase values, such as `message`, `system_event` and `action` for `kind`, or `customer`, `ai_agent`, `human_agent` and `system` for `speaker`. Verification levels are `V0` to `V4` and `no_customer`. Within `/v1` no value ever changes meaning.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Errors" href="/en/errors">
+    every code, and what to do with it.
+  </Card>
+  <Card title="Events and the batch" href="/en/concepts/events">
+    idempotency and per-item errors in practice.
+  </Card>
+  <Card title="Spaces and keys" href="/en/concepts/spaces-and-keys">
+    scopes, sources and the key format.
+  </Card>
+  <Card title="The Niadra API" href="/en/api">
+    every route, generated from the OpenAPI.
+  </Card>
+</CardGroup>

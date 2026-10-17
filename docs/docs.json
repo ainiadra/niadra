@@ -1,0 +1,1410 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Niadra",
+  "description": "A camada de memória omnichannel para os agentes de IA da empresa: os eventos de todo canal, plataforma e sistema viram uma memória só de cada cliente, que qualquer agente lê, com governança.",
+  "colors": {
+    "primary": "#5e7c00",
+    "light": "#a2d500",
+    "dark": "#5e7c00"
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.png",
+    "dark": "/logo/dark.png",
+    "href": "https://niadra.com"
+  },
+  "background": {
+    "color": {
+      "light": "#ffffff",
+      "dark": "#111113"
+    }
+  },
+  "fonts": {
+    "heading": {
+      "family": "Archivo",
+      "weight": 700
+    },
+    "body": {
+      "family": "Instrument Sans",
+      "weight": 400
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "cursor",
+      "mcp"
+    ]
+  },
+  "navigation": {
+    "languages": [
+      {
+        "language": "pt-BR",
+        "default": true,
+        "navbar": {
+          "links": [
+            {
+              "label": "Suporte",
+              "icon": "life-ring",
+              "href": "https://niadra.com/enterprise"
+            },
+            {
+              "label": "GitHub",
+              "icon": "github",
+              "href": "https://github.com/ainiadra"
+            }
+          ],
+          "primary": {
+            "type": "button",
+            "label": "Console",
+            "href": "https://niadra.com/console"
+          }
+        },
+        "tabs": [
+          {
+            "tab": "Início",
+            "groups": [
+              {
+                "group": "Começar",
+                "pages": [
+                  "index",
+                  "quickstart"
+                ]
+              },
+              {
+                "group": "Fundamentos",
+                "pages": [
+                  "conventions",
+                  "errors"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Conceitos",
+            "groups": [
+              {
+                "group": "A base da memória",
+                "pages": [
+                  "concepts/spaces-and-keys",
+                  "concepts/events",
+                  "concepts/identity",
+                  "concepts/accounts"
+                ]
+              },
+              {
+                "group": "O que o agente recebe",
+                "pages": [
+                  "concepts/context",
+                  "concepts/history",
+                  "concepts/agent-memory",
+                  "concepts/systems",
+                  "concepts/patterns"
+                ]
+              },
+              {
+                "group": "Os agentes em ação",
+                "pages": [
+                  "concepts/object-types",
+                  "concepts/object-type-reference",
+                  "concepts/object-memory",
+                  "concepts/turn-records",
+                  "concepts/claims",
+                  "concepts/coordination",
+                  "concepts/signals",
+                  "concepts/agent-state",
+                  "concepts/outcomes"
+                ]
+              },
+              {
+                "group": "Governança",
+                "pages": [
+                  "concepts/context-use",
+                  "concepts/triggers-and-webhooks",
+                  "concepts/privacy",
+                  "concepts/receipts",
+                  "concepts/console-access"
+                ]
+              },
+              {
+                "group": "Segurança",
+                "pages": [
+                  "security/threat-model",
+                  "security/questionnaire",
+                  "security/data-use",
+                  "security/incident-response",
+                  "security/api-versioning"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Guias",
+            "groups": [
+              {
+                "group": "Agentes",
+                "pages": [
+                  "guides/voice-agents",
+                  "guides/whatsapp-agents",
+                  "guides/internal-agents"
+                ]
+              },
+              {
+                "group": "Por setor",
+                "pages": [
+                  "guides/retail-agents",
+                  "guides/legal-agents",
+                  "guides/health-agents"
+                ]
+              },
+              {
+                "group": "Integrações",
+                "pages": [
+                  "guides/mcp",
+                  "guides/system-webhooks",
+                  "guides/opentelemetry",
+                  "guides/from-mem0"
+                ]
+              },
+              {
+                "group": "Operação",
+                "pages": [
+                  "guides/replay-in-ci",
+                  "guides/gateways",
+                  "guides/resolver-worker",
+                  "guides/metadata-only",
+                  "guides/derive-types"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Integrações",
+            "groups": [
+              {
+                "group": "Começar",
+                "pages": [
+                  "integrations/overview",
+                  "integrations/coding-assistants"
+                ]
+              },
+              {
+                "group": "Voz",
+                "pages": [
+                  "integrations/livekit",
+                  "integrations/pipecat",
+                  "integrations/elevenlabs",
+                  "integrations/vapi",
+                  "integrations/retell"
+                ]
+              },
+              {
+                "group": "Canais",
+                "pages": [
+                  "integrations/whatsapp",
+                  "integrations/twilio"
+                ]
+              },
+              {
+                "group": "Frameworks de agente",
+                "pages": [
+                  "integrations/openai-agents",
+                  "integrations/langchain",
+                  "integrations/langgraph",
+                  "integrations/ai-sdk",
+                  "integrations/mastra",
+                  "integrations/google-adk",
+                  "integrations/strands",
+                  "integrations/pydantic-ai",
+                  "integrations/llamaindex",
+                  "integrations/crewai",
+                  "integrations/agno",
+                  "integrations/agent-framework",
+                  "integrations/semantic-kernel",
+                  "integrations/haystack",
+                  "integrations/camel",
+                  "integrations/dspy",
+                  "integrations/ag2",
+                  "integrations/genkit",
+                  "integrations/voltagent",
+                  "integrations/cloudflare-agents"
+                ]
+              },
+              {
+                "group": "SDKs de modelo",
+                "pages": [
+                  "integrations/openai",
+                  "integrations/anthropic",
+                  "integrations/bedrock",
+                  "integrations/google-genai",
+                  "integrations/litellm"
+                ]
+              },
+              {
+                "group": "Plataformas de automação",
+                "pages": [
+                  "integrations/n8n",
+                  "integrations/flowise",
+                  "integrations/langflow",
+                  "integrations/dify"
+                ]
+              },
+              {
+                "group": "Clientes MCP",
+                "pages": [
+                  "integrations/mcp/claude-code",
+                  "integrations/mcp/claude-desktop",
+                  "integrations/mcp/cursor",
+                  "integrations/mcp/vscode"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "SDKs",
+            "groups": [
+              {
+                "group": "SDKs",
+                "pages": [
+                  "sdk/python",
+                  "sdk/typescript"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Referência da API",
+            "groups": [
+              {
+                "group": "Visão geral",
+                "pages": [
+                  "api"
+                ]
+              },
+              {
+                "group": "Escrita",
+                "pages": [
+                  "api/batch",
+                  "api/media-uploads",
+                  "api/ingest-files",
+                  "api/ingest-status",
+                  "api/ingest-file",
+                  "api/ingest-webhook",
+                  "api/ingest-webhook-challenge",
+                  "api/otel-traces",
+                  "api/feedback",
+                  "api/feedback-batch"
+                ]
+              },
+              {
+                "group": "Contexto",
+                "pages": [
+                  "api/context",
+                  "api/context-prefetch",
+                  "api/context-by-profile",
+                  "api/subject-tokens",
+                  "api/mcp"
+                ]
+              },
+              {
+                "group": "Histórico",
+                "pages": [
+                  "api/history-search",
+                  "api/history-timeline",
+                  "api/history-timeline-by-profile",
+                  "api/history-open",
+                  "api/history-item",
+                  "api/history-tools"
+                ]
+              },
+              {
+                "group": "Memória do agente",
+                "pages": [
+                  "api/agent-memory-block",
+                  "api/agent-memory-search",
+                  "api/agent-memory-tools",
+                  "api/agent-memory-notes-create",
+                  "api/agent-memory-notes",
+                  "api/agent-memory-note",
+                  "api/agent-memory-note-update",
+                  "api/agent-memory-note-retire",
+                  "api/agent-memory-note-versions",
+                  "api/agent-memory-notes-erase",
+                  "api/agent-memory-export",
+                  "api/agent-memory-distill",
+                  "api/agent-memory-proposals",
+                  "api/agent-memory-proposal-approve",
+                  "api/agent-memory-proposal-reject"
+                ]
+              },
+              {
+                "group": "Objetos",
+                "pages": [
+                  "api/object",
+                  "api/object-timeline"
+                ]
+              },
+              {
+                "group": "Identidade e perfis",
+                "pages": [
+                  "api/identity-assertions",
+                  "api/identity-assertions-create",
+                  "api/identity-assertion-retract",
+                  "api/identity-merge",
+                  "api/identity-unmerge",
+                  "api/identity-handles-block",
+                  "api/identity-links",
+                  "api/identity-link-end",
+                  "api/identity-suggestions",
+                  "api/identity-suggestion-accept",
+                  "api/identity-suggestion-dismiss",
+                  "api/profiles",
+                  "api/profiles-search",
+                  "api/profile",
+                  "api/profile-memory",
+                  "api/profile-fact-history",
+                  "api/profile-objects",
+                  "api/graph"
+                ]
+              },
+              {
+                "group": "Privacidade e auditoria",
+                "pages": [
+                  "api/forget",
+                  "api/forget-list",
+                  "api/forget-status",
+                  "api/corrections",
+                  "api/facts-restore",
+                  "api/corrections-batch",
+                  "api/export",
+                  "api/export-download",
+                  "api/export-runs",
+                  "api/export-destination-credential",
+                  "api/receipts-search",
+                  "api/receipts",
+                  "api/receipts-verify",
+                  "api/lineage-receipt",
+                  "api/lineage-fact",
+                  "api/policy-simulate",
+                  "api/secrets",
+                  "api/dead-tasks",
+                  "api/dead-tasks-replay"
+                ]
+              },
+              {
+                "group": "Fontes",
+                "pages": [
+                  "api/sources-arrived",
+                  "api/sources-coverage",
+                  "api/sources-me",
+                  "api/source-revoke"
+                ]
+              },
+              {
+                "group": "Padrões, medição e uso",
+                "pages": [
+                  "api/trait-retract",
+                  "api/traits-dry-run",
+                  "api/traits-opt-out",
+                  "api/context-use",
+                  "api/context-use-conversations",
+                  "api/context-use-one-conversation",
+                  "api/context-use-conversation",
+                  "api/usage",
+                  "api/usage-budget",
+                  "api/usage-context-latency",
+                  "api/usage-prompt-cache"
+                ]
+              },
+              {
+                "group": "Revisão e assistente",
+                "pages": [
+                  "api/review-queue",
+                  "api/review-verdicts",
+                  "api/review-agreement",
+                  "api/review-cases",
+                  "api/assist",
+                  "api/assist-runs",
+                  "api/assist-run"
+                ]
+              },
+              {
+                "group": "Gatilhos e webhooks",
+                "pages": [
+                  "api/triggers-dry-run",
+                  "api/trigger-firings",
+                  "api/webhook-deliveries",
+                  "api/webhook-redeliver",
+                  "api/webhook-endpoint-test"
+                ]
+              },
+              {
+                "group": "Análise da base",
+                "pages": [
+                  "api/insights-schema",
+                  "api/insights-overview",
+                  "api/insights-aggregate",
+                  "api/insights-profiles",
+                  "api/insights-search",
+                  "api/insights-episodes-sample",
+                  "api/insights-context",
+                  "api/insights-lineage",
+                  "api/insights-gaps",
+                  "api/insights-gaps-review",
+                  "api/insights-reveal",
+                  "api/mcp-insights"
+                ]
+              },
+              {
+                "group": "Registro de turnos e replay",
+                "pages": [
+                  "api/turns",
+                  "api/turns-promote",
+                  "api/turn",
+                  "api/turns-search",
+                  "api/turns-index",
+                  "api/replay-cases",
+                  "api/scenarios-create",
+                  "api/scenarios-from-report",
+                  "api/scenarios",
+                  "api/scenario",
+                  "api/scenario-update",
+                  "api/scenario-runs-create",
+                  "api/scenario-run",
+                  "api/changes",
+                  "api/data-issues",
+                  "api/data-issue-ack",
+                  "api/intake-failed",
+                  "api/intake-failed-retry",
+                  "api/notifications"
+                ]
+              },
+              {
+                "group": "Estado tipado",
+                "pages": [
+                  "api/sdk-profile",
+                  "api/objects-push",
+                  "api/objects-snapshot",
+                  "api/objects-coverage",
+                  "api/types-fingerprint",
+                  "api/state-view",
+                  "api/state-read",
+                  "api/state-verify",
+                  "api/state-refresh-requests",
+                  "api/state-refresh-request-release",
+                  "api/content-release"
+                ]
+              },
+              {
+                "group": "Memória de trabalho",
+                "pages": [
+                  "api/agent-state-write",
+                  "api/agent-state-read",
+                  "api/profile-agent-state"
+                ]
+              },
+              {
+                "group": "Sinais e restrições",
+                "pages": [
+                  "api/constraints",
+                  "api/profile-inferences",
+                  "api/profile-inference-correct",
+                  "api/profile-inference-delete",
+                  "api/review-requests-create",
+                  "api/review-requests",
+                  "api/review-request-resolve",
+                  "api/legal-holds-create",
+                  "api/legal-hold-release"
+                ]
+              },
+              {
+                "group": "Coordenação",
+                "pages": [
+                  "api/coordination-check",
+                  "api/coordination-check-batch",
+                  "api/coordination-declare",
+                  "api/coordination-claims",
+                  "api/coordination-claim-release",
+                  "api/coordination-effects",
+                  "api/coordination-effect-settle",
+                  "api/handoffs-create",
+                  "api/handoff",
+                  "api/handoff-accept",
+                  "api/handoff-outcome",
+                  "api/suppressions",
+                  "api/suppressions-salt",
+                  "api/contact-keys",
+                  "api/coordination-reports",
+                  "api/coordination-overview",
+                  "api/coordination-shadow"
+                ]
+              },
+              {
+                "group": "Desfechos e experimentos",
+                "pages": [
+                  "api/measure-outcomes",
+                  "api/measure-attribution",
+                  "api/measure-reconcile-uploads",
+                  "api/measure-reconcile",
+                  "api/measure-interleaving",
+                  "api/measure-experiments",
+                  "api/measure-power",
+                  "api/measure-counterfactual-runs-create",
+                  "api/measure-counterfactual-runs",
+                  "api/measure-counterfactual-run",
+                  "api/measure-unmet-demand"
+                ]
+              },
+              {
+                "group": "Controle: acesso",
+                "pages": [
+                  "api/control/login",
+                  "api/control/second-factor",
+                  "api/control/token",
+                  "api/control/jwks",
+                  "api/control/me",
+                  "api/control/me-preferences",
+                  "api/control/me-preference-set",
+                  "api/control/me-second-factor",
+                  "api/control/recovery-codes",
+                  "api/control/second-factor-change",
+                  "api/control/second-factor-confirm",
+                  "api/control/invitation-preview",
+                  "api/control/invitation-accept"
+                ]
+              },
+              {
+                "group": "Controle: login único (SSO)",
+                "pages": [
+                  "api/control/sso-discover",
+                  "api/control/sso-start",
+                  "api/control/sso-oidc-callback",
+                  "api/control/sso-saml-metadata",
+                  "api/control/sso-saml-acs",
+                  "api/control/sso-exchange",
+                  "api/control/sso-second-factor",
+                  "api/control/sso",
+                  "api/control/sso-save",
+                  "api/control/sso-remove",
+                  "api/control/sso-test",
+                  "api/control/sso-test-result"
+                ]
+              },
+              {
+                "group": "Controle: pessoas e papéis",
+                "pages": [
+                  "api/control/users",
+                  "api/control/users-create",
+                  "api/control/user-roles",
+                  "api/control/user-deactivate",
+                  "api/control/user-reactivate",
+                  "api/control/user-invitation",
+                  "api/control/user-history",
+                  "api/control/second-factor-reset",
+                  "api/control/roles"
+                ]
+              },
+              {
+                "group": "Controle: tenant e projetos",
+                "pages": [
+                  "api/control/tenants-create",
+                  "api/control/tenant",
+                  "api/control/projects",
+                  "api/control/projects-create",
+                  "api/control/space",
+                  "api/control/space-delete",
+                  "api/control/space-deletion-receipt",
+                  "api/control/space-kms-key"
+                ]
+              },
+              {
+                "group": "Controle: fontes e chaves",
+                "pages": [
+                  "api/control/sources",
+                  "api/control/sources-create",
+                  "api/control/keys",
+                  "api/control/keys-create",
+                  "api/control/keys-rotate",
+                  "api/control/keys-revoke",
+                  "api/control/source-revoke",
+                  "api/control/secret-refs",
+                  "api/control/secret-refs-create"
+                ]
+              },
+              {
+                "group": "Controle: configuração",
+                "pages": [
+                  "api/control/config-types",
+                  "api/control/config-document",
+                  "api/control/config-diffs-list",
+                  "api/control/config-observed",
+                  "api/control/config-diffs",
+                  "api/control/config-diff-approve",
+                  "api/control/config-diff-reject",
+                  "api/control/config-diff-rollback",
+                  "api/control/config-history",
+                  "api/control/config-proposals"
+                ]
+              },
+              {
+                "group": "Controle: uso",
+                "pages": [
+                  "api/control/usage",
+                  "api/control/usage-statement"
+                ]
+              },
+              {
+                "group": "Controle: operação da plataforma",
+                "pages": [
+                  "api/control/cells",
+                  "api/control/cells-create",
+                  "api/control/placement",
+                  "api/control/placement-move",
+                  "api/control/placement-complete",
+                  "api/control/quotas",
+                  "api/control/snapshot",
+                  "api/control/revocations",
+                  "api/control/access-changes",
+                  "api/control/usage-push",
+                  "api/control/deletion-receipt-push"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Perguntas frequentes",
+            "groups": [
+              {
+                "group": "Perguntas frequentes",
+                "pages": [
+                  "faq"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "language": "en",
+        "navbar": {
+          "links": [
+            {
+              "label": "Support",
+              "icon": "life-ring",
+              "href": "https://niadra.com/en/enterprise"
+            },
+            {
+              "label": "GitHub",
+              "icon": "github",
+              "href": "https://github.com/ainiadra"
+            }
+          ],
+          "primary": {
+            "type": "button",
+            "label": "Console",
+            "href": "https://niadra.com/console"
+          }
+        },
+        "tabs": [
+          {
+            "tab": "Home",
+            "groups": [
+              {
+                "group": "Get started",
+                "pages": [
+                  "en/index",
+                  "en/quickstart"
+                ]
+              },
+              {
+                "group": "Fundamentals",
+                "pages": [
+                  "en/conventions",
+                  "en/errors"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Concepts",
+            "groups": [
+              {
+                "group": "Memory basics",
+                "pages": [
+                  "en/concepts/spaces-and-keys",
+                  "en/concepts/events",
+                  "en/concepts/identity",
+                  "en/concepts/accounts"
+                ]
+              },
+              {
+                "group": "What the agent receives",
+                "pages": [
+                  "en/concepts/context",
+                  "en/concepts/history",
+                  "en/concepts/agent-memory",
+                  "en/concepts/systems",
+                  "en/concepts/patterns"
+                ]
+              },
+              {
+                "group": "Agents at work",
+                "pages": [
+                  "en/concepts/object-types",
+                  "en/concepts/object-type-reference",
+                  "en/concepts/object-memory",
+                  "en/concepts/turn-records",
+                  "en/concepts/claims",
+                  "en/concepts/coordination",
+                  "en/concepts/signals",
+                  "en/concepts/agent-state",
+                  "en/concepts/outcomes"
+                ]
+              },
+              {
+                "group": "Governance",
+                "pages": [
+                  "en/concepts/context-use",
+                  "en/concepts/triggers-and-webhooks",
+                  "en/concepts/privacy",
+                  "en/concepts/receipts",
+                  "en/concepts/console-access"
+                ]
+              },
+              {
+                "group": "Security",
+                "pages": [
+                  "en/security/threat-model",
+                  "en/security/questionnaire",
+                  "en/security/data-use",
+                  "en/security/incident-response",
+                  "en/security/api-versioning"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Guides",
+            "groups": [
+              {
+                "group": "Agents",
+                "pages": [
+                  "en/guides/voice-agents",
+                  "en/guides/whatsapp-agents",
+                  "en/guides/internal-agents"
+                ]
+              },
+              {
+                "group": "By sector",
+                "pages": [
+                  "en/guides/retail-agents",
+                  "en/guides/legal-agents",
+                  "en/guides/health-agents"
+                ]
+              },
+              {
+                "group": "Integrations",
+                "pages": [
+                  "en/guides/mcp",
+                  "en/guides/system-webhooks",
+                  "en/guides/opentelemetry",
+                  "en/guides/from-mem0"
+                ]
+              },
+              {
+                "group": "Operations",
+                "pages": [
+                  "en/guides/replay-in-ci",
+                  "en/guides/gateways",
+                  "en/guides/resolver-worker",
+                  "en/guides/metadata-only",
+                  "en/guides/derive-types"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Integrations",
+            "groups": [
+              {
+                "group": "Get started",
+                "pages": [
+                  "en/integrations/overview",
+                  "en/integrations/coding-assistants"
+                ]
+              },
+              {
+                "group": "Voice",
+                "pages": [
+                  "en/integrations/livekit",
+                  "en/integrations/pipecat",
+                  "en/integrations/elevenlabs",
+                  "en/integrations/vapi",
+                  "en/integrations/retell"
+                ]
+              },
+              {
+                "group": "Channels",
+                "pages": [
+                  "en/integrations/whatsapp",
+                  "en/integrations/twilio"
+                ]
+              },
+              {
+                "group": "Agent frameworks",
+                "pages": [
+                  "en/integrations/openai-agents",
+                  "en/integrations/langchain",
+                  "en/integrations/langgraph",
+                  "en/integrations/ai-sdk",
+                  "en/integrations/mastra",
+                  "en/integrations/google-adk",
+                  "en/integrations/strands",
+                  "en/integrations/pydantic-ai",
+                  "en/integrations/llamaindex",
+                  "en/integrations/crewai",
+                  "en/integrations/agno",
+                  "en/integrations/agent-framework",
+                  "en/integrations/semantic-kernel",
+                  "en/integrations/haystack",
+                  "en/integrations/camel",
+                  "en/integrations/dspy",
+                  "en/integrations/ag2",
+                  "en/integrations/genkit",
+                  "en/integrations/voltagent",
+                  "en/integrations/cloudflare-agents"
+                ]
+              },
+              {
+                "group": "Model SDKs",
+                "pages": [
+                  "en/integrations/openai",
+                  "en/integrations/anthropic",
+                  "en/integrations/bedrock",
+                  "en/integrations/google-genai",
+                  "en/integrations/litellm"
+                ]
+              },
+              {
+                "group": "Automation platforms",
+                "pages": [
+                  "en/integrations/n8n",
+                  "en/integrations/flowise",
+                  "en/integrations/langflow",
+                  "en/integrations/dify"
+                ]
+              },
+              {
+                "group": "MCP clients",
+                "pages": [
+                  "en/integrations/mcp/claude-code",
+                  "en/integrations/mcp/claude-desktop",
+                  "en/integrations/mcp/cursor",
+                  "en/integrations/mcp/vscode"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "SDKs",
+            "groups": [
+              {
+                "group": "SDKs",
+                "pages": [
+                  "en/sdk/python",
+                  "en/sdk/typescript"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "API reference",
+            "groups": [
+              {
+                "group": "Overview",
+                "pages": [
+                  "en/api"
+                ]
+              },
+              {
+                "group": "Write",
+                "pages": [
+                  "en/api/batch",
+                  "en/api/media-uploads",
+                  "en/api/ingest-files",
+                  "en/api/ingest-status",
+                  "en/api/ingest-file",
+                  "en/api/ingest-webhook",
+                  "en/api/ingest-webhook-challenge",
+                  "en/api/otel-traces",
+                  "en/api/feedback",
+                  "en/api/feedback-batch"
+                ]
+              },
+              {
+                "group": "Context",
+                "pages": [
+                  "en/api/context",
+                  "en/api/context-prefetch",
+                  "en/api/context-by-profile",
+                  "en/api/subject-tokens",
+                  "en/api/mcp"
+                ]
+              },
+              {
+                "group": "History",
+                "pages": [
+                  "en/api/history-search",
+                  "en/api/history-timeline",
+                  "en/api/history-timeline-by-profile",
+                  "en/api/history-open",
+                  "en/api/history-item",
+                  "en/api/history-tools"
+                ]
+              },
+              {
+                "group": "Agent memory",
+                "pages": [
+                  "en/api/agent-memory-block",
+                  "en/api/agent-memory-search",
+                  "en/api/agent-memory-tools",
+                  "en/api/agent-memory-notes-create",
+                  "en/api/agent-memory-notes",
+                  "en/api/agent-memory-note",
+                  "en/api/agent-memory-note-update",
+                  "en/api/agent-memory-note-retire",
+                  "en/api/agent-memory-note-versions",
+                  "en/api/agent-memory-notes-erase",
+                  "en/api/agent-memory-export",
+                  "en/api/agent-memory-distill",
+                  "en/api/agent-memory-proposals",
+                  "en/api/agent-memory-proposal-approve",
+                  "en/api/agent-memory-proposal-reject"
+                ]
+              },
+              {
+                "group": "Objects",
+                "pages": [
+                  "en/api/object",
+                  "en/api/object-timeline"
+                ]
+              },
+              {
+                "group": "Identity and profiles",
+                "pages": [
+                  "en/api/identity-assertions",
+                  "en/api/identity-assertions-create",
+                  "en/api/identity-assertion-retract",
+                  "en/api/identity-merge",
+                  "en/api/identity-unmerge",
+                  "en/api/identity-handles-block",
+                  "en/api/identity-links",
+                  "en/api/identity-link-end",
+                  "en/api/identity-suggestions",
+                  "en/api/identity-suggestion-accept",
+                  "en/api/identity-suggestion-dismiss",
+                  "en/api/profiles",
+                  "en/api/profiles-search",
+                  "en/api/profile",
+                  "en/api/profile-memory",
+                  "en/api/profile-fact-history",
+                  "en/api/profile-objects",
+                  "en/api/graph"
+                ]
+              },
+              {
+                "group": "Privacy and audit",
+                "pages": [
+                  "en/api/forget",
+                  "en/api/forget-list",
+                  "en/api/forget-status",
+                  "en/api/corrections",
+                  "en/api/facts-restore",
+                  "en/api/corrections-batch",
+                  "en/api/export",
+                  "en/api/export-download",
+                  "en/api/export-runs",
+                  "en/api/export-destination-credential",
+                  "en/api/receipts-search",
+                  "en/api/receipts",
+                  "en/api/receipts-verify",
+                  "en/api/lineage-receipt",
+                  "en/api/lineage-fact",
+                  "en/api/policy-simulate",
+                  "en/api/secrets",
+                  "en/api/dead-tasks",
+                  "en/api/dead-tasks-replay"
+                ]
+              },
+              {
+                "group": "Sources",
+                "pages": [
+                  "en/api/sources-arrived",
+                  "en/api/sources-coverage",
+                  "en/api/sources-me",
+                  "en/api/source-revoke"
+                ]
+              },
+              {
+                "group": "Patterns, measurement and usage",
+                "pages": [
+                  "en/api/trait-retract",
+                  "en/api/traits-dry-run",
+                  "en/api/traits-opt-out",
+                  "en/api/context-use",
+                  "en/api/context-use-conversations",
+                  "en/api/context-use-one-conversation",
+                  "en/api/context-use-conversation",
+                  "en/api/usage",
+                  "en/api/usage-budget",
+                  "en/api/usage-context-latency",
+                  "en/api/usage-prompt-cache"
+                ]
+              },
+              {
+                "group": "Review and assistant",
+                "pages": [
+                  "en/api/review-queue",
+                  "en/api/review-verdicts",
+                  "en/api/review-agreement",
+                  "en/api/review-cases",
+                  "en/api/assist",
+                  "en/api/assist-runs",
+                  "en/api/assist-run"
+                ]
+              },
+              {
+                "group": "Triggers and webhooks",
+                "pages": [
+                  "en/api/triggers-dry-run",
+                  "en/api/trigger-firings",
+                  "en/api/webhook-deliveries",
+                  "en/api/webhook-redeliver",
+                  "en/api/webhook-endpoint-test"
+                ]
+              },
+              {
+                "group": "Base-wide analysis",
+                "pages": [
+                  "en/api/insights-schema",
+                  "en/api/insights-overview",
+                  "en/api/insights-aggregate",
+                  "en/api/insights-profiles",
+                  "en/api/insights-search",
+                  "en/api/insights-episodes-sample",
+                  "en/api/insights-context",
+                  "en/api/insights-lineage",
+                  "en/api/insights-gaps",
+                  "en/api/insights-gaps-review",
+                  "en/api/insights-reveal",
+                  "en/api/mcp-insights"
+                ]
+              },
+              {
+                "group": "Turn records and replay",
+                "pages": [
+                  "en/api/turns",
+                  "en/api/turns-promote",
+                  "en/api/turn",
+                  "en/api/turns-search",
+                  "en/api/turns-index",
+                  "en/api/replay-cases",
+                  "en/api/scenarios-create",
+                  "en/api/scenarios-from-report",
+                  "en/api/scenarios",
+                  "en/api/scenario",
+                  "en/api/scenario-update",
+                  "en/api/scenario-runs-create",
+                  "en/api/scenario-run",
+                  "en/api/changes",
+                  "en/api/data-issues",
+                  "en/api/data-issue-ack",
+                  "en/api/intake-failed",
+                  "en/api/intake-failed-retry",
+                  "en/api/notifications"
+                ]
+              },
+              {
+                "group": "Typed state",
+                "pages": [
+                  "en/api/sdk-profile",
+                  "en/api/objects-push",
+                  "en/api/objects-snapshot",
+                  "en/api/objects-coverage",
+                  "en/api/types-fingerprint",
+                  "en/api/state-view",
+                  "en/api/state-read",
+                  "en/api/state-verify",
+                  "en/api/state-refresh-requests",
+                  "en/api/state-refresh-request-release",
+                  "en/api/content-release"
+                ]
+              },
+              {
+                "group": "Working memory",
+                "pages": [
+                  "en/api/agent-state-write",
+                  "en/api/agent-state-read",
+                  "en/api/profile-agent-state"
+                ]
+              },
+              {
+                "group": "Signals and constraints",
+                "pages": [
+                  "en/api/constraints",
+                  "en/api/profile-inferences",
+                  "en/api/profile-inference-correct",
+                  "en/api/profile-inference-delete",
+                  "en/api/review-requests-create",
+                  "en/api/review-requests",
+                  "en/api/review-request-resolve",
+                  "en/api/legal-holds-create",
+                  "en/api/legal-hold-release"
+                ]
+              },
+              {
+                "group": "Coordination",
+                "pages": [
+                  "en/api/coordination-check",
+                  "en/api/coordination-check-batch",
+                  "en/api/coordination-declare",
+                  "en/api/coordination-claims",
+                  "en/api/coordination-claim-release",
+                  "en/api/coordination-effects",
+                  "en/api/coordination-effect-settle",
+                  "en/api/handoffs-create",
+                  "en/api/handoff",
+                  "en/api/handoff-accept",
+                  "en/api/handoff-outcome",
+                  "en/api/suppressions",
+                  "en/api/suppressions-salt",
+                  "en/api/contact-keys",
+                  "en/api/coordination-reports",
+                  "en/api/coordination-overview",
+                  "en/api/coordination-shadow"
+                ]
+              },
+              {
+                "group": "Outcomes and experiments",
+                "pages": [
+                  "en/api/measure-outcomes",
+                  "en/api/measure-attribution",
+                  "en/api/measure-reconcile-uploads",
+                  "en/api/measure-reconcile",
+                  "en/api/measure-interleaving",
+                  "en/api/measure-experiments",
+                  "en/api/measure-power",
+                  "en/api/measure-counterfactual-runs-create",
+                  "en/api/measure-counterfactual-runs",
+                  "en/api/measure-counterfactual-run",
+                  "en/api/measure-unmet-demand"
+                ]
+              },
+              {
+                "group": "Control: access",
+                "pages": [
+                  "en/api/control/login",
+                  "en/api/control/second-factor",
+                  "en/api/control/token",
+                  "en/api/control/jwks",
+                  "en/api/control/me",
+                  "en/api/control/me-preferences",
+                  "en/api/control/me-preference-set",
+                  "en/api/control/me-second-factor",
+                  "en/api/control/recovery-codes",
+                  "en/api/control/second-factor-change",
+                  "en/api/control/second-factor-confirm",
+                  "en/api/control/invitation-preview",
+                  "en/api/control/invitation-accept"
+                ]
+              },
+              {
+                "group": "Control: single sign-on",
+                "pages": [
+                  "en/api/control/sso-discover",
+                  "en/api/control/sso-start",
+                  "en/api/control/sso-oidc-callback",
+                  "en/api/control/sso-saml-metadata",
+                  "en/api/control/sso-saml-acs",
+                  "en/api/control/sso-exchange",
+                  "en/api/control/sso-second-factor",
+                  "en/api/control/sso",
+                  "en/api/control/sso-save",
+                  "en/api/control/sso-remove",
+                  "en/api/control/sso-test",
+                  "en/api/control/sso-test-result"
+                ]
+              },
+              {
+                "group": "Control: people and roles",
+                "pages": [
+                  "en/api/control/users",
+                  "en/api/control/users-create",
+                  "en/api/control/user-roles",
+                  "en/api/control/user-deactivate",
+                  "en/api/control/user-reactivate",
+                  "en/api/control/user-invitation",
+                  "en/api/control/user-history",
+                  "en/api/control/second-factor-reset",
+                  "en/api/control/roles"
+                ]
+              },
+              {
+                "group": "Control: tenant and projects",
+                "pages": [
+                  "en/api/control/tenants-create",
+                  "en/api/control/tenant",
+                  "en/api/control/projects",
+                  "en/api/control/projects-create",
+                  "en/api/control/space",
+                  "en/api/control/space-delete",
+                  "en/api/control/space-deletion-receipt",
+                  "en/api/control/space-kms-key"
+                ]
+              },
+              {
+                "group": "Control: sources and keys",
+                "pages": [
+                  "en/api/control/sources",
+                  "en/api/control/sources-create",
+                  "en/api/control/keys",
+                  "en/api/control/keys-create",
+                  "en/api/control/keys-rotate",
+                  "en/api/control/keys-revoke",
+                  "en/api/control/source-revoke",
+                  "en/api/control/secret-refs",
+                  "en/api/control/secret-refs-create"
+                ]
+              },
+              {
+                "group": "Control: configuration",
+                "pages": [
+                  "en/api/control/config-types",
+                  "en/api/control/config-document",
+                  "en/api/control/config-diffs-list",
+                  "en/api/control/config-observed",
+                  "en/api/control/config-diffs",
+                  "en/api/control/config-diff-approve",
+                  "en/api/control/config-diff-reject",
+                  "en/api/control/config-diff-rollback",
+                  "en/api/control/config-history",
+                  "en/api/control/config-proposals"
+                ]
+              },
+              {
+                "group": "Control: usage",
+                "pages": [
+                  "en/api/control/usage",
+                  "en/api/control/usage-statement"
+                ]
+              },
+              {
+                "group": "Control: platform operations",
+                "pages": [
+                  "en/api/control/cells",
+                  "en/api/control/cells-create",
+                  "en/api/control/placement",
+                  "en/api/control/placement-move",
+                  "en/api/control/placement-complete",
+                  "en/api/control/quotas",
+                  "en/api/control/snapshot",
+                  "en/api/control/revocations",
+                  "en/api/control/access-changes",
+                  "en/api/control/usage-push",
+                  "en/api/control/deletion-receipt-push"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "FAQ",
+            "groups": [
+              {
+                "group": "FAQ",
+                "pages": [
+                  "en/faq"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/ainiadra",
+      "website": "https://niadra.com"
+    }
+  },
+  "redirects": [
+    {
+      "source": "/security/subprocessors",
+      "destination": "/security/data-use"
+    },
+    {
+      "source": "/en/security/subprocessors",
+      "destination": "/en/security/data-use"
+    },
+    {
+      "source": "/errors/invalid_input",
+      "destination": "/errors#o-catálogo"
+    },
+    {
+      "source": "/errors/verification_not_allowed",
+      "destination": "/errors#o-catálogo"
+    },
+    {
+      "source": "/errors/about_without_link",
+      "destination": "/errors#o-catálogo"
+    },
+    {
+      "source": "/errors/unauthenticated",
+      "destination": "/errors#o-catálogo"
+    },
+    {
+      "source": "/errors/forbidden",
+      "destination": "/errors#o-catálogo"
+    },
+    {
+      "source": "/errors/scope_missing",
+      "destination": "/errors#o-catálogo"
+    },
+    {
+      "source": "/errors/operation_not_allowed",
+      "destination": "/errors#o-catálogo"
+    },
+    {
+      "source": "/errors/not_found",
+      "destination": "/errors#o-catálogo"
+    },
+    {
+      "source": "/errors/conflict",
+      "destination": "/errors#o-catálogo"
+    },
+    {
+      "source": "/errors/wrong_cell",
+      "destination": "/errors#o-catálogo"
+    },
+    {
+      "source": "/errors/rate_limited",
+      "destination": "/errors#o-catálogo"
+    },
+    {
+      "source": "/errors/internal_error",
+      "destination": "/errors#o-catálogo"
+    },
+    {
+      "source": "/errors/unavailable",
+      "destination": "/errors#o-catálogo"
+    },
+    {
+      "source": "/errors/personal_data_in_agent_memory",
+      "destination": "/errors#o-catálogo"
+    }
+  ]
+}

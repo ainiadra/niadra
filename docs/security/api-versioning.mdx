@@ -1,0 +1,62 @@
+---
+title: "Política de versões da API"
+description: "A versão no caminho, o que conta como mudança incompatível, o prazo de convivência das versões, o aviso por e-mail e os cabeçalhos de depreciação. Em vigor a partir da primeira mudança incompatível."
+---
+
+A API de dados e a API de controle da Niadra levam a versão no caminho: `/v1`. Esta página é a política que diz quando esse número muda, o que a sua integração pode contar que não muda, e como e com que antecedência a Niadra avisa. Ela vale para a API HTTP, para o servidor MCP e para os dois SDKs, que falam a mesma API.
+
+## O que não muda a versão
+
+Dentro de `/v1`, a Niadra pode, sem aviso e a qualquer momento:
+
+- acrescentar um campo a uma resposta;
+- acrescentar uma rota, um parâmetro opcional, um tipo de evento, um valor novo a um enum de saída ou uma ferramenta MCP;
+- acrescentar um cabeçalho de resposta;
+- relaxar um limite (aceitar um lote maior, uma taxa maior);
+- corrigir um comportamento que contrariava a documentação, quando a correção não muda o sentido de um campo existente.
+
+Por isso o seu código precisa ignorar campos e valores que não conhece. Os dois SDKs fazem isso: o de Python descarta campos desconhecidos nas respostas (`extra="ignore"` nos modelos de resposta, `niadra-sdk-python/src/niadra/models/_base.py`) e o de TypeScript lê as respostas como JSON, sem esquema estrito que recuse um campo a mais. Um enum de saída que ganha um valor novo é uma mudança compatível: trate um valor que o seu código não conhece como "outro".
+
+## O que é uma mudança incompatível
+
+Qualquer coisa que faça um cliente correto de hoje parar de funcionar ou passar a entender um dado errado:
+
+- remover um campo, uma rota, um parâmetro ou uma ferramenta MCP;
+- mudar o sentido, o tipo ou o formato de um campo existente;
+- tornar obrigatório o que era opcional, ou apertar uma validação que aceitava um valor antes aceito;
+- mudar um código de erro ou de status de uma situação já documentada;
+- reduzir um limite documentado.
+
+Uma mudança dessas nasce em `/v2`. A `/v1` continua respondendo como antes.
+
+## Convivência, aviso e depreciação
+
+Quando a `/v2` existir:
+
+1. **Doze meses de convivência.** A `/v1` continua respondendo por pelo menos 12 meses depois do anúncio da `/v2`, com as mesmas garantias de disponibilidade do contrato. Correções de segurança entram nas duas.
+2. **Aviso por e-mail.** No dia do anúncio, o contato técnico de cada projeto recebe um e-mail com o que muda, o guia de migração e a data em que a `/v1` para de responder. Lembretes vão a 90, 30 e 7 dias da data.
+3. **Cabeçalhos de depreciação.** A partir do anúncio, toda resposta de uma rota depreciada, ou de uma rota com um campo depreciado, leva `Deprecation: @<instante>` (RFC 9745), que diz desde quando ela está depreciada, e `Sunset: <data HTTP>` (RFC 8594), que diz quando ela para; um cabeçalho `Link` com `rel="deprecation"` aponta para o guia de migração daquela rota. Os três são expostos no CORS, para o Console e para clientes no navegador. O intervalo entre `Deprecation` e `Sunset` é sempre de pelo menos 12 meses. Os dois SDKs leem esses cabeçalhos: na primeira resposta de cada rota depreciada, registram um aviso com as duas datas e o link (no logger `niadra` em Python, no `logger` do cliente em TypeScript), uma vez por processo e sem o caminho da requisição, que pode levar um id.
+4. **Os SDKs migram junto.** Uma versão maior de cada SDK (`niadra` no PyPI, `@niadra/sdk` no npm) fala a `/v2`; a versão anterior continua falando a `/v1` até o `Sunset` e recebe correções de segurança até lá.
+
+## O que vale hoje
+
+Em 30/09/2026 só existe a `/v1`. O servidor envia os cabeçalhos da seção anterior em toda resposta de uma rota que esteja no registro de depreciações, e esse registro está vazio: nenhuma rota, campo ou ferramenta foi depreciada, então hoje nenhuma resposta leva `Deprecation` nem `Sunset`. Um teste do servidor recusa uma entrada do registro cuja rota não exista, cujo `Sunset` fique a menos de 12 meses do `Deprecation` ou cujo link não aponte para esta documentação. Esta política entra em vigor com a primeira mudança incompatível.
+
+Antes do lançamento público, enquanto a plataforma não tem cliente em produção, a Niadra pode mudar a `/v1` sem esse rito, e é assim que o histórico de mudanças de 2026 deve ser lido. A partir do primeiro contrato, a política acima é o compromisso, e entra nele.
+
+## Como saber de uma mudança
+
+- A [referência da API](/api) é gerada do contrato OpenAPI do servidor a cada versão publicada, então ela descreve a `/v1` como está no ar; o `llms.txt` desta documentação acompanha.
+- Uma mudança incompatível é anunciada por e-mail ao contato técnico de cada projeto, como diz a seção anterior; uma mudança compatível não gera aviso.
+- Os SDKs levam número de versão próprio (hoje `niadra` 0.9.0 e `@niadra/sdk` 0.9.0); a versão maior de cada um é a que muda de versão da API.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Limites e convenções" href="/conventions">
+    versão, autenticação, idempotência, limites e dado pessoal fora da URL.
+  </Card>
+  <Card title="Referência da API" href="/api">
+    a `/v1` como está no ar.
+  </Card>
+</CardGroup>

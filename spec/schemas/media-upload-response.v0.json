@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/media-upload-response.v0.json",
+  "title": "Niadra Media Upload Response v0",
+  "description": "The reference for a reserved file and the short-lived signed URL its bytes go to. See spec/media-upload.md.",
+  "additionalProperties": false,
+  "properties": {
+    "media_ref": {
+      "title": "Media Ref",
+      "type": "string"
+    },
+    "upload_url": {
+      "title": "Upload Url",
+      "type": "string"
+    },
+    "upload_headers": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Send exactly these headers with the upload; the store refuses other bytes.",
+      "title": "Upload Headers",
+      "type": "object"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "media_ref",
+    "upload_url",
+    "expires_at"
+  ],
+  "type": "object"
+}

@@ -1,0 +1,5 @@
+---
+title: "Liberar um pedido de releitura"
+description: "Um pedido emprestado que o worker não consegue responder: o objeto não está na fonte (`not_found`) ou a leitura falhou (`failed`). O pedido sai na hora e a chamada paga conta; uma revalidação de watch cai em `refetch.unconfirmed_watch` do tipo."
+openapi: "/openapi/pt/cell.json POST /v1/state/refresh-requests/{request_id}/release"
+---

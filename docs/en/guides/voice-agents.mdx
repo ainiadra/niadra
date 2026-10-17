@@ -1,0 +1,263 @@
+---
+title: "Voice agents"
+description: "Context read while the phone rings and served from the SDK's memory on every turn, network attestation, two-pass transcripts and handoff."
+---
+
+A voice agent has less time than any other agent. The caller hears silence while the prompt is built, so the context has to be ready before the first word, and every lookup during the call has to fit inside a spoken turn. This guide wires a voice agent to Niadra from the moment the phone rings to the moment the call ends: context during the ring, history lookups sized for speech, the call metadata that proves who is calling, the transcript in two passes and the handoff to a human.
+
+We follow Marina Souza. At 2:02 pm she complained on WhatsApp that the technician never showed up. At 2:06 pm the billing agent posted a $40 credit on invoice 0823. At 2:07 pm she calls. The voice agent answers already knowing both.
+
+## What the voice agent receives
+
+The `voice` view is the shortest channel view. It carries who the caller is, what is still open, what other agents just did and the history highlights that change the conversation, sized so the agent can read it before it speaks. Anything that happened on another channel after the pack was compiled arrives in `live`, and it goes at the end of the prompt.
+
+| Budget | Value | Where it is set |
+|---|---|---|
+| The call's first read, while the phone rings | 1.5 s | SDK `Timeouts.context_voice_start` / `contextVoiceStart` |
+| A turn's wait for the read of its words, already in flight | 200 ms | SDK `Timeouts.context_voice` / `contextVoice` |
+| History navigation time budget, voice | 300 ms | SDK `navigation_voice` / `navigationVoice` |
+| Tokens returned by a history search | 300 | `max_tokens=300` |
+
+The SDK keeps its own time budget, independent of the voice platform. If the budget runs out, the call carries on and the agent speaks with what it has.
+
+In both SDKs, a voice turn never waits on a round trip to the region for what can be known in advance. The pinned pack is the same bytes for the whole call, so the first read brings it and every later turn gets it from the SDK's memory at once, whatever its age, while the SDK revalidates it by ETag in the background. `begin()` starts that first read when the call starts (the ring, the inbound webhook, the caller joining the room) and `ready()` waits for it within `context_voice_start` (1.5 s: a cold connection costs three round trips, TCP, TLS and the request, plus the server's first compile). While the customer speaks, the SDK sends the partial transcript with `prefetch()` and, once it has stayed the same for 200 ms, reads the turn with it; the final turn takes that read's slots and delta when its words start with the partial's and the partial carries at least three quarters of them. The 200 ms budget (`context_voice`) only covers the wait for a read already in flight; past it, the turn goes out with the pinned body and no slots, and the read goes on in the background, revalidates the body and leaves its delta for the next turn. On a client's first voice read, it measures the round trip to the region once (`GET /healthz`) and logs a warning when a budget cannot hold it. Ending the conversation drops what the SDK kept for it.
+
+## Steps
+
+### 1. Read the context while the phone rings
+
+Start the conversation as soon as your voice platform reports the inbound call, and ask for the context in the same handler. By the time the call is answered, the pack is in the prompt. The calling number is the subject; the platform call id is your `conversation_id`. Before the first event the call has proved nothing yet, and a read without proof comes out at V0, a level at which the starting policy releases nothing. That is why the handler first records the carrier's network attestation with `verify()`, which is sent at once, opens the conversation and proves its level. While the customer speaks, send the partial transcript with `prefetch()` (the LiveKit and Pipecat adapters do it, and Retell in TypeScript too): the read that answers the turn finds their memory warm and the SDK itself reads the turn as soon as the partial settles, so the final turn arrives with its slots ready; a prefetch never delays or fails a turn. In the adapters, the first read starts when the call starts: LiveKit and Pipecat when the caller joins, Retell, Vapi and ElevenLabs on the call start webhook (which waits up to 1.5 s for it), Twilio on the ringing webhook, after the attestation. The server ([`POST /v1/context/prefetch`](/en/api/context-prefetch)) reuses the work only for the identical `query`; a longer transcript still finds the customer's memory already open, and a turn with time words or a count is recomputed at the read.
+
+The memory of a customer who tends to call after writing is already open when the phone rings: a customer whose history shows two returns by voice within 72 hours of a contact on another channel, in the last 180 days, is watched for 72 hours after a read on that other channel, and the read process keeps their retrieval entry at the current generation of the profile, so the first turn of the call finds the rows open. The prewarm respects `settings.prewarm_per_minute` (loads per minute in the space; zero by default, that is, off), loads nothing while the retrieval cache is above 75% of its bytes, so it never evicts a customer being served, and watches only reads through a confirmed handle, through the confirmed view of the profile. A turn made only of "thanks", "ok" or "can you repeat?" passes the intent gate: no slots and no prefetch, the pinned skeleton alone, and `prefetch()` prepares nothing for it.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+
+niadra = Niadra(channel="voice")
+
+# The carrier's STIR/SHAKEN attestation: A proves V2, B and C prove V1
+ATTESTED = {"A": "V2", "B": "V1", "C": "V1"}
+
+def on_incoming_call(call):
+    caller = phone(call.from_number)  # +14155550123
+    level = ATTESTED.get(call.network_attestation)
+    if level:
+        niadra.verify("network_attestation", level, handle=caller, conversation_id="call-4471")
+    conversation = niadra.conversation(
+        "call-4471",
+        subject=caller,
+        view="voice",
+        verification="V2",
+    )
+    ctx = conversation.ready()  # the call's first read, within 1.5 s; the phone rings meanwhile
+    call.agent.set_instructions(f"{AGENT_INSTRUCTIONS}\n\n{ctx.system_block}")
+    return conversation
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+
+// The carrier's STIR/SHAKEN attestation: A proves V2, B and C prove V1
+const ATTESTED: Record<string, "V1" | "V2"> = { A: "V2", B: "V1", C: "V1" };
+
+async function onIncomingCall(call: IncomingCall) {
+  const caller = handles.phone(call.fromNumber); // +14155550123
+  const level = ATTESTED[call.networkAttestation];
+  if (level) {
+    await niadra.verify({ handle: caller, method: "network_attestation", level, conversation_id: "call-4471" });
+  }
+  const conversation = niadra.conversation({
+    subject: caller,
+    channel: "voice",
+    conversation_id: "call-4471",
+    verification: "V2",
+  });
+  const ctx = await conversation.ready(); // the call's first read, within 1.5 s; the phone rings meanwhile
+  await call.agent.setInstructions(`${AGENT_INSTRUCTIONS}\n\n${ctx.text}`);
+  return conversation;
+}
+```
+```bash cURL
+BASE=https://acme-prod.us-east-2.api.niadra.com
+
+# The carrier's attestation A proves V2 for this call
+curl -X POST "$BASE/v1/batch" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"items": [{
+    "type": "verify",
+    "idempotency_key": "call-4471-attestation",
+    "method": "network_attestation",
+    "level": "V2",
+    "handle": { "type": "phone_e164", "value": "+14155550123" },
+    "conversation_id": "call-4471",
+    "occurred_at": "2026-09-22T17:07:01Z"
+  }]}'
+
+curl -X POST "$BASE/v1/context" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subject": { "type": "phone_e164", "value": "+14155550123" },
+    "view": "voice",
+    "verification": "V2",
+    "conversation_id": "call-4471"
+  }'
+```
+</CodeGroup>
+
+With `conversation_id`, the server pins the pack: every turn of this call gets the same bytes, so the model provider keeps the prompt prefix cached. What changes during the call (a new action by another agent, a message on WhatsApp) comes as a delta and as live turns. In Python, append `ctx.turn_block` at the end of each turn; in TypeScript, append `ctx.suffix`. On the turns that follow, `context()` returns the pinned body from the SDK's memory at once and the slots of the read `prefetch()` made of the turn's words.
+
+<Tip>
+In TypeScript, a conversation on channel `voice` uses the `voice` view by default. Pass `target` with the provider and model of your speech agent: for Claude, OpenAI and Gemini models the pack comes out sized for their prompt cache; another model needs its floor in the space settings.
+</Tip>
+
+### 2. Send the call metadata
+
+The verification level is what the call proved, never a guess. Network attestation from the carrier (STIR/SHAKEN and its equivalents) is the strongest signal a call carries before any question is asked. Level A maps to V2; levels B and C map to V1. A hidden caller id or a PBX number is V0 or V1, and the agent identifies the person by conversation.
+
+Send the call details in the `voice` block of the first event. A call often has two ids, the platform id and the trunk id: put the second one in `conversation_aliases` so both resolve to the same conversation.
+
+<CodeGroup>
+```python Python
+conversation.customer(
+    "Hi, it's Marina. The technician never showed up this morning.",
+    conversation_aliases=["trunk-7f2a9"],
+    voice={
+        "ani": "+14155550123",
+        "dnis": "+18005550100",
+        "trunk": "sip-east-2",
+        "network_attestation": "A",
+        "answered_at": "2026-09-22T17:07:03Z",
+        "turn_offset_ms": 2400,
+    },
+)
+```
+```typescript TypeScript
+conversation.track({
+  speaker: "customer",
+  text: "Hi, it's Marina. The technician never showed up this morning.",
+  conversation_aliases: ["trunk-7f2a9"],
+  voice: {
+    ani: "+14155550123",
+    dnis: "+18005550100",
+    trunk: "sip-east-2",
+    network_attestation: "A",
+    answered_at: "2026-09-22T17:07:03Z",
+    turn_offset_ms: 2400,
+  },
+});
+```
+</CodeGroup>
+
+The effective level is always the lowest of three values: what you requested, the ceiling of your source and what the conversation proved. A customer-facing agent source starts with a V2 ceiling and can go up to V3, the level of the OTP it runs itself. The response tells you what happened in `verification.requested`, `verification.effective` and `verification.reason`.
+
+### 3. Let the agent look up the history, sized for speech
+
+The pack answers the most common question on its own: its "History" line says whether this happened before and how it was settled. When the caller brings up something older, the agent searches. Bind the tools to the caller in your code, so the model chooses the query and never the customer, and use the voice budget.
+
+<CodeGroup>
+```python Python
+kit = niadra.tools(phone("+14155550123"), verification="V2", conversation_id="call-4471", voice=True)
+
+# Hand kit.definitions to your speech model; route its tool calls here:
+output = kit.call("search_customer_history", {"query": "credit for missed technician visit"})
+```
+```typescript TypeScript
+const kit = conversation.tools(); // bound to the caller, voice budget
+
+// Hand kit.definitions to your speech model; route its tool calls here:
+const output = await kit.call("search_customer_history", { query: "credit for missed technician visit" });
+```
+</CodeGroup>
+
+A search called from a voice conversation returns up to 300 tokens, cut by value, with a `recurrence` block when the query matches a category: how many complaints about that topic there were in the last 90 days, the date of the last one and how it was settled.
+
+### 4. Record what the agent says
+
+Capture the agent turns as they happen. Call `mark_injected()` (Python) or `markInjected()` (TypeScript) each time the pack goes into the prompt: the agent's next turns and actions then carry a `context_stamp` with the ETag of that pack and the moment it went in, which is how the [context use](/en/concepts/context-use) measurement tells a late context from an unused one. If your agent is built on the OpenAI client, `wrap()` in either SDK injects the pack, stamps it and records the answers for you.
+
+<CodeGroup>
+```python Python
+ctx = conversation.context()
+conversation.mark_injected(ctx)  # the pack went into this prompt
+conversation.agent("Marina, I can see the $40 credit on your August bill was already applied at 2:06 pm.")
+```
+```typescript TypeScript
+const ctx = await conversation.context();
+conversation.markInjected(ctx); // the pack went into this prompt
+conversation.agent("Marina, I can see the $40 credit on your August bill was already applied at 2:06 pm.");
+```
+</CodeGroup>
+
+### 5. Hand off to a human, warm
+
+When the caller asks for a person, record the handoff before the transfer. With `mode="warm"`, the receiving desk reads the `brief` view: a short, spoken-length briefing your platform can whisper to the attendant. The attendant keeps working in the tool your company already uses; the context reaches it by API, webhook or MCP.
+
+<CodeGroup>
+```python Python
+conversation.handoff("human", target_source="0192f79e-11ae-7f64-9b72-a05162839ea4", reason="asked for a person", mode="warm")
+
+brief = niadra.context(subject=phone("+14155550123"), view="brief", verification="V2", conversation_id="call-4471")
+```
+```typescript TypeScript
+await conversation.handoff({ target: "human", target_source: "0192f79e-11ae-7f64-9b72-a05162839ea4", reason: "asked for a person", mode: "warm" });
+
+const brief = await niadra.context({ subject: handles.phone("+14155550123"), view: "brief", verification: "V2", conversation_id: "call-4471" });
+```
+</CodeGroup>
+
+A transfer whose destination never reads the context within 10 minutes shows up as a handoff without reading in the measurement.
+
+### 6. End the call, then send the final transcript
+
+End the conversation the moment the call hangs up. In Python, leaving the `with` block does it; you can also call `end()`. That closes the session at once instead of waiting for inactivity, and the derived memory comes right after the session ends, with a one-minute target.
+
+<CodeGroup>
+```python Python
+niadra.track({
+    "channel": "voice",
+    "conversation_id": "call-4471",
+    "handles": [phone("+14155550123")],
+    "speaker": {"role": "system"},
+    "kind": "system_event",
+    "canonical_type": "call.ended",
+    "voice": {"ended_at": "2026-09-22T17:11:40Z", "end_reason": "caller_hangup", "recording_ref": "rec_88213"},
+})
+conversation.end()
+```
+```typescript TypeScript
+conversation.track({
+  speaker: "system",
+  kind: "system_event",
+  canonical_type: "call.ended",
+  voice: { ended_at: "2026-09-22T17:11:40Z", end_reason: "caller_hangup", recording_ref: "rec_88213" },
+});
+await conversation.end();
+```
+</CodeGroup>
+
+Voice platforms deliver in two passes: the real-time transcript during the call and a better one after it. Send the post-call transcript as new events on the same `conversation_id`, with their own idempotency keys. Late data is never an update: the turns of the post-call transcript carry times before the `conversation.ended` you sent at hang-up, so they join the same session, which closes again at once and is extracted again, and the episode gets a new version, whether the transcript arrives minutes or hours later; a turn timed after the end opens a new session in the same conversation, and the memory derived from it sits beside the earlier one. That is why the end's `occurred_at` has to be the real hang-up time. Turns with speech-to-text confidence below the threshold do not count as questions or claims in the measurement.
+
+<Note>
+The audio itself never travels inside an event. Upload the recording with `upload_media()` in Python or `uploadMedia()` in TypeScript, passing the caller as `subject` so erasing the customer also erases the recording, and put the returned `media_ref` in `voice.recording_ref` or `content.media_ref`, with its SHA-256. Over HTTP, [`POST /v1/media/uploads`](/en/api/media-uploads) returns the URL and the exact `upload_headers` to send with the `PUT`.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Context and views" href="/en/concepts/context">
+    layers, pinning, live turns and delta.
+  </Card>
+  <Card title="Identity and verification" href="/en/concepts/identity">
+    how V0 to V4 are proven and capped.
+  </Card>
+  <Card title="History navigation" href="/en/concepts/history">
+    search, timeline and open, with budgets.
+  </Card>
+  <Card title="WhatsApp agents" href="/en/guides/whatsapp-agents">
+    the other side of the 2:02 pm message.
+  </Card>
+</CardGroup>

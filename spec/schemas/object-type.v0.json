@@ -1,0 +1,2095 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/object-type.v0.json",
+  "title": "Niadra Object Type v0",
+  "description": "One object type of a company's type registry: fields, sources, freshness, lifecycle, timers, readings and relations, declared or derived from the company's schema. See spec/object-type.md.",
+  "$defs": {
+    "AccessRule": {
+      "additionalProperties": false,
+      "properties": {
+        "readers": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Readers",
+          "type": "array"
+        },
+        "purposes": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Purposes",
+          "type": "array"
+        },
+        "effect": {
+          "enum": [
+            "allow",
+            "mask",
+            "deny"
+          ],
+          "title": "Effect",
+          "type": "string"
+        }
+      },
+      "required": [
+        "readers",
+        "effect"
+      ],
+      "title": "AccessRule",
+      "type": "object"
+    },
+    "AgentStatePolicy": {
+      "additionalProperties": false,
+      "description": "How an agent's working state of a type is scoped and written. A state is kept whole, with no cap: a write is bounded only by the request's own size limit, and refused there.",
+      "properties": {
+        "scope": {
+          "default": "conversation",
+          "enum": [
+            "conversation",
+            "task",
+            "object",
+            "subject"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "write": {
+          "default": "both",
+          "description": "The write modes allowed.",
+          "enum": [
+            "cas",
+            "merge_by_key",
+            "both"
+          ],
+          "title": "Write",
+          "type": "string"
+        }
+      },
+      "title": "AgentStatePolicy",
+      "type": "object"
+    },
+    "Attribute": {
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+          "title": "Family",
+          "type": "string"
+        },
+        "vocabulary": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vocabulary"
+        }
+      },
+      "required": [
+        "family"
+      ],
+      "title": "Attribute",
+      "type": "object"
+    },
+    "Axis": {
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "enum": [
+            "source",
+            "derived",
+            "platform"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "rule": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_.-]{0,63}@[A-Za-z0-9_.-]{1,32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rule"
+        },
+        "immutable": {
+          "default": false,
+          "title": "Immutable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "origin"
+      ],
+      "title": "Axis",
+      "type": "object"
+    },
+    "Budget": {
+      "additionalProperties": false,
+      "properties": {
+        "units": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "const": "unlimited",
+              "type": "string"
+            }
+          ],
+          "title": "Units"
+        },
+        "per": {
+          "anyOf": [
+            {
+              "pattern": "^(item|object|turn|session|conversation|subject|space|day)(/[0-9]{1,6}(ms|s|min|h|d))?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The scope and period the units count in, `item/1h`.",
+          "title": "Per"
+        }
+      },
+      "required": [
+        "units"
+      ],
+      "title": "Budget",
+      "type": "object"
+    },
+    "ClaimPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "title": "Allowed",
+          "type": "boolean"
+        },
+        "class": {
+          "anyOf": [
+            {
+              "enum": [
+                "money",
+                "percent",
+                "date",
+                "quantity",
+                "count",
+                "duration",
+                "dosage",
+                "text"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Class"
+        },
+        "nature": {
+          "anyOf": [
+            {
+              "enum": [
+                "computed",
+                "quoted",
+                "observed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nature"
+        }
+      },
+      "required": [
+        "allowed"
+      ],
+      "title": "ClaimPolicy",
+      "type": "object"
+    },
+    "ClaimPurpose": {
+      "additionalProperties": false,
+      "properties": {
+        "on_stale": {
+          "const": "serve_with_prohibitions",
+          "default": "serve_with_prohibitions",
+          "title": "On Stale",
+          "type": "string"
+        },
+        "prohibitions": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Prohibitions",
+          "type": "array"
+        }
+      },
+      "title": "ClaimPurpose",
+      "type": "object"
+    },
+    "Completeness": {
+      "additionalProperties": false,
+      "properties": {
+        "levels": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+                "type": "string"
+              },
+              "maxItems": 8,
+              "minItems": 2,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Levels"
+        },
+        "total_field": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Field"
+        }
+      },
+      "title": "Completeness",
+      "type": "object"
+    },
+    "ContentPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "full",
+          "enum": [
+            "full",
+            "pointer",
+            "hash_only"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "scan": {
+          "default": "rules",
+          "enum": [
+            "required",
+            "rules",
+            "off"
+          ],
+          "title": "Scan",
+          "type": "string"
+        },
+        "fields": {
+          "description": "The fields holding content.",
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Fields",
+          "type": "array"
+        }
+      },
+      "title": "ContentPolicy",
+      "type": "object"
+    },
+    "DecidePurpose": {
+      "additionalProperties": false,
+      "properties": {
+        "on_stale": {
+          "default": "serve_with_age",
+          "enum": [
+            "serve_with_age",
+            "structured_refusal"
+          ],
+          "title": "On Stale",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "action": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action"
+        }
+      },
+      "title": "DecidePurpose",
+      "type": "object"
+    },
+    "DerivedField": {
+      "additionalProperties": false,
+      "description": "A field computed when the object is read, from the related objects of one relation (a look's pieces): never stored, so it follows every change of a related object at once.",
+      "properties": {
+        "agg": {
+          "enum": [
+            "min",
+            "max",
+            "count",
+            "all",
+            "any"
+          ],
+          "title": "Agg",
+          "type": "string"
+        },
+        "over": {
+          "description": "The relation whose related objects it is computed over.",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Over",
+          "type": "string"
+        },
+        "where": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A condition on each related object, in its own type's terms: `count` counts the ones it holds for, `all` and `any` say whether it holds for every one or for some, and `min` and `max` compare only those.",
+          "title": "Where"
+        },
+        "field": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The related objects' field `min` and `max` compare; only they name one.",
+          "title": "Field"
+        }
+      },
+      "required": [
+        "agg",
+        "over"
+      ],
+      "title": "DerivedField",
+      "type": "object"
+    },
+    "DisplayPurpose": {
+      "additionalProperties": false,
+      "properties": {
+        "on_stale": {
+          "const": "serve_with_age",
+          "default": "serve_with_age",
+          "title": "On Stale",
+          "type": "string"
+        }
+      },
+      "title": "DisplayPurpose",
+      "type": "object"
+    },
+    "ExpiredWithoutOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9]{1,6}(ms|s|min|h|d)$",
+              "type": "string"
+            },
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            }
+          ],
+          "description": "A duration, or the name of a value holding the deadline.",
+          "title": "After"
+        }
+      },
+      "required": [
+        "after"
+      ],
+      "title": "ExpiredWithoutOutcome",
+      "type": "object"
+    },
+    "FieldFreshness": {
+      "additionalProperties": false,
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/FreshnessClass"
+        },
+        "max_age": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9]{1,6}(ms|s|min|h|d)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Age"
+        },
+        "claim_max_age": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9]{1,6}(ms|s|min|h|d)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claim Max Age"
+        }
+      },
+      "required": [
+        "class"
+      ],
+      "title": "FieldFreshness",
+      "type": "object"
+    },
+    "FieldSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "string",
+            "text",
+            "number",
+            "money",
+            "percent",
+            "date",
+            "datetime",
+            "duration",
+            "bool",
+            "enum",
+            "list",
+            "ref"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 60,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The field's name in the space's language, as a text for a model says it (`coparticipação`); the field's own name otherwise.",
+          "title": "Label"
+        },
+        "logic": {
+          "default": "plain",
+          "enum": [
+            "plain",
+            "tri"
+          ],
+          "title": "Logic",
+          "type": "string"
+        },
+        "observers": {
+          "items": {
+            "$ref": "#/$defs/Observer"
+          },
+          "maxItems": 8,
+          "title": "Observers",
+          "type": "array"
+        },
+        "unobserved_blocks": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Unobserved Blocks",
+          "type": "array"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "claim": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClaimPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "attribute": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Attribute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "freshness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldFreshness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "completeness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Completeness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sensitivity": {
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "biometric",
+                "criminal_record",
+                "genetic",
+                "health",
+                "philosophical_belief",
+                "political_opinion",
+                "racial_or_ethnic_origin",
+                "religion",
+                "sexual_life",
+                "sexual_orientation",
+                "union_membership"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sensitivity"
+        },
+        "access": {
+          "items": {
+            "$ref": "#/$defs/AccessRule"
+          },
+          "maxItems": 20,
+          "title": "Access",
+          "type": "array"
+        },
+        "pii": {
+          "default": false,
+          "title": "Pii",
+          "type": "boolean"
+        },
+        "track_changes": {
+          "default": false,
+          "title": "Track Changes",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "FieldSpec",
+      "type": "object"
+    },
+    "Forbidden": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "From",
+          "type": "string"
+        },
+        "to": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "title": "Forbidden",
+      "type": "object"
+    },
+    "FreshnessClass": {
+      "enum": [
+        "volatile",
+        "price",
+        "semi",
+        "stable",
+        "none"
+      ],
+      "title": "FreshnessClass",
+      "type": "string"
+    },
+    "Key": {
+      "additionalProperties": false,
+      "properties": {
+        "natural": {
+          "description": "Paths of the natural key.",
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Natural",
+          "type": "array"
+        },
+        "fingerprint": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An expression whose value identifies the same observation across sources.",
+          "title": "Fingerprint"
+        },
+        "variant": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Variant"
+        },
+        "match": {
+          "description": "A pattern per identifier a conversation writes as it is (a case number, an order number), a path of the natural key or a declared field: what the text says in that shape names the customer's own object holding that value, never an object the customer is not tied to.",
+          "maxProperties": 8,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,63}$": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "title": "Match",
+          "type": "object"
+        }
+      },
+      "required": [
+        "natural"
+      ],
+      "title": "Key",
+      "type": "object"
+    },
+    "KnownDefect": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Field",
+          "type": "string"
+        },
+        "use_source": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Use Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "use_source"
+      ],
+      "title": "KnownDefect",
+      "type": "object"
+    },
+    "Licence": {
+      "additionalProperties": false,
+      "properties": {
+        "commercial_use": {
+          "default": "allowed",
+          "enum": [
+            "allowed",
+            "forbidden"
+          ],
+          "title": "Commercial Use",
+          "type": "string"
+        },
+        "exclude_from_purposes": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Exclude From Purposes",
+          "type": "array"
+        }
+      },
+      "title": "Licence",
+      "type": "object"
+    },
+    "Lifecycle": {
+      "additionalProperties": false,
+      "properties": {
+        "transitions": {
+          "items": {
+            "$ref": "#/$defs/Transition"
+          },
+          "maxItems": 100,
+          "title": "Transitions",
+          "type": "array"
+        },
+        "forbidden": {
+          "items": {
+            "$ref": "#/$defs/Forbidden"
+          },
+          "maxItems": 100,
+          "title": "Forbidden",
+          "type": "array"
+        },
+        "latches": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Latches",
+          "type": "array"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Outcome"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Lifecycle",
+      "type": "object"
+    },
+    "MirrorOf": {
+      "additionalProperties": false,
+      "description": "The company's system this type mirrors: Niadra mirrors and never is the barrier.",
+      "properties": {
+        "system": {
+          "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+          "title": "System",
+          "type": "string"
+        },
+        "derived_by": {
+          "default": "declaration",
+          "enum": [
+            "declaration",
+            "introspection",
+            "observation"
+          ],
+          "title": "Derived By",
+          "type": "string"
+        },
+        "fingerprint": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The fingerprint of the catalog an introspection read.",
+          "title": "Fingerprint"
+        },
+        "drift": {
+          "default": "alert",
+          "enum": [
+            "alert",
+            "ignore"
+          ],
+          "title": "Drift",
+          "type": "string"
+        }
+      },
+      "required": [
+        "system"
+      ],
+      "title": "MirrorOf",
+      "type": "object"
+    },
+    "Observer": {
+      "additionalProperties": false,
+      "properties": {
+        "who": {
+          "pattern": "^(machine|human|source:[a-z][a-z0-9_]{0,63})$",
+          "title": "Who",
+          "type": "string"
+        },
+        "rule": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_.-]{0,63}@[A-Za-z0-9_.-]{1,32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rule"
+        },
+        "validity": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9]{1,6}(ms|s|min|h|d)$",
+              "type": "string"
+            },
+            {
+              "const": "never",
+              "type": "string"
+            }
+          ],
+          "title": "Validity"
+        },
+        "overrides": {
+          "items": {
+            "pattern": "^(machine|human|source:[a-z][a-z0-9_]{0,63})$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Overrides",
+          "type": "array"
+        }
+      },
+      "required": [
+        "who",
+        "validity"
+      ],
+      "title": "Observer",
+      "type": "object"
+    },
+    "Outcome": {
+      "additionalProperties": false,
+      "properties": {
+        "provisional": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Provisional",
+          "type": "array"
+        },
+        "final": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Final",
+          "type": "array"
+        },
+        "expired_without_outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExpiredWithoutOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "vocabularies": {
+          "items": {
+            "$ref": "#/$defs/OutcomeVocabulary"
+          },
+          "maxItems": 10,
+          "title": "Vocabularies",
+          "type": "array"
+        }
+      },
+      "title": "Outcome",
+      "type": "object"
+    },
+    "OutcomeVocabulary": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Source",
+          "type": "string"
+        },
+        "map": {
+          "additionalProperties": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "maxProperties": 200,
+          "propertyNames": {
+            "maxLength": 64,
+            "minLength": 1
+          },
+          "title": "Map",
+          "type": "object"
+        },
+        "precedence": {
+          "default": 0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Precedence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "source",
+        "map"
+      ],
+      "title": "OutcomeVocabulary",
+      "type": "object"
+    },
+    "Purposes": {
+      "additionalProperties": false,
+      "description": "What a read with each purpose does with stale data: the read itself never refuses.",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/DisplayPurpose"
+        },
+        "claim": {
+          "$ref": "#/$defs/ClaimPurpose"
+        },
+        "decide": {
+          "$ref": "#/$defs/DecidePurpose"
+        }
+      },
+      "title": "Purposes",
+      "type": "object"
+    },
+    "Reading": {
+      "additionalProperties": false,
+      "properties": {
+        "expr": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expr"
+        },
+        "fields": {
+          "items": {
+            "pattern": "^(\\*|[a-z][a-z0-9_]{0,63})$",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Fields",
+          "type": "array"
+        },
+        "purposes": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Purposes",
+          "type": "array"
+        },
+        "prefer_source": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prefer Source"
+        },
+        "include_inputs": {
+          "default": false,
+          "title": "Include Inputs",
+          "type": "boolean"
+        }
+      },
+      "title": "Reading",
+      "type": "object"
+    },
+    "Refetch": {
+      "additionalProperties": false,
+      "properties": {
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/RefetchReason"
+          },
+          "maxItems": 20,
+          "title": "Reasons",
+          "type": "array"
+        },
+        "never": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Never",
+          "type": "array"
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefetchBudget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "unconfirmed_watch": {
+          "default": "fire",
+          "description": "A watch whose condition holds on a value that did not come live from its source asks the resolver worker for the value again (`watch_revalidation`, on the `interest_alert` budget). When none comes (no worker, the budget refused, the worker released it or gave up), the watch fires with `revalidated: false`, or is dropped.",
+          "enum": [
+            "fire",
+            "drop"
+          ],
+          "title": "Unconfirmed Watch",
+          "type": "string"
+        }
+      },
+      "title": "Refetch",
+      "type": "object"
+    },
+    "RefetchBudget": {
+      "additionalProperties": false,
+      "properties": {
+        "unit": {
+          "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+          "title": "Unit",
+          "type": "string"
+        },
+        "never_money": {
+          "const": true,
+          "default": true,
+          "description": "Budgets are in the company's units, never in money.",
+          "title": "Never Money",
+          "type": "boolean"
+        },
+        "min_interval": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9]{1,6}(ms|s|min|h|d)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Interval"
+        },
+        "floor": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9]{1,6}(ms|s|min|h|d)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Floor"
+        }
+      },
+      "required": [
+        "unit"
+      ],
+      "title": "RefetchBudget",
+      "type": "object"
+    },
+    "RefetchReason": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "when": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "When",
+          "type": "string"
+        },
+        "priority": {
+          "default": "normal",
+          "enum": [
+            "high",
+            "normal",
+            "low"
+          ],
+          "title": "Priority",
+          "type": "string"
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Budget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name",
+        "when"
+      ],
+      "title": "RefetchReason",
+      "type": "object"
+    },
+    "Relation": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}$",
+          "title": "Type",
+          "type": "string"
+        },
+        "via": {
+          "description": "The path in this object's state to the related objects' ids; with `match`, to the value they name this object by.",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Via",
+          "type": "string"
+        },
+        "many": {
+          "default": false,
+          "title": "Many",
+          "type": "boolean"
+        },
+        "status_field": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status Field"
+        },
+        "required_field": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required Field"
+        },
+        "match": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A reverse relation: the related objects are the customers' objects of `type` whose field of this name holds the value at `via` (a lawsuit's notices by its `case_number`).",
+          "title": "Match"
+        }
+      },
+      "required": [
+        "type",
+        "via"
+      ],
+      "title": "Relation",
+      "type": "object"
+    },
+    "Revisions": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "default": false,
+          "title": "Allowed",
+          "type": "boolean"
+        },
+        "novelty": {
+          "const": "keep_first_seen",
+          "default": "keep_first_seen",
+          "description": "A revision of the same observation keeps the time Niadra first knew of it.",
+          "title": "Novelty",
+          "type": "string"
+        }
+      },
+      "title": "Revisions",
+      "type": "object"
+    },
+    "Sanity": {
+      "additionalProperties": false,
+      "properties": {
+        "min_items": {
+          "minimum": 1,
+          "title": "Min Items",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "min_items"
+      ],
+      "title": "Sanity",
+      "type": "object"
+    },
+    "SourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "push",
+            "pull",
+            "tool_observation",
+            "batch",
+            "quote",
+            "human"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "precedence": {
+          "description": "Lower comes first.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Precedence",
+          "type": "integer"
+        },
+        "authoritative_for": {
+          "items": {
+            "pattern": "^(\\*|[a-z][a-z0-9_]{0,63})$",
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Authoritative For",
+          "type": "array"
+        },
+        "scope": {
+          "default": "global",
+          "enum": [
+            "global",
+            "customer",
+            "context"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "sanity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sanity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "known_defects": {
+          "items": {
+            "$ref": "#/$defs/KnownDefect"
+          },
+          "maxItems": 20,
+          "title": "Known Defects",
+          "type": "array"
+        },
+        "active_when": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active When"
+        },
+        "empty_means": {
+          "default": "unobserved",
+          "enum": [
+            "absent",
+            "unobserved"
+          ],
+          "title": "Empty Means",
+          "type": "string"
+        },
+        "cost": {
+          "default": "free",
+          "enum": [
+            "free",
+            "paid"
+          ],
+          "title": "Cost",
+          "type": "string"
+        },
+        "licence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Licence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "precedence"
+      ],
+      "title": "SourceSpec",
+      "type": "object"
+    },
+    "TimeAxes": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Axis"
+      },
+      "description": "Named time axes: each key other than `timers_on` is an axis.",
+      "properties": {
+        "timers_on": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The axis timers count on.",
+          "title": "Timers On"
+        }
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]{0,63}$"
+      },
+      "title": "TimeAxes",
+      "type": "object"
+    },
+    "Timer": {
+      "additionalProperties": false,
+      "properties": {
+        "due": {
+          "description": "When it fires: a date or a datetime on the `timers_on` axis.",
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Due",
+          "type": "string"
+        },
+        "once_per": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Once Per"
+        },
+        "on_fire": {
+          "items": {
+            "pattern": "^(notify|refresh\\([a-z][a-z0-9_]{0,63}\\)|transition\\([a-z][a-z0-9_]{0,63}->[a-z][a-z0-9_]{0,63}\\))$",
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "On Fire",
+          "type": "array"
+        }
+      },
+      "required": [
+        "due",
+        "on_fire"
+      ],
+      "title": "Timer",
+      "type": "object"
+    },
+    "Transition": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "const": "*",
+              "type": "string"
+            }
+          ],
+          "title": "From"
+        },
+        "to": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "To",
+          "type": "string"
+        },
+        "by": {
+          "items": {
+            "enum": [
+              "source",
+              "human",
+              "agent",
+              "clock"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "title": "By",
+          "type": "array"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "When"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "const": "required",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence"
+        },
+        "erase_derived": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Erase Derived",
+          "type": "array"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "by"
+      ],
+      "title": "Transition",
+      "type": "object"
+    },
+    "ValueSpec": {
+      "additionalProperties": false,
+      "description": "A value the company computes and Niadra keeps as a versioned fact: the rule stays the company's.",
+      "properties": {
+        "rule": {
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}@[A-Za-z0-9_.-]{1,32}$",
+          "title": "Rule",
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}(\\.[a-z][a-z0-9_]{0,63})*(@[A-Za-z0-9_.-]{1,32})?$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Inputs",
+          "type": "array"
+        },
+        "validity": {
+          "anyOf": [
+            {
+              "const": "until_input_or_rule_change",
+              "type": "string"
+            },
+            {
+              "pattern": "^[0-9]{1,6}(ms|s|min|h|d)$",
+              "type": "string"
+            }
+          ],
+          "default": "until_input_or_rule_change",
+          "title": "Validity"
+        },
+        "declared_gaps": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Declared Gaps",
+          "type": "array"
+        },
+        "gap_effect": {
+          "default": "unknown",
+          "enum": [
+            "errs_early",
+            "errs_late",
+            "unknown"
+          ],
+          "title": "Gap Effect",
+          "type": "string"
+        },
+        "absent_as": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The name the value takes when it is absent.",
+          "title": "Absent As"
+        }
+      },
+      "required": [
+        "rule"
+      ],
+      "title": "ValueSpec",
+      "type": "object"
+    },
+    "WorkingSet": {
+      "additionalProperties": false,
+      "properties": {
+        "enter_on": {
+          "items": {
+            "enum": [
+              "presented",
+              "engaged",
+              "related",
+              "watched",
+              "committed"
+            ],
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Enter On",
+          "type": "array"
+        },
+        "leave_after": {
+          "pattern": "^[0-9]{1,6}(ms|s|min|h|d)$",
+          "title": "Leave After",
+          "type": "string"
+        },
+        "cap": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cap"
+        }
+      },
+      "required": [
+        "enter_on",
+        "leave_after"
+      ],
+      "title": "WorkingSet",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "pattern": "^[a-z][a-z0-9_]{0,39}$",
+      "title": "Type",
+      "type": "string"
+    },
+    "version": {
+      "default": "1",
+      "pattern": "^[A-Za-z0-9_.-]{1,32}$",
+      "title": "Version",
+      "type": "string"
+    },
+    "ownership": {
+      "enum": [
+        "subject",
+        "shared",
+        "agent"
+      ],
+      "title": "Ownership",
+      "type": "string"
+    },
+    "nature": {
+      "default": "observed",
+      "enum": [
+        "observed",
+        "derived"
+      ],
+      "title": "Nature",
+      "type": "string"
+    },
+    "mirror_of": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MirrorOf"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "key": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Key"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "revisions": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Revisions"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "content": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentPolicy"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "time": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeAxes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "inputs": {
+      "description": "What a derived object is a function of.",
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]{0,63}(\\.[a-z][a-z0-9_]{0,63})*(@[A-Za-z0-9_.-]{1,32})?$",
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Inputs",
+      "type": "array"
+    },
+    "fields": {
+      "maxProperties": 200,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]{0,63}$": {
+          "$ref": "#/$defs/FieldSpec"
+        }
+      },
+      "title": "Fields",
+      "type": "object"
+    },
+    "values": {
+      "maxProperties": 50,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]{0,63}$": {
+          "$ref": "#/$defs/ValueSpec"
+        }
+      },
+      "title": "Values",
+      "type": "object"
+    },
+    "sources": {
+      "maxProperties": 20,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]{0,63}$": {
+          "$ref": "#/$defs/SourceSpec"
+        }
+      },
+      "title": "Sources",
+      "type": "object"
+    },
+    "union": {
+      "maxProperties": 200,
+      "patternProperties": {
+        "^(\\*|[a-z][a-z0-9_]{0,63})$": {
+          "enum": [
+            "first_authoritative_live",
+            "first_by_precedence",
+            "union",
+            "min",
+            "max",
+            "latest",
+            "divergence"
+          ],
+          "type": "string"
+        }
+      },
+      "title": "Union",
+      "type": "object"
+    },
+    "states": {
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]{0,63}$",
+        "type": "string"
+      },
+      "maxItems": 50,
+      "title": "States",
+      "type": "array"
+    },
+    "lifecycle": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Lifecycle"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "timers": {
+      "maxProperties": 20,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]{0,63}$": {
+          "$ref": "#/$defs/Timer"
+        }
+      },
+      "title": "Timers",
+      "type": "object"
+    },
+    "refetch": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Refetch"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "purposes": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Purposes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "readings": {
+      "maxProperties": 50,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]{0,63}(\\.[a-z][a-z0-9_]{0,63})?$": {
+          "$ref": "#/$defs/Reading"
+        }
+      },
+      "title": "Readings",
+      "type": "object"
+    },
+    "relations": {
+      "maxProperties": 20,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]{0,63}$": {
+          "$ref": "#/$defs/Relation"
+        }
+      },
+      "title": "Relations",
+      "type": "object"
+    },
+    "derived_fields": {
+      "maxProperties": 50,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]{0,63}$": {
+          "$ref": "#/$defs/DerivedField"
+        }
+      },
+      "title": "Derived Fields",
+      "type": "object"
+    },
+    "working_set": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkingSet"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "agent_state": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AgentStatePolicy"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "retention": {
+      "maxProperties": 20,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]{0,63}$": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9]{1,6}(ms|s|min|h|d)$",
+              "type": "string"
+            },
+            {
+              "const": "while_in_working_set",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "title": "Retention",
+      "type": "object"
+    }
+  },
+  "required": [
+    "type",
+    "ownership"
+  ],
+  "type": "object",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "ownership": {
+            "enum": [
+              "subject",
+              "shared"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "mirror_of"
+        ],
+        "properties": {
+          "mirror_of": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "nature"
+        ],
+        "properties": {
+          "nature": {
+            "const": "derived"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "inputs"
+        ],
+        "properties": {
+          "inputs": {
+            "minItems": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "inputs": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "working_set"
+        ],
+        "properties": {
+          "working_set": {
+            "type": "object"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "ownership": {
+            "const": "shared"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "agent_state"
+        ],
+        "properties": {
+          "agent_state": {
+            "type": "object"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "ownership": {
+            "const": "agent"
+          }
+        }
+      }
+    }
+  ]
+}

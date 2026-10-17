@@ -1,0 +1,116 @@
+---
+title: "Outcomes and attribution"
+description: "How much the agents sold, order by order, with the method of each attribution, the reconciliation with your BI, experiments by arm, interleaving and the tool counterfactual."
+---
+
+[Context use](/en/concepts/context-use) says whether each agent used the context it received. **Outcome measurement** goes one step further: it links what the agents did to what happened afterwards in your systems of record, order by order, with the method of each attribution said next to the value, and checks the total against your BI. It never multiplies a value by a confidence, never adds a probable value to a deterministic one, and never names a person.
+
+## Turning it on and off
+
+Outcome measurement is the space's `measurement` feature, on by default; a space turns it off in the `features` document, by the `security` role. The definitions live in the `measurement` document, of the `analysis` role: the revenue definition (gross or net of discount, coupons, shipping, taxes, cancellations, exchanges, split orders, currency), the **outcomes** (an object type, its success states, the revenue field, its lines with the item, the quantity, the state and the exposure token stamp, the handoff field, and `final_after`), the attribution (methods, click and view windows, the reconciliation tolerance), the experiments, the minimum of people for unmet demand and the cost per turn with memory off your company measured. The routes need the `analysis` role.
+
+## The revenue definition
+
+The number matches your BI only if Niadra counts revenue the way it does. The revenue definition of the `measurement` document (`revenue`) says what goes into each line's and each order's value, and it applies to every outcome link, to the daily totals and to the reconciliation. Without it, outcomes are counted and no value is attributed.
+
+A line's value (`lines.value`) is its amount before discounts, coupon, shipping and taxes: the price times the quantity. The rest comes in fields of their own, which you name:
+
+| Where | Field | What it holds |
+|---|---|---|
+| Line | `lines.discount` (default `discount`) | The line's own discount |
+| Line | `lines.tax` (default `tax`) | The line's tax, outside its amount |
+| Line | `lines.replaces` (default `replaces`) | The `line_id` of the line of the same order it replaced in an exchange |
+| Order | `coupon_field` | The coupon applied to the whole order |
+| Order | `shipping_field` | The order's shipping |
+| Order without lines | `revenue_field`, `discount_field`, `tax_field` | The order's amount, its discount and its tax |
+| Order | `purchase_field` | The id of the purchase the parts of an order split by seller came from |
+
+Each setting of the definition says what the value takes in:
+
+| Setting | Values | What it does |
+|---|---|---|
+| `basis` | `net_of_discount` (default), `gross` | Net takes the line's discount and the coupon off; gross takes neither off |
+| `coupons` | `prorated_by_line` (default), `order_level` | Prorated: the order's coupon is split over its lines in proportion to each line's value, in whole cents that add up to the exact coupon (the largest remainders take the cents left over). Order level: the lines stay whole, and the coupon comes off the order's value as a whole only (an order without lines, or a handoff that assisted the sale) |
+| `shipping` | `excluded` (default), `included` | Included: the shipping is split over the lines like a prorated coupon |
+| `taxes` | `excluded` (default), `included` | Included: each line takes its own tax, and an order without lines its own |
+| `cancellations` | `by_line` (default), `whole_order` | By line: a line in a failed state (`failed_states`, such as cancelled or returned) is worth nothing and the rest of the order keeps its value. Whole order: no line's state takes value; only the order's own state does |
+| `exchanges` | `new_item` (default), `same_item` | New item: the line that names the replaced one is a line like any other, and the replaced one follows its own state. Same item: the exchange is the same sale, so the replaced line keeps its value and attribution, even when returned, and the replacing line counts nothing |
+| `split_orders` | `by_seller` (default), `whole_order` | By seller: each part of a split purchase is an order. Whole order: the parts that name the same purchase (`purchase_field`) count as one order in the totals, each link carries the purchase in `purchase`, and the reconciliation compares order by order |
+
+A line that replaces another never takes a share of the coupon or the shipping: both were split when the order was placed, and a cancelled line's share leaves with it. A revised definition applies to the outcomes attributed after it: the links already written stay as they are, except those of the last 10 minutes, which are attributed again under the new definition, because it takes a few seconds to reach every process. An example, with the defaults: a R$ 199.90 dress with R$ 20.00 off and a R$ 100.00 bag, with a R$ 30.00 coupon, are worth R$ 160.62 and R$ 89.28.
+
+## From what the agent showed to the order
+
+An agent shows a list of cards; the customer buys one of them, in the store's own checkout. To tie the order line to the exact card the agent showed, the card carries a short **exposure token**, and the store's app copies it, as opaque text, into a property of the cart line. The order arrives with the token, and the memory attributes the line to the exposure and the position, deterministically, without the app knowing anything else.
+
+```text
+nx1.<exposure id>.<position>.<verifier>
+```
+
+The SDK mints the token when the list is presented (`exposure_token(exposure_id, pos)` in Python, `exposureToken()` in TypeScript), and the interface puts it on the card. It carries only the exposure id and the position: nothing about the customer, the item or the price. The verifier, the first 4 characters of the SHA-256 of the token's head, catches a token copied wrong; it is not a signature, and the memory accepts a token only for an exposure its space recorded, at a position that exposure had. A line whose token does not check is attributed by the other methods, never by this one.
+
+## The methods
+
+| Method | Band | How |
+|---|---|---|
+| `line` | Deterministic | The exposure token on the order line itself, never an inferred one |
+| `order` | Deterministic | The token on the order, or the agent's own last action on the object |
+| `identity` | Probable | The same item the customer engaged with or was shown, within the window (`click_window_days`, 7 by default; `view_window_days`, 1) |
+| `assisted_handoff` | Probable | A handoff that assisted the sale: the outcome came within the window (`handoff_window_days`, 7 by default) after the handoff the object names |
+
+Each **outcome link** ([`GET /v1/measure/outcomes`](/en/api/measure-outcomes)) carries the method, the band, the line's value whole or none at all (in the currency's minor units, only under the signed revenue definition), the state of the object or its line, when the outcome first counted and its finality: `provisional` until the exchange window ends (`final_after`) or the object reaches a final state of the [lifecycle](/en/concepts/object-types#lifecycle-and-timers), whichever comes first, or `expired_without_outcome` when the type's deadline passed first. An `identity` link carries the method's **confidence** in this space: how often it names the exposure the line's own token names, on the lines where both exist. It stays beside the value, never multiplied by it.
+
+[`GET /v1/measure/attribution`](/en/api/measure-attribution) adds up by day, agent, method and band, in UTC days, deterministic and probable apart. An outcome that comes through a handoff appears as the receiving side's `handoff.outcome` action, and the commitments and outcomes of [coordination](/en/concepts/coordination) enter the memory as actions on their objects.
+
+## Reconciling with your BI
+
+The number that counts is yours. [`POST /v1/measure/reconcile/uploads`](/en/api/measure-reconcile-uploads) reserves the upload of your BI's CSV for a period (`order`, `line` optional, `value` in major units as the signed definition nets it, `currency`), read once and deleted; [`POST /v1/measure/reconcile`](/en/api/measure-reconcile) compares line by line the attributed lines with the file's, on the lines both sides know, and returns the deviation (`|ours - BI| / BI`), the lines that differ most and, apart, the ones only one side knows, which never enter the deviation. With `split_orders: whole_order`, both sides are compared order by order, each order's lines added up, because your BI knows the purchase and not its parts. The tolerance lives in the `measurement` document.
+
+## Experiments
+
+The space can measure the effect of an element or of an agent by arms, in the `measurement` document: an `element` experiment drops from one arm the constraints block, the inferred soft signals, the inferred and outcome-derived sizes, the state block or a pack section (`facts`, `episodes`, `actions` or `objects`); an `agent` one compares agents; an `interleave` one interleaves two rankings of a tool. Arms are drawn like the memory's control group, by the HMAC of the customer's oldest handle, so the same person stays in the same arm across every channel and vendor. Critical sources never go to a control arm, and the memory's control group gets no block at all.
+
+[`GET /v1/measure/experiments`](/en/api/measure-experiments) compares each arm with `control` on each metric (conversion and value per person), from what people did after they were assigned: **incremental**, as only a control group says. The difference is adjusted by **CUPED**, with the days before each person's assignment as the covariate (`cuped_days`), when the history varies, and the report says how much of the variance the adjustment removed. The test is the **mixture sequential test** (mSPRT, with the document's mixing variance): the p-value and the interval hold at any look, so the report may be read every day without inflating the error; `decided` says when the difference is real at the test's `alpha`. The comparisons stay empty until each arm holds enough people for the normal approximation. [`POST /v1/measure/power`](/en/api/measure-power) says how many days of the space's traffic a relative difference needs to be detected, looked at once at the end or every day, from the space's history or the numbers you give.
+
+### Interleaving
+
+When two rankings of a tool are interleaved (a team draft, seeded by the turn), `team` on each item of the exposure says which one contributed it, and engagement and cart go to the list that contributed the item. [`GET /v1/measure/interleaving`](/en/api/measure-interleaving) counts, by day and over the period, the impressions engagement credited to `a` (the ranking in production) or `b` (the candidate) and the ties, with the two-sided sign test over the decided impressions.
+
+### The tool counterfactual
+
+Before running an experiment on an element of the constraints block, a smaller question: does the element change what the tool returns at all? A search that ignores a filter, or a filter that removes nothing, makes every later measurement of that element a measurement of nothing. The **tool counterfactual** answers from recorded turns: the Python SDK's `niadra counterfactual` command runs each recorded call of the tool live, inside your company, three times at the same moment (twice with the element, to measure the tool's own noise, and once without it), and reports positions and overlaps only, never items, arguments or results. A tool that writes state runs as its dry run, and without a dry run it is never called. The runner reads the tool through the [binding](/en/concepts/signals#tool-bindings) the space declares and the SDK profile serves; a tool the space does not bind stops before the first call.
+
+```sh
+niadra counterfactual --tools app.tools:TOOLS --tool search_products --element hard --scenario sc_01J9... --label "$GIT_SHA"
+```
+
+The overlap is `overlap@k`, depth-weighted with the same exposure weight as the signals (`1 / log2(pos + 1)`); `k` is the recorded list's `visible_k`, or 10. The report ([`POST /v1/measure/counterfactual-runs`](/en/api/measure-counterfactual-runs-create), read at [`GET /v1/measure/counterfactual-runs/{run_id}`](/en/api/measure-counterfactual-run)) carries the mean overlap, the noise floor, the effect (`noise_floor - overlap`), the sign test, where the items the person engaged with went (kept, lost, gained, the mean shift) and the skipped cases. It also states its own limits: `not_quality` (it says whether the list changed, not whether it got better), `model_reaction_not_measured`, `trivial_for_hard` (a hard constraint changes a list by construction), `few_cases` (fewer than 30 completed), `noisy_tool` (a noise floor below 0.9), `cases_skipped` and `dry_run`. Niadra keeps the report, never the turn and call ids.
+
+## Unmet demand
+
+[`GET /v1/measure/unmet-demand`](/en/api/measure-unmet-demand) lists what people asked the tools for and did not get: by week and by combination of what was asked (on the type registry's fields, values normalized), the calls that came back empty and the ones that came back with one or two results, and how many distinct people asked. A combination fewer people than the space's minimum asked (10 by default) is left out: never a person.
+
+## Cost with and without memory
+
+With [turn records](/en/concepts/turn-records) on, [context use](/en/api/context-use) brings in `cost`, per source and agent, the calls, tokens and money per turn, against the cost per turn with memory off your company measured and declared in `memory_off_costs` of the `measurement` document; `difference_usd` above zero costs more. Niadra adds up what the records say; the baseline is yours.
+
+## Privacy
+
+Outcome measurement reads what the cell already has, and the result is about the agent, the tool and the order, never about the subject: the reports carry counts, aggregate values and object ids, and unmet demand only above the minimum of people. Outcome links stay 13 months. Erasing a customer removes their rows by the same lineage, and a report already computed is not redone.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Signals and constraints" href="/en/concepts/signals">
+    the exposure the exposure token is born from.
+  </Card>
+  <Card title="Object types and state" href="/en/concepts/object-types">
+    the lifecycle that gives an order its final state.
+  </Card>
+  <Card title="Context use" href="/en/concepts/context-use">
+    the measurement that says whether the agent used what it received.
+  </Card>
+  <Card title="Attributed outcomes" href="/en/api/measure-outcomes">
+    the reference of `GET /v1/measure/outcomes`.
+  </Card>
+</CardGroup>

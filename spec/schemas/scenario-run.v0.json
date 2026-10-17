@@ -1,0 +1,405 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/scenario-run.v0.json",
+  "title": "Niadra Scenario Run v0",
+  "description": "The statistical verdict of a replay run, per scenario and per assertion, against its baseline. See spec/replay.md.",
+  "$defs": {
+    "AssertionStats": {
+      "additionalProperties": false,
+      "description": "One assertion over the run's completed executions, against its baseline. `p_value` is the one-sided Fisher exact test that the run passes less often than the baseline, rounded to 6 decimals.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "integer"
+        },
+        "failed": {
+          "title": "Failed",
+          "type": "integer"
+        },
+        "not_checked": {
+          "title": "Not Checked",
+          "type": "integer"
+        },
+        "baseline_passed": {
+          "title": "Baseline Passed",
+          "type": "integer"
+        },
+        "baseline_failed": {
+          "title": "Baseline Failed",
+          "type": "integer"
+        },
+        "drop": {
+          "description": "The baseline's pass rate minus the run's.",
+          "title": "Drop",
+          "type": "number"
+        },
+        "p_value": {
+          "title": "P Value",
+          "type": "number"
+        },
+        "regression": {
+          "title": "Regression",
+          "type": "boolean"
+        },
+        "flaky": {
+          "title": "Flaky",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "passed",
+        "failed",
+        "not_checked",
+        "baseline_passed",
+        "baseline_failed",
+        "drop",
+        "p_value",
+        "regression",
+        "flaky"
+      ],
+      "title": "AssertionStats",
+      "type": "object"
+    },
+    "ScenarioRunSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "scenarios": {
+          "items": {
+            "$ref": "#/$defs/ScenarioVerdict"
+          },
+          "title": "Scenarios",
+          "type": "array"
+        }
+      },
+      "title": "ScenarioRunSummary",
+      "type": "object"
+    },
+    "ScenarioVerdict": {
+      "additionalProperties": false,
+      "properties": {
+        "scenario_id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "pass",
+            "flaky",
+            "infrastructure_error",
+            "pin_mismatch",
+            "regression"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "completed": {
+          "title": "Completed",
+          "type": "integer"
+        },
+        "infrastructure_errors": {
+          "title": "Infrastructure Errors",
+          "type": "integer"
+        },
+        "pin_mismatches": {
+          "title": "Pin Mismatches",
+          "type": "integer"
+        },
+        "needs_paraphrase": {
+          "description": "An assertion passed and failed across the runs: its next run must include paraphrases.",
+          "title": "Needs Paraphrase",
+          "type": "boolean"
+        },
+        "baseline_run_id": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The earlier run compared against; none when it was the recording.",
+          "title": "Baseline Run Id"
+        },
+        "assertions": {
+          "items": {
+            "$ref": "#/$defs/AssertionStats"
+          },
+          "title": "Assertions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "verdict",
+        "completed",
+        "infrastructure_errors",
+        "pin_mismatches",
+        "needs_paraphrase",
+        "assertions"
+      ],
+      "title": "ScenarioVerdict",
+      "type": "object"
+    },
+    "TurnBuild": {
+      "additionalProperties": false,
+      "properties": {
+        "pins": {
+          "$ref": "#/$defs/TurnPins"
+        },
+        "sdk": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "E.g. `niadra-python/0.7.0`.",
+          "title": "Sdk"
+        },
+        "adapter": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The framework adapter and its version, if any.",
+          "title": "Adapter"
+        }
+      },
+      "title": "TurnBuild",
+      "type": "object"
+    },
+    "TurnCompilerPins": {
+      "additionalProperties": false,
+      "properties": {
+        "compiler": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The context compiler's version, from the pack.",
+          "title": "Compiler"
+        },
+        "pack_hash": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The hash of the pack this turn read.",
+          "title": "Pack Hash"
+        }
+      },
+      "title": "TurnCompilerPins",
+      "type": "object"
+    },
+    "TurnPins": {
+      "additionalProperties": false,
+      "description": "What must be the same for a replay to reproduce this turn. The recording document says which are required; a turn without one of them is kept, marked not replayable.",
+      "properties": {
+        "prompts": {
+          "additionalProperties": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "description": "Prompt name -> version, e.g. `core` -> `v16`.",
+          "maxProperties": 50,
+          "propertyNames": {
+            "maxLength": 256,
+            "minLength": 1
+          },
+          "title": "Prompts",
+          "type": "object"
+        },
+        "corpus_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Digest of the files the agent consults, computed in the SDK; never the files.",
+          "title": "Corpus Digest"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The exact model the agent called.",
+          "title": "Model"
+        },
+        "assembler": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The version of the company's context assembler.",
+          "title": "Assembler"
+        },
+        "tool_schemas": {
+          "additionalProperties": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "description": "Tool name -> hash of its schema.",
+          "maxProperties": 200,
+          "propertyNames": {
+            "maxLength": 256,
+            "minLength": 1
+          },
+          "title": "Tool Schemas",
+          "type": "object"
+        },
+        "niadra": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TurnCompilerPins"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "TurnPins",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "done"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "verdict": {
+      "anyOf": [
+        {
+          "enum": [
+            "pass",
+            "flaky",
+            "infrastructure_error",
+            "pin_mismatch",
+            "regression"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The worst of the scenarios' verdicts.",
+      "title": "Verdict"
+    },
+    "mode": {
+      "enum": [
+        "hermetic_turn",
+        "hermetic_conversation",
+        "era_memory"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "vary": {
+      "items": {
+        "enum": [
+          "prompts",
+          "corpus_digest",
+          "model",
+          "assembler",
+          "tool_schemas"
+        ],
+        "type": "string"
+      },
+      "title": "Vary",
+      "type": "array"
+    },
+    "build": {
+      "$ref": "#/$defs/TurnBuild"
+    },
+    "summary": {
+      "$ref": "#/$defs/ScenarioRunSummary"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "status",
+    "mode",
+    "build",
+    "summary",
+    "created_at"
+  ],
+  "type": "object"
+}

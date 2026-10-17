@@ -1,0 +1,1 @@
+{"idempotency_key": "k3", "channel": "chat", "handles": [{"type": "email", "value": "m@example.com"}], "speaker": {"role": "ai_agent"}, "content": {"text": "done"}, "action": {"operation": "credit"}, "occurred_at": "2026-09-22T14:06:00Z"}

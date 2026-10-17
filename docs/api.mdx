@@ -1,0 +1,90 @@
+---
+title: "A API da Niadra"
+description: "Endereço, autenticação e os grupos de rotas da API de dados e da API de controle."
+---
+
+A Niadra tem duas APIs HTTP. A **API de dados** é de cada espaço: é nela que os seus agentes e sistemas gravam eventos, leem o contexto e navegam no histórico, e que o seu time de governança apaga, exporta, audita e mede. A **API de controle** cuida de tenants, projetos, fontes, chaves, pessoas e configuração versionada, e nunca guarda conteúdo de cliente. Os SDKs cobrem o lado do agente na API de dados; cada rota das duas APIs tem página própria nesta referência.
+
+## Endereço
+
+Cada espaço tem um endereço estável, que leva a região e nunca expõe a infraestrutura por trás:
+
+```text
+https://<space>.<region>.api.niadra.com
+```
+
+O SDK tira esse endereço da chave (`nia_sk_<live|test>_<region>_<space>_<key_id>_<secret>`). Enquanto um espaço muda de célula, a célula antiga responde `421 wrong_cell` e o SDK tenta de novo numa conexão nova. A API de controle fica em `https://control.api.niadra.com`.
+
+## Autenticação
+
+Toda rota recebe `Authorization: Bearer <credencial>`. Qual credencial serve depende da rota:
+
+| Tipo de rota | Credencial | Exemplo |
+| --- | --- | --- |
+| Rotas de agentes e sistemas | Uma chave de fonte com o escopo da rota: `track`, `act`, `context`, `search`, `identify`, `agent_memory`, `agent_memory:write`, `replay`, `coordinate`, `state:push`, `agent_state`, `identity:link` | [`POST /v1/context`](/api/context) pede `context` |
+| Rotas de governança | O token de uma pessoa do Console com um dos papéis da rota, ou uma chave de fonte com o escopo `admin` | [`POST /v1/forget`](/api/forget) pede `security` |
+| Análise da base | Uma chave com o escopo `analytics` (só fontes de analista) ou uma pessoa com `analysis`; a revelação pede também `admin` na chave, ou `security` na pessoa | [`POST /v1/insights/aggregate`](/api/insights-aggregate) |
+| Relatórios de medição | As credenciais de governança, ou a mesma chave de analista com `analytics`, que lê o relatório somado de todas as fontes; qualquer outra chave vê só a própria fonte | [`GET /v1/context-use`](/api/context-use) |
+| Entrada de webhook | O método declarado no mapeamento da fonte: bearer, assinatura HMAC ou token na URL | [`POST /v1/ingest/webhook/{source_id}`](/api/ingest-webhook) |
+| API de controle | O token de uma pessoa, emitido por [`POST /v1/auth/login`](/api/control/login) e válido por 15 minutos | [`GET /v1/users/me`](/api/control/me) |
+
+Os papéis do Console são `admin`, `security`, `integration`, `review`, `analysis` e `vendor`. `admin` passa em toda checagem de papel. Uma pessoa `vendor` só enxerga as fontes nomeadas no vínculo do papel dela. Uma chave sem o escopo da rota recebe `403 scope_missing`; uma pessoa sem o papel, `403 forbidden`. As rotas das [funcionalidades de agente](/concepts/spaces-and-keys#funcionalidades-do-espaço) respondem `404` num espaço que não ligou a funcionalidade delas. Cada página da referência diz o que a rota aceita.
+
+## Grupos de rotas
+
+| Grupo | O que cobre |
+| --- | --- |
+| Escrita | [lote](/api/batch), [upload de mídia](/api/media-uploads), [importação de arquivo](/api/ingest-files) e [o estado dela](/api/ingest-file), [webhook de sistema](/api/ingest-webhook) e [o desafio dele](/api/ingest-webhook-challenge), [traces OTLP](/api/otel-traces), [correção](/api/feedback) |
+| Contexto | [por handle ou por id de perfil](/api/context), [por id de perfil na URL](/api/context-by-profile), [subject tokens](/api/subject-tokens), [servidor MCP](/api/mcp) |
+| Histórico | [busca](/api/history-search), [linha do tempo por handle ou por perfil](/api/history-timeline), [linha do tempo por perfil na URL](/api/history-timeline-by-profile), [abrir item](/api/history-open), [abrir item pela URL](/api/history-item), [definições das ferramentas](/api/history-tools) |
+| Memória do agente | [bloco](/api/agent-memory-block), [busca](/api/agent-memory-search), [ferramentas](/api/agent-memory-tools), [gravar](/api/agent-memory-notes-create) e [listar](/api/agent-memory-notes) notas, [versões](/api/agent-memory-note-versions), [apagar](/api/agent-memory-notes-erase), [exportar](/api/agent-memory-export), [destilar](/api/agent-memory-distill), [propostas](/api/agent-memory-proposals) |
+| Objetos | [estado](/api/object) e [linha do tempo](/api/object-timeline) de um pedido, ticket ou fatura |
+| Identidade e perfis | [asserções](/api/identity-assertions), [criar](/api/identity-assertions-create), [retirar](/api/identity-assertion-retract), [unir](/api/identity-merge), [separar](/api/identity-unmerge), [bloquear handle](/api/identity-handles-block), [vínculos](/api/identity-links), [sugestões](/api/identity-suggestions), [busca de perfis](/api/profiles-search), [perfil](/api/profile), [memória](/api/profile-memory), [objetos](/api/profile-objects) |
+| Privacidade e auditoria | [apagar](/api/forget), [corrigir](/api/corrections), [lista de apagamentos](/api/forget-list), [exportar](/api/export), [execuções de exportação](/api/export-runs), [busca de comprovantes](/api/receipts-search), [comprovantes pela URL](/api/receipts), [verificação da cadeia](/api/receipts-verify), [linhagem](/api/lineage-receipt), [simulação de política](/api/policy-simulate), [segredos](/api/secrets), [trabalho parado](/api/dead-tasks) e [reenvio](/api/dead-tasks-replay) |
+| Fontes | [cobertura](/api/sources-coverage), [cortar uma fonte na célula](/api/source-revoke) |
+| Padrões, medição e uso | [retirar padrão](/api/trait-retract), [testar regra](/api/traits-dry-run), [oposição](/api/traits-opt-out), [aproveitamento do contexto](/api/context-use), [conversas medidas](/api/context-use-conversations), [de uma conversa](/api/context-use-one-conversation), [uso](/api/usage), [teto de gasto com IA](/api/usage-budget) |
+| Revisão e assistente | [fila de revisão](/api/review-queue), [vereditos](/api/review-verdicts), [concordância](/api/review-agreement), [assistente de configuração](/api/assist) |
+| Gatilhos e webhooks | [testar gatilho](/api/triggers-dry-run), [disparos](/api/trigger-firings), [entregas](/api/webhook-deliveries), [reenvio](/api/webhook-redeliver) |
+| Registro de turnos e replay | [registrar](/api/turns), [promover](/api/turns-promote), [ler](/api/turn) e [buscar](/api/turns-search) turnos, [o índice do dia](/api/turns-index), [caso de replay](/api/replay-cases), [cenários](/api/scenarios-create), [execuções](/api/scenario-runs-create), [registro de mudanças](/api/changes), [problemas de dados](/api/data-issues), [feed de avisos](/api/notifications). Funcionalidade `turns`, e `notifications` para o feed |
+| Estado tipado | [perfil do SDK](/api/sdk-profile), [push](/api/objects-push), [snapshot](/api/objects-snapshot), [view de agora](/api/state-view), [ler](/api/state-read) e [conferir](/api/state-verify) objetos tipados, [pedidos de releitura](/api/state-refresh-requests), [liberar conteúdo](/api/content-release). Funcionalidade `state` |
+| Memória de trabalho | [gravar](/api/agent-state-write) e [ler](/api/agent-state-read) o estado de trabalho de um agente, [o de um cliente](/api/profile-agent-state). Funcionalidade `agent_state` |
+| Sinais e restrições | [bloco de restrições](/api/constraints), [inferências](/api/profile-inferences), [pedidos de revisão](/api/review-requests-create), [retenções legais](/api/legal-holds-create). Funcionalidades `signals` e `legal_holds` |
+| Coordenação | [perguntar](/api/coordination-check), [declarar](/api/coordination-declare), [reivindicar](/api/coordination-claims), [efeitos](/api/coordination-effects), [transferências](/api/handoffs-create), [lista de supressão](/api/suppressions), [chaves do token de contato](/api/contact-keys), [relatórios de sombra](/api/coordination-reports). Funcionalidade `coordination` |
+| Desfechos e experimentos | [desfechos](/api/measure-outcomes), [atribuição](/api/measure-attribution), [reconciliação com o BI](/api/measure-reconcile), [intercalação](/api/measure-interleaving), [experimentos](/api/measure-experiments), [poder](/api/measure-power), [contrafactual](/api/measure-counterfactual-runs-create), [demanda não atendida](/api/measure-unmet-demand). Funcionalidade `measurement` |
+| Análise da base | [esquema](/api/insights-schema), [visão geral](/api/insights-overview), [agregar](/api/insights-aggregate), [encontrar perfis](/api/insights-profiles), [busca](/api/insights-search), [revelação](/api/insights-reveal), [MCP de análise](/api/mcp-insights) |
+| API de controle | [acesso](/api/control/login), [pessoas e papéis](/api/control/me), [projetos](/api/control/projects), [fontes e chaves](/api/control/sources), [configuração](/api/control/config-types), [uso](/api/control/usage), [operação da plataforma](/api/control/cells) |
+
+## Convenções numa tabela
+
+| Assunto | Regra |
+| --- | --- |
+| Versão | No caminho (`/v1`). Campo novo e rota nova não mudam a versão; remover um campo ou mudar o sentido dele é `/v2`, com 12 meses de convivência e os cabeçalhos `Deprecation` e `Sunset` a partir do anúncio ([política de versões](/security/api-versioning)) |
+| Dado pessoal | Telefone, e-mail, documento e texto livre vão no corpo, nunca na URL. Por isso contexto, busca e linha do tempo por handle são `POST`. Toda leitura que leva um id de conversa tem uma forma `POST`, recomendada, com o id no corpo: `POST /v1/context` e `POST /v1/history/timeline` com `profile_id`, `POST /v1/history/open`, `POST /v1/receipts/search` e `POST /v1/context-use/conversation`; as formas `GET` continuam |
+| Idempotência | Eventos levam `idempotency_key`; escritas de identidade, `POST /v1/forget`, o corte de fonte e as escritas da coordenação, do replay e das retenções legais exigem o cabeçalho `Idempotency-Key` |
+| Erros | `application/problem+json` com um `code` estável; o lote responde `200`, ou `207` quando algum item foi recusado |
+| Paginação | `cursor` opaco e `limit` (até 200 nas listas, 100 nas linhas do tempo) |
+| Cache | ETag no contexto; por handle, mande `known_etag` no corpo; por perfil, `If-None-Match` devolve `304` |
+| Rastreio | `traceparent` é aceito e devolvido; toda resposta traz `request_id` |
+
+Os detalhes estão em [Limites e convenções](/conventions) e em [Erros](/errors).
+
+## Contrato
+
+A referência sai do contrato OpenAPI 3.1 que o servidor exporta do próprio código. Valores de enum e nomes de campo são em inglês ASCII e nunca mudam de sentido dentro da `/v1`. As descrições aparecem em português; os nomes do contrato ficam como são.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Ler o contexto" href="/api/context">
+    A chamada que todo agente faz antes de agir.
+  </Card>
+  <Card title="Enviar um lote" href="/api/batch">
+    Mensagens, eventos de sistema e ações.
+  </Card>
+  <Card title="Erros" href="/errors">
+    O catálogo de códigos e o que fazer com cada um.
+  </Card>
+  <Card title="Limites e convenções" href="/conventions">
+    Tamanhos, taxas, idempotência e cache.
+  </Card>
+</CardGroup>

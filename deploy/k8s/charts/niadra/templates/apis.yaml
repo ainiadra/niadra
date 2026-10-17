@@ -1,0 +1,99 @@
+{{- if eq .Values.part "app" }}
+# Pending pods of the read path are placed before the others; nothing is evicted for them (values.yaml).
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: niadra-read
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+value: {{ .Values.readPriority }}
+preemptionPolicy: Never
+globalDefault: false
+description: Niadra read path (context()), placed first when memory frees up; never preempts.
+{{- range $role, $api := .Values.apis }}
+{{- if not (and (eq $role "control") $.Values.controlPlane.url) }}
+{{- $name := $role }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "niadra.labels" $ | nindent 4 }}
+spec:
+  # No `replicas`: the autoscaler below owns that field. With it here, a deploy after a scale-up
+  # fails on a server-side apply conflict with the controller (23/09/2026).
+  selector:
+    matchLabels: {{- include "niadra.selector" $name | nindent 6 }}
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  template:
+    metadata:
+      labels:
+        {{- include "niadra.selector" $name | nindent 8 }}
+        niadra.com/metrics: "true"
+        niadra.com/db-client: "true"
+    spec:
+      # Longer than the HTTP drain (20 s): a stopping process still sends its final receipt mark.
+      terminationGracePeriodSeconds: 30
+      {{- if eq $role "read" }}
+      priorityClassName: niadra-read
+      {{- end }}
+      {{- include "niadra.spread" $name | nindent 6 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "niadra.image" (list $ "server") }}
+          args: [{{ $role }}]
+          ports: [{name: http, containerPort: 8000}]
+          {{- if eq $role "control" }}
+          envFrom:
+            - configMapRef: {name: niadra-cell}
+            - secretRef: {name: niadra-control}
+            - secretRef: {name: niadra-owner}
+          env:
+            - {name: NIADRA_CONTROL_SIGNING_KEY_FILE, value: /run/secrets/control/signing.pem}
+          volumeMounts: [{name: signing, mountPath: /run/secrets/control, readOnly: true}]
+          {{- else }}
+          {{- include "niadra.cellEnv" $ | nindent 10 }}
+          {{- end }}
+          {{- include "niadra.apiProbes" $ | nindent 10 }}
+          {{- include "niadra.resources" $api | nindent 10 }}
+          {{- include "niadra.securityContext" $ | nindent 10 }}
+      {{- if eq $role "control" }}
+      volumes:
+        - name: signing
+          secret: {secretName: niadra-control, items: [{key: signing.pem, path: signing.pem}]}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "niadra.labels" $ | nindent 4 }}
+spec:
+  selector: {{- include "niadra.selector" $name | nindent 4 }}
+  ports: [{name: http, port: 8000, targetPort: http}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels: {{- include "niadra.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: {{ $name }}}
+  minReplicas: {{ $api.replicas }}
+  maxReplicas: {{ $api.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels: {{- include "niadra.labels" $ | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {{- include "niadra.selector" $name | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}

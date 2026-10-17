@@ -1,0 +1,117 @@
+---
+title: "OpenAI Agents SDK"
+description: "A memória do cliente em Runner.run, pelos pontos de extensão do próprio SDK: filtro de entrada do modelo, hooks e function tools, em Python e em JavaScript."
+---
+
+Em Python, `NiadraAgentsMemory` entrega `run_config()` (o filtro que injeta o contexto antes de cada chamada ao modelo), `hooks` (que registram os turnos) e `tools`. Em JavaScript, `@niadra/sdk/openai-agents` traz `NiadraSession`, `niadraInstructions()`, `niadraTools()` e `niadraRunHooks()`.
+
+## Instalar
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[openai-agents]'   # openai-agents 0.22.3 ou mais novo, abaixo da 1
+```
+```sh TypeScript
+npm install @niadra/sdk @openai/agents   # @openai/agents 0.18, como peer dependency opcional
+```
+</CodeGroup>
+
+A integração em TypeScript está no `@niadra/sdk` no npm.
+
+## As cinco primitivas
+
+| Primitiva | Python | JavaScript |
+|---|---|---|
+| Contexto | `run_config()` define `call_model_input_filter`, que roda logo antes de cada chamada ao modelo: o contexto vai depois das instruções do agente e o `turn_block` depois da entrada, como mensagem de sistema. Um filtro que você já tinha roda primeiro | `niadraInstructions(base, conversation)` torna as instruções dinâmicas: o seu texto, depois as notas do agente e o contexto, depois o sufixo |
+| Turnos | `hooks` (um `RunHooks`) registra as mensagens novas do cliente quando o modelo é chamado pela primeira vez para elas, e a resposta do agente com o uso informado. Os turnos do cliente são chaveados pela posição, então o histórico que uma `Session` repete no próximo run nunca é registrado duas vezes | `NiadraSession` é uma `Session` para `run(agent, input, { session })`: guarda os itens do run na sessão que você passa (uma `MemorySession` por padrão) e registra o que o cliente disse e o que o agente respondeu |
+| Ferramentas | `tools`: as três do histórico como `FunctionTool`s com os nomes, descrições e esquemas do kit, amarradas ao cliente | `niadraTools(conversation)` |
+| Verificação | O que o seu app provou (um login, um OTP) vai a `conversation.verify()` antes do run | Idem, em `conv.verify()` |
+| Transbordo | Um handoff do SDK entre agentes registra `handoff("agent")`; dê a todo agente do run a mesma `memory` | `niadraRunHooks(runner, conversation)` registra os handoffs entre agentes |
+
+## Exemplo mínimo
+
+<CodeGroup>
+```python Python
+"""An OpenAI Agents SDK agent with the customer's memory."""
+
+import asyncio
+
+from agents import Agent, Runner
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.openai_agents import NiadraAgentsMemory
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    async with niadra.conversation("thread-81", subject=phone("+5511912345678")) as conversation:
+        memory = NiadraAgentsMemory(conversation, agent_memory=True)
+        agent = Agent(
+            name="Support", instructions="You are Acme's agent.", model="gpt-4.1", tools=memory.tools
+        )
+        result = await Runner.run(
+            agent, "Where is my replacement lid?", hooks=memory.hooks, run_config=memory.run_config()
+        )
+        print(result.final_output)
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+```typescript TypeScript
+import { Agent, Runner } from "@openai/agents";
+import { Niadra, handles } from "@niadra/sdk";
+import { NiadraSession, niadraInstructions, niadraRunHooks, niadraTools } from "@niadra/sdk/openai-agents";
+
+const niadra = new Niadra();
+const runner = new Runner();
+
+/** One customer message in; `userId` comes from your session, never from the model. */
+export async function reply(userId: string, chatId: string, text: string): Promise<string> {
+  const convo = niadra.conversation({ subject: handles.appUserId(userId), channel: "web_chat", conversation_id: chatId });
+  const billing = new Agent({ name: "Billing", instructions: niadraInstructions("You handle invoices and credits.", convo), tools: niadraTools(convo) });
+  const support = new Agent({
+    name: "Support",
+    instructions: niadraInstructions("You are Acme's support agent. Hand billing questions to Billing.", convo),
+    tools: niadraTools(convo),
+    handoffs: [billing],
+  });
+  const stop = niadraRunHooks(runner, convo);
+  try {
+    const result = await runner.run(support, text, { session: new NiadraSession(convo) });
+    return String(result.finalOutput ?? "");
+  } finally {
+    stop();
+  }
+}
+```
+</CodeGroup>
+
+O mesmo código está em `examples/openai_agents_run.py` e `examples/openai-agents.ts`.
+
+## Memória do agente
+
+Em Python, `agent_memory=True` (ou `{"write": True, "max_tokens": 300, "tags": [...]}`) põe as notas do próprio agente depois das instruções e antes do contexto do cliente, e `search_agent_memory` (e `remember`, com `write`) entram em `tools`. Em JavaScript, `agentMemory` nas opções. Veja [Memória do agente](/concepts/agent-memory).
+
+## Registros de turno
+
+Com a funcionalidade `turns` ligada no espaço (ela vem ligada), os `RunHooks` de Python com `turns=True` e os ganchos de JavaScript com `turns: true` gravam cada execução como um [registro de turno](/concepts/turn-records), com cada chamada de ferramenta pelo id do provedor e cada chamada de modelo com os tokens; um handoff abre um subturno. Os ganchos do OpenAI Agents JS não param uma ferramenta, então envolva as ferramentas com `Niadra.tool()` para um [replay](/guides/replay-in-ci) respondê-las do registro; em Python, as `FunctionTool`s respondem do registro. Um turno nunca espera pela Niadra e nunca repete o texto da conversa.
+
+## Limites
+
+- O adaptador em Python não implementa a `Session` do SDK: uma `Session` guarda os itens do próprio agente, e a Niadra guarda memória derivada, não uma cópia de cada item. Use qualquer `Session` ao lado dele. Em JavaScript, `NiadraSession` embrulha a sessão que você escolher.
+- Nada aqui derruba um run: a Niadra lenta ou fora deixa as instruções só suas.
+- Em Python, o extra `openai-agents` fixa versões incompatíveis com `livekit`, `crewai` e `litellm`; instale um por ambiente.
+- Testado contra `openai-agents` 0.22.3 e `@openai/agents` 0.18.0 com o modelo substituído por um fake e a Niadra no emulador.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Navegação do histórico" href="/concepts/history">
+    as três ferramentas que o agente recebe.
+  </Card>
+  <Card title="OpenAI e Azure OpenAI" href="/integrations/openai">
+    o `wrap()` do cliente, para quem não usa o Agents SDK.
+  </Card>
+</CardGroup>

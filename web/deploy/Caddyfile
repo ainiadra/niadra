@@ -1,0 +1,265 @@
+# The site container: the prerendered pages, the Console and the admin panel, on :8080 behind the
+# cluster's ingress (which ends TLS). The environment comes from deploy/entrypoint.sh:
+#   SITE_ORIGIN           https://niadra.com, the canonical address of every page
+#   NIADRA_CONNECT_SRC    the origins the Console may call (control plane and data API)
+#   ADMIN_HOST            admin.niadra.com, the only host that serves the admin panel
+#   ACCESS_LOG_ADDR       site-api:8788, where the access counter listens (UDP)
+{
+	admin off
+	auto_https off
+	persist_config off
+	# The client's address is the last one the ingress appended to X-Forwarded-For; every hop inside the
+	# cluster is on a private network. The access log masks it when written (below).
+	servers {
+		trusted_proxies static private_ranges
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For
+	}
+	# A copy of every access log entry goes to the site API, which counts it by day, page, class and
+	# crawler name (web/server/access). UDP, so Caddy never waits on it: a datagram nobody
+	# reads is dropped. The address is masked as in the stdout log, and only the fields the count reads
+	# (host, path, user agent, masked address, time) are worth the bytes; the rest goes.
+	log counter {
+		output net udp/{$ACCESS_LOG_ADDR} {
+			dial_timeout 2s
+			soft_start
+		}
+		format filter {
+			wrap json
+			fields {
+				request>remote_ip delete
+				request>remote_port delete
+				request>client_ip ip_mask {
+					ipv4 24
+					ipv6 32
+				}
+				request>tls delete
+				request>headers>X-Forwarded-For delete
+				request>headers>X-Real-Ip delete
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+				request>headers>Accept delete
+				request>headers>Accept-Encoding delete
+				request>headers>Accept-Language delete
+				request>headers>X-Forwarded-Server delete
+				request>headers>X-Forwarded-Proto delete
+				request>headers>X-Forwarded-Host delete
+				request>headers>X-Forwarded-Port delete
+				resp_headers delete
+			}
+		}
+		include http.log.access.site
+	}
+}
+
+(security) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# Applied last, when the response is written: `?` leaves the Console's own policy alone.
+		?Content-Security-Policy "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'"
+		-Server
+	}
+}
+
+:8080 {
+	root * /srv
+	encode zstd gzip
+	import security
+
+	# The kubelet's probe, on the pod's own address.
+	handle /healthz {
+		respond "ok" 200
+	}
+	# The admin panel (admin.niadra.com), from /admin, which is outside the site's folder: no other host
+	# can reach it. Never cached, never indexed. Its API is /api/admin/* on the site API, which the
+	# ingress routes there for this host only.
+	@admin host {$ADMIN_HOST}
+	handle @admin {
+		header {
+			X-Robots-Tag "noindex, nofollow"
+			Cache-Control "no-store"
+			Content-Security-Policy "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'"
+		}
+		# try_files would send /robots.txt to the panel's page, so it gets its own handle.
+		handle /robots.txt {
+			respond <<TXT
+				User-agent: *
+				Disallow: /
+				TXT 200
+		}
+		handle {
+			root * /admin
+			try_files {path} /admin.html
+			file_server
+		}
+	}
+
+	# www and any other alias go to the main address, keeping the path.
+	@alias {
+		not host {$SITE_HOST}
+		not host {$ADMIN_HOST}
+		not path /healthz
+	}
+	redir @alias {$SITE_ORIGIN}{uri} permanent
+
+	# Hashed file names never change; everything else revalidates, so a deploy shows at once.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	@pages not path /assets/*
+	header @pages Cache-Control "no-cache"
+
+	# Markdown versions and feeds with the right type, for agents and feed readers.
+	@md path *.md
+	header @md >Content-Type "text/markdown; charset=utf-8"
+	@feed path /blog/feed.xml /en/blog/feed.xml
+	header @feed >Content-Type "application/rss+xml; charset=utf-8"
+	# The Markdown version names the HTML page as the main one (search engines would treat the .md
+	# as a copy); llms*.txt stay out of the search index and open to any AI.
+	@mdhome path /index.md
+	header @mdhome Link "<{$SITE_ORIGIN}/>; rel=\"canonical\""
+	@mdpage {
+		path_regexp mdpage ^(/.+)\.md$
+		not path /index.md
+	}
+	header @mdpage Link "<{$SITE_ORIGIN}{re.mdpage.1}>; rel=\"canonical\""
+	@llms path /llms.txt /llms-full.txt
+	header @llms X-Robots-Tag "noindex"
+
+	# The Console's runtime addresses, written at start; never cached.
+	handle /config.json {
+		root * /config
+		rewrite * /console-config.json
+		header Cache-Control "no-store"
+		file_server
+	}
+
+	# The Console runs only in the browser and stays out of search: every /console route gets the
+	# prerendered console.html, with connect-src open to the control plane and the data API.
+	@console {
+		path /console /console/*
+		not host {$ADMIN_HOST}
+	}
+	handle @console {
+		header X-Robots-Tag "noindex, nofollow"
+		header Content-Security-Policy "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' {$NIADRA_CONNECT_SRC}"
+		rewrite * /console.html
+		file_server
+	}
+
+	handle {
+		# One address per page: a trailing slash goes to the address without it.
+		@slash path_regexp slash ^(.+)/$
+		redir @slash {re.slash.1} 308
+		# Addresses people and crawlers guess (AI crawlers spend many requests on 404s): each goes
+		# to the page that answers it.
+		redir /pricing /en/preco 301
+		redir /en/pricing /en/preco 301
+		redir /precos /preco 301
+		redir /products /en/produtos 301
+		redir /en/products /en/produtos 301
+		redir /produto /produtos 301
+		redir /resources /en/recursos 301
+		redir /en/resources /en/recursos 301
+		redir /security /en/recursos#seguranca 301
+		redir /en/security /en/recursos#seguranca 301
+		redir /seguranca /recursos#seguranca 301
+		redir /privacy /en/recursos#privacidade 301
+		redir /en/privacy /en/recursos#privacidade 301
+		redir /privacidade /recursos#privacidade 301
+		# The docs live at docs.niadra.com (Mintlify), with the same paths: the old /docs/... and
+		# /en/docs/... addresses go to the same page there. The SDK is not a product: its page is the docs.
+		@docs path_regexp docs ^/docs(/.*)?$
+		redir @docs https://docs.niadra.com{re.docs.1} 301
+		@docs_en path_regexp docs_en ^/en/docs(/.*)?$
+		redir @docs_en https://docs.niadra.com/en{re.docs_en.1} 301
+		redir /documentacao https://docs.niadra.com 301
+		redir /documentation https://docs.niadra.com/en 301
+		redir /en/documentation https://docs.niadra.com/en 301
+		redir /produtos/sdk https://docs.niadra.com 301
+		redir /en/produtos/sdk https://docs.niadra.com/en 301
+		# A product that changed name (afirmacao is conferencia since 01/10/2026): links already indexed keep working.
+		redir /produtos/afirmacao /produtos/conferencia 301
+		redir /en/produtos/afirmacao /en/produtos/conferencia 301
+		redir /comparison /en/comparativo 301
+		redir /en/comparison /en/comparativo 301
+		redir /comparativo-de-memoria /comparativo 301
+		# The integration pages: /integracoes/<slug> in Portuguese, /en/integracoes/<slug> in English.
+		redir /integrations /en/integracoes 301
+		redir /en/integrations /en/integracoes 301
+		# The integration logos live under /integrations/logos (public/): files, not pages.
+		@integrations_en {
+			path_regexp integrations_en ^/(en/)?integrations/(.+)$
+			not path /integrations/logos/*
+		}
+		redir @integrations_en /en/integracoes/{re.integrations_en.2} 301
+		redir /integracao /integracoes 301
+		# security.txt at the root is the legacy location (RFC 9116); the file lives under /.well-known.
+		redir /security.txt /.well-known/security.txt 301
+		redir /contact /en/enterprise 301
+		redir /en/contact /en/enterprise 301
+		redir /contato /enterprise 301
+		redir /about /en/sobre 301
+		redir /en/about /en/sobre 301
+		# The glossary page was removed on 02/10/2026: every old address goes to the resources page.
+		redir /glossario /recursos 301
+		redir /en/glossario /en/recursos 301
+		redir /glossary /en/recursos 301
+		redir /en/glossary /en/recursos 301
+		redir /index.html / 301
+		redir /feed /blog/feed.xml 301
+		redir /rss /blog/feed.xml 301
+		redir /feed.xml /blog/feed.xml 301
+		redir /rss.xml /blog/feed.xml 301
+		redir /en/feed /en/blog/feed.xml 301
+		redir /llm.txt /llms.txt 301
+		redir /.well-known/llms.txt /llms.txt 301
+		# Every page is prerendered: /preco is preco.html, /en/preco is en/preco.html.
+		try_files {path} {path}.html
+		file_server
+	}
+
+	# A page that does not exist: the error page of its language, with a real 404.
+	handle_errors 404 {
+		@en path /en /en/*
+		handle @en {
+			rewrite * /en/404.html
+			file_server {
+				status 404
+			}
+		}
+		handle {
+			rewrite * /404.html
+			file_server {
+				status 404
+			}
+		}
+	}
+
+	# Access log as JSON on stdout (to CloudWatch; deploy/scripts/ai_crawlers.py reads it), and through
+	# the `counter` log above to the site API. The address is masked when written (/24 and /32): enough to
+	# count and block abuse, not to identify a person.
+	log site {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>remote_ip ip_mask {
+					ipv4 24
+					ipv6 32
+				}
+				request>client_ip ip_mask {
+					ipv4 24
+					ipv6 32
+				}
+				request>headers>X-Forwarded-For delete
+				request>headers>X-Real-Ip delete
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+			}
+		}
+	}
+}

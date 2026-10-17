@@ -1,0 +1,64 @@
+---
+title: "DSPy"
+description: "A memória do cliente num programa DSPy: o contexto colocado pelo format() do adapter, NiadraModule para rodar e registrar o turno, e o kit como dspy.Tools."
+---
+
+O DSPy monta o prompt no adapter, e `niadra_adapter(conversation)` é o adapter que você usa (`ChatAdapter` por padrão, ou `base=dspy.JSONAdapter`) com uma mudança só, no `format()`. `NiadraModule` roda o seu programa com esse adapter e registra o turno; `history_tools()` dá o kit como `dspy.Tool`s. Só em Python.
+
+## Instalar
+
+```sh
+pip install 'niadra[dspy]'   # dspy 3.4 ou mais novo, abaixo da 4
+```
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | No `format()`, o contexto (depois das notas do agente, com `agent_memory=`) vai logo depois da mensagem de sistema que o DSPy escreve a partir da signature, e o `turn_block` no fim. `NiadraModule` roda o programa com esse adapter; `dspy.context(adapter=niadra_adapter(conversation))` faz o mesmo em volta de qualquer chamada. O contexto não é um campo da signature, então um otimizador nunca o vê como entrada |
+| Turnos | `NiadraModule` registra o `input_field` como turno do cliente e o `output_field` como turno do agente, com o uso que o DSPy contou (`dspy.configure(track_usage=True)`) |
+| Ferramentas | `history_tools()`: `dspy.Tool`s com os nomes, descrições e esquemas de argumentos do kit, amarradas ao cliente; em function calling nativo, são as definições do kit palavra por palavra |
+| Verificação | `conversation.verify()` antes de chamar o programa |
+| Transbordo | `NiadraModule.transferred_to_agent()` e `transferred_to_human()` registram a transferência |
+
+## Exemplo mínimo
+
+```python
+"""A DSPy ReAct program with the customer's memory in its adapter and the history tools."""
+
+import dspy
+
+from niadra import Niadra, phone
+from niadra.integrations.dspy import NiadraModule, history_tools
+
+niadra = Niadra(channel="chat")
+conversation = niadra.conversation("thread-81", subject=phone("+5511912345678"))
+dspy.configure(lm=dspy.LM("openai/gpt-4.1"), track_usage=True)
+react = dspy.ReAct("question -> answer", tools=history_tools(conversation))
+agent = NiadraModule(react, conversation, input_field="question", output_field="answer")
+print(agent(question="Where is my replacement lid?").answer)
+niadra.close()
+```
+
+O mesmo código está em `examples/dspy_program.py`.
+
+## Memória do agente
+
+`niadra_adapter(conversation, agent_memory=True)`, `NiadraModule(..., agent_memory=True)` e `history_tools(conversation, agent_memory=True)` põem as notas do próprio agente antes do contexto do cliente e acrescentam as duas ferramentas. Veja [Memória do agente](/concepts/agent-memory).
+
+## Limites
+
+- Funciona com conversas de `Niadra` e de `AsyncNiadra`; com `AsyncNiadra`, chame o programa com `acall`.
+- Nada aqui para o programa: com a Niadra lenta ou fora, ele roda sem o contexto e uma ferramenta responde que o histórico está indisponível.
+- Testado contra `dspy` 3.4.0 com o LM substituído por um fake e a Niadra no emulador.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Navegação do histórico" href="/concepts/history">
+    as três ferramentas que o agente recebe.
+  </Card>
+  <Card title="LiteLLM" href="/integrations/litellm">
+    o mesmo registro de uso para quem chama o LiteLLM direto.
+  </Card>
+</CardGroup>

@@ -1,0 +1,7 @@
+{
+  "kind": "watch",
+  "ref": "item_variant:loja:789",
+  "condition": "available == yes",
+  "consent_event_key": "msg-88213",
+  "expires_at": "2026-10-29T00:00:00Z"
+}

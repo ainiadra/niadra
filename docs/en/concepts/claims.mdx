@@ -1,0 +1,167 @@
+---
+title: "Claims"
+description: "The claim contract: what an agent may state, the evidence each kind of claim needs in the turn, the three natures of a number, the verdicts and the actions."
+---
+
+An agent fails less for lack of memory than for stating what it did not consult: a price nobody quoted, a deadline three days off, a promise with no action behind it, a citation of an article that says something else. The **claim contract** declares what an agent may state and the evidence each kind of claim needs in the [turn record](/en/concepts/turn-records). The check runs without a model, in the agent's process, at the last point before the customer or before a document is saved; Niadra only receives the verdicts and adds them up. The contract rewrites nothing by default, never rewrites an immutable output, and comes with a versioned list of phrases of the trade that must never trigger it.
+
+## Turning it on and off
+
+The contract is the space's `claims` feature, on by default; a space turns it off in the `features` document, by the `security` role. The contract itself lives in the `claim-contract` document, of the `integration` and `security` roles, and reaches the SDK through the [SDK profile](/en/api/sdk-profile), without the phrases of the negative corpus (only its version), which only your CI's `niadra contract test` reads, from your own copy. The claims the SDK checks enter the turn record, so the `turns` feature is what carries them to Niadra and to [context use](/en/concepts/context-use). Without a contract, nothing is checked.
+
+## The document
+
+| Field | What it says |
+|---|---|
+| `version` | The contract's version, which the turn record cites |
+| `languages` | `pt`, `en` or `es`; the first reads an output whose language is unknown |
+| `categories` | The kinds of claim, up to 64, each with an `id` (`price`, `deadline`, `action_promise`), the `agents` it applies to, how its claims are found (`detect`), what the turn must hold (`evidence`), how a number is handled by where it came from (`natures`) and what happens to a claim that does not stand (`actions`) |
+| `negative_corpus` | The versioned list of phrases of the trade that must never trigger; required when there are categories |
+| `internal_text` | Fingerprints of your own prompt |
+| `outputs` | The `immutable` and `mutable` contexts, apart |
+
+**Detection** is lexical: numbers of certain `classes` (with `terms`, a number counts only in a sentence that holds one of the terms), `roles` (the words that give a number its role: "was" and "before" for the list price, "now" and "with discount" for the sale price), `terms` of the trade on their own ("I reserved", "I sent the link"), named `patterns` (`article_citation`, `precedent_citation`) or `document_sections`, in which every sentence is a claim of fact.
+
+**Evidence** is exactly one of: `value` (a value with provenance in the turn, from a tool's result or from what the blocks of a context read served, with `same_role`, `fresh_for: claim` to require the type's claim age, and `must_state_gaps` to require the value's declared gaps to be said with it), `tool` (a call of this tool in the turn: the boundary of what the agent may know, and an agent without the tool always fails), `tool_any` (a call of any of these tools: a promise of an action needs the action) or `anchor` (the text cites a source through an anchor that matches it, at 0.90 or more).
+
+What the blocks of a context read (`include`) served is evidence of the turn: the state view's fields and computed values, the new value of what changed since the customer saw it, the constraints' values, and the numbers each offer already shown was shown with (`already_presented[].values` of the [constraints block](/en/concepts/signals): price, total, discount, installment), each with the field's role and whether it may still be claimed. A price only the pack's text states is no evidence: an agent that repeats it has the claim checked as `unsupported`, and an offer shown longer ago than its type lets it be claimed gives `stale`.
+
+An example category, from a retail contract:
+
+```json
+{
+  "id": "price",
+  "detect": {
+    "classes": ["money"],
+    "roles": {
+      "price_list": ["de", "antes", "era", "was"],
+      "price_sale": ["por", "sai por", "com desconto", "now"]
+    }
+  },
+  "evidence": { "value": { "same_role": true, "fresh_for": "claim" } },
+  "natures": { "computed": "check", "quoted": "verbatim", "model": "warn" },
+  "actions": { "default": "warn", "contexts": { "chat": "rewrite_if_unequivocal" } }
+}
+```
+
+## The numbers
+
+The parser reads every number of an output, in one language, and each number lands in at most one mention: first the **labels**, by shape (a case number, a postal code, a phone, a time of day) and by the word before (order, protocol, article, size, page); then the **dates**, day first in Portuguese and Spanish, month first in English; then the **amounts**, by what comes before or after (a currency, `%`, business days, `mg`, `kg`, `10x`); then codes and ordinals, which are labels; and the rest (five digits or more and a year are labels, two decimals are money without a currency, an integer before a word is a count). A number in words counts only before a unit ("fifteen business days"), because "one" is also an article. Two amounts joined by "to", "until" or a hyphen make a range. The classes are `money`, `percent`, `date`, `duration`, `quantity`, `count`, `dosage` and `label`; a label names instead of measuring, no category detects it and nothing ever rewrites it. When a number has both `.` and `,`, the last one is the decimal mark; "R$ 511.06" in Portuguese is 511.06 all the same.
+
+A **role** counts when its term stands within 6 words of the number, in the same sentence; the nearest term gives the role, and two tied roles leave the number `ambiguous`, which is never approved.
+
+## The three natures
+
+| Nature | What it is | Handling (`natures`) |
+|---|---|---|
+| **Quoted** | The number lies inside quotation marks: reproduced as the source wrote it, even when false, because contesting an allegation requires stating it. The check confirms only that the quoted passage is in a document of the turn | `verbatim` (the default) or `count` |
+| **Computed** | The turn holds a value of the number's class with the number's role, or with the number's value, from a value with provenance, calculated by a rule or observed from a source | `check` (the default) or `count` |
+| **Said by the model** | Neither: it has no origin | `block`, `warn` or `count`, or the category's action |
+
+The validator that drops every amount absent from the history is one category of class `money` with `model: block`.
+
+## Verdicts and actions
+
+| Verdict | When |
+|---|---|
+| `matched` | A value of the evidence equals the number (of its role, when there is one; of its class, when there is not) |
+| `mismatch` | Values of the evidence exist, and none equals the number |
+| `no_evidence` | The evidence holds no value to check against; with `tool` or `tool_any`, the turn did not call the tool |
+| `stale` | The equal value is not fresh enough for a claim |
+| `gap_not_stated` | The equal value declares gaps the output does not say |
+| `role_ambiguous` | Terms of two roles tie |
+| `unsupported` | The number has no origin |
+| `quoted_found`, `quoted_missing` | A quoted number's passage is, or is not, in a document of the turn |
+| `anchored`, `below_threshold`, `source_missing` | The anchor matches, scores under 0.90, or cites a document the turn does not hold |
+| `not_checked` | The nature's handling is `count`, or no anchor was emitted |
+| `internal_text_found` | The output repeated fingerprints of your own prompt |
+
+`matched`, `quoted_found` and `anchored` take no action; `not_checked` is counted. Every other verdict takes the category's action for the output's context (`actions.contexts`, or `actions.default`), and `unsupported` takes `natures.model` when set:
+
+| Action | What happens |
+|---|---|
+| `block` | In a mutable output, the passage gives way to `replace_with`; in an immutable one, the whole output goes to a person, untouched |
+| `warn` | The output goes as it is, and the claim is marked |
+| `count` | Only measured |
+| `rewrite_if_unequivocal` | The number is rewritten only when unequivocal; otherwise marked as `warn` |
+| `discard_anchor_and_count` | The anchor is dropped and counted |
+
+A rewrite is **unequivocal** only when all hold: the output is mutable; the class is money, percent, date or duration (a dose, a technical quantity, a size, a position and an identifier are never rewritten, in any context); the number is a single value, not a range; the verdict is `stale` and the number is a literal copy of one field of one object, whose fresh value in the turn is different; and no other number of its class is in the sentence. A contract may not name `rewrite_if_unequivocal` as its default, nor for a context it does not list as mutable. The principle: correct, annotate or count; never block with a generic message, and never rewrite what is immutable. Stating the gap is an acceptable answer.
+
+## The negative corpus
+
+Every contract with categories comes with the versioned list of phrases of the trade that a naive lexicon would catch and that must never trigger ("we are not sure about the deadline", "the deadline to contest is 15 business days", "Is your postal code 01310-100?"). A phrase triggers when, read in any of the contract's languages and for any of its agents, a category finds a claim in it. The SDKs' `niadra contract test` command fails when one does, and it is made for your CI: a false positive that blocks a document with a deadline running is the contract's main risk, and the test is part of it.
+
+```sh
+niadra contract test --contract claim-contract.json --examples tests/claims/examples.json
+```
+
+The command reads your copy of the contract (or the profile's, with the corpus in `--corpus`) and files of example turns, and exits with 0 when everything holds, 1 when it does not, 2 when it could not run.
+
+## Internal text
+
+Your company may register fingerprints of its own prompt: hashes of every `n` consecutive words (8 by default), computed by the SDK, never the prompt. An output that repeats one gives way to `redact`: the passage becomes a claim of the reserved category `internal_text`, with the verdict `internal_text_found` and the action `block` (in an immutable output, the whole output goes to a person), and the turn is flagged `guard_acted`. The record never holds the redacted text.
+
+## The text anchor
+
+A tool or the agent emits anchors: where in the output, the quoted text and the document it cites. Both texts are normalized the same way (lower case, accents removed, every run of anything but letters and digits made one space), and the edit distance between the quote and some passage of the document gives the score `1 - d / len(quote)`. An anchor holds at 0.90 or above; below it is discarded and counted, never repaired. A number inside an anchored passage is still checked as a number: the score alone would let a changed amount through. `coverage` keeps law and fact apart, and they never add up.
+
+## Where it runs
+
+In the SDK, at the stream bridge, before the customer (a candidate is held at most 150 ms and a message at most 300 ms; past that, the text goes as it is, annotated `guard_budget_exceeded`), or before a document is saved. The server never runs the check in a turn.
+
+<CodeGroup>
+```python Python
+# Count mode: what the agent says inside a turn is checked against what its tools returned,
+# each claim goes to the record with its verdict, and nothing changes the output.
+with conversation.turn(build=BUILD):
+    ...
+    conversation.agent(reply)
+
+# The guard that acts, as the contract's actions say
+reply = conversation.claims.guard_text(draft, context="chat")
+for chunk in conversation.claims.guard(stream, context="chat"):
+    speak(chunk)
+
+# On demand, without acting
+records = conversation.claims.check(draft, context="proposal", immutable=True)
+```
+```typescript TypeScript
+// Count mode: what the agent says inside a turn is checked against what its tools returned,
+// each claim goes to the record with its verdict, and nothing changes the output.
+await convo.turn({ build: BUILD }, async () => {
+  // ...
+  convo.agent(reply);
+});
+
+// The guard that acts, as the contract's actions say
+const guarded = await convo.claims.guardText(draft, { context: "chat" });
+for await (const chunk of convo.claims.guard(stream, { context: "chat" })) speak(chunk);
+
+// On demand, without acting
+const records = await convo.claims.check(draft, { context: "proposal", immutable: true });
+```
+</CodeGroup>
+
+Each claim becomes one entry of `claims` in the turn record: the category, a number's class, nature and role, the span in code points, the normalized value, the evidence (the call and field, the object and field, or the document and score), the verdict and the action taken (`none`, `block`, `warn`, `count`, `rewrite` or `discard_anchor`). A value that is not safe to claim can be read again by your resolver, inside your company and within 300 ms, before the answer leaves: `conversation.verify_claim()` in Python, `convo.verifyClaim()` in TypeScript. See [The resolver worker](/en/guides/resolver-worker).
+
+## Reading the numbers
+
+[`GET /v1/context-use`](/en/api/context-use), with the `claims` feature on, brings in `claims`, per source and agent, the claims of its outputs by category and verdict, and how many stand on evidence (`evidenced`). It is the rate of what the agent states without consulting. A contract with categories, a negative corpus your CI maintains and that rate in the Console are what your company measures; Niadra adds up, and never runs one more model per turn.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Object types and state" href="/en/concepts/object-types">
+    each field's claim age and the prohibitions.
+  </Card>
+  <Card title="Turn records" href="/en/concepts/turn-records">
+    where the verdicts live.
+  </Card>
+  <Card title="Retail agents" href="/en/guides/retail-agents">
+    a contract of price, availability and action promises.
+  </Card>
+  <Card title="Legal agents" href="/en/guides/legal-agents">
+    deadlines with declared gaps and anchored citations.
+  </Card>
+</CardGroup>

@@ -1,0 +1,53 @@
+---
+title: "Uso de dados"
+description: "O que a Niadra faz e não faz com os dados dos seus clientes: nunca vendidos, usados só para a finalidade da sua empresa, nunca usados para treinar modelos. Cada afirmação conferida no código e na configuração."
+---
+
+A sua empresa é a controladora dos dados dos seus clientes; a Niadra os trata em nome dela, como operadora, para uma finalidade só: dar aos seus agentes a memória de cada cliente. Esta página diz o que decorre disso, em termos que o seu jurídico e o seu time de segurança podem conferir, e aponta, para cada afirmação, o código ou a configuração que a sustenta em 30/09/2026.
+
+## As três afirmações
+
+**Os dados nunca são vendidos, alugados ou compartilhados para outro fim.** Nada no código da Niadra envia dado de cliente a um destino fora dos que esta página lista, e cada um deles o recebe para a finalidade da sua empresa: hospedar (AWS), extrair a memória de uma conversa e decidir sobre ela (a IA da Niadra). Nenhum destino de marketing, de análise de mercado ou de "parceiro" existe no servidor. Toda saída HTTP para fora da célula passa por um único adaptador, `server/src/niadra/adapters/outbound/egress.py`, que só entrega a endpoints que a sua empresa configurou (webhooks, SIEM, bucket de exportação); os demais destinos são os da AWS e a IA da Niadra, nomeados no código.
+
+**Os dados são usados só para a finalidade da controladora.** O que a Niadra grava, extrai, compila e entrega serve à memória dos seus agentes e às ferramentas de governança da sua empresa (apagamento, exportação, auditoria, medição). A política do espaço decide quem lê o quê ([Acesso negado por padrão](/concepts/privacy#acesso-negado-por-padrão-liberado-por-finalidade)), e cada item guarda as finalidades e a base legal com que foi colhido ([Finalidade e base legal por item](/concepts/privacy#finalidade-e-base-legal-por-item)). A Niadra não lê o conteúdo para nenhum fim próprio: os logs não levam conteúdo (teste `server/tests/unit/flow/test_log_canary.py`), as métricas não levam id de espaço ou de cliente, e a cobrança conta conversas e tarefas, não lê o que dizem.
+
+**Os dados nunca treinam modelos, nem os da Niadra, nem os de terceiros.** A Niadra não treina modelo nenhum: os modelos que rodam dentro da célula (o detector de dado pessoal, o de busca por significado, o leitor de documentos) são modelos publicados, fixados por versão na imagem (`server/models/src/niadra_models/onnx/pinned.py`), e não há nenhum código de treino ou de ajuste fino nos repositórios. Para a IA da Niadra, que roda fora da célula, cada pedido proíbe que quem o processa o guarde para treino ou melhoria de produto e exige retenção zero (`server/src/niadra/adapters/outbound/llm/`). Um destino que não ofereça as duas coisas não recebe o pedido.
+
+## O que sai da célula, e para onde
+
+| Destino | O que vai | Para quê | Onde está |
+|---|---|---|---|
+| A IA da Niadra, fora da região | O texto das conversas mascarado (e-mail, telefone, cartão, IBAN, endereço, códigos postais, documentos e contas bancárias trocados por marcadores dentro da célula) e as amostras de eventos do assistente de configuração | Extrair a memória de cada conversa; decidir se uma conversa vale extrair, se um turno tenta instruir o agente, a categoria sensível de um texto, o tipo de uma pergunta, se duas afirmações se contradizem | `server/src/niadra/domain/extract/redaction.py`; `adapters/outbound/llm/` |
+| Os endpoints da sua empresa | Webhooks (ids e hashes, nunca conteúdo), o fluxo para o SIEM (ids e hashes) e a exportação contínua (a memória, em Parquet, decifrada só no caminho até o seu bucket) | Avisar, auditar e devolver os dados a você | `egress.py`; [Exportação contínua](/concepts/privacy#exportação-contínua-para-o-seu-bucket) |
+| AWS, dentro de `us-east-2` | Tudo o que a plataforma guarda, cifrado | Hospedar | `deploy/aws/cluster.yaml` |
+
+Nada mais. Não há SDK de análise, pixel ou serviço de terceiro no Console ou no site que receba dado de cliente: a Content Security Policy do site e do Console só permite scripts da própria origem (`web/deploy/Caddyfile`), e as visitas ao site são contadas pela própria Niadra, sem terceiro.
+
+## O que a operação da Niadra vê
+
+- **Por padrão, ids, hashes e contagens.** Os logs, as métricas, os alertas e os painéis não levam conteúdo de cliente. Os comprovantes dizem quem leu o quê por id, nunca o texto.
+- **Acesso operacional existe e deixa rastro.** Para restaurar um espaço, conferir uma cópia ou apagar um espaço, o fundador roda os runbooks do `server/README.md` na máquina, pelo Systems Manager, que o CloudTrail da conta registra. Um acesso pelo Console a um espaço deixa comprovante `admin`, que a sua empresa vê. Esse acesso não é usado para ler conteúdo de cliente; não há segundo aprovador para ele, e isso está dito no [modelo de ameaças](/security/threat-model#riscos-residuais).
+- **Testes e medidas usam dados sintéticos.** A verificação de ponta a ponta de cada implantação roda num tenant sintético da própria Niadra; os testes do CI e as medições publicadas usam conversas inventadas.
+
+## O que a sua empresa controla
+
+- **Retenção**, por classe de dado e por finalidade, e o apagamento com comprovante ([Privacidade](/concepts/privacy)).
+- **Quem lê o quê**, pela política, com simulação antes de mudar ([`POST /v1/policy/simulate`](/api/policy-simulate)).
+- **Exportação** sob demanda e contínua: os dados são seus e saem quando você pedir, no seu bucket.
+- **Os terceiros que tratam os dados**: a lista vai no contrato, e uma mudança nela é avisada no prazo do contrato, com direito de objeção.
+- **A saída da região.** Se a sua empresa não aceitar que texto mascarado vá à IA da Niadra fora da região, isso é uma condição de contrato; hoje a plataforma não tem um modo que mantenha esse texto na região, e ele não está prometido.
+
+## Compromisso contratual
+
+O que esta página descreve é o comportamento do código de hoje. As três afirmações entram como cláusulas no contrato de tratamento de dados (DPA) da sua empresa com a Niadra, com a lista desses terceiros como anexo. O contrato é o que obriga; esta página é como conferir que o código faz o que o contrato diz.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Modelo de ameaças" href="/security/threat-model">
+    a fronteira com a IA da Niadra e o risco residual dela.
+  </Card>
+  <Card title="Privacidade, apagamento e exportação" href="/concepts/privacy">
+    os direitos do titular, por API.
+  </Card>
+</CardGroup>

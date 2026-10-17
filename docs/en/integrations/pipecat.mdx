@@ -1,0 +1,76 @@
+---
+title: "Pipecat"
+description: "One frame processor between the user aggregator and the LLM: context, turns and tools in a Pipecat pipeline."
+---
+
+`NiadraMemoryProcessor` is a `FrameProcessor` that sits between `aggregators.user()` and the LLM. On every `LLMContextFrame` it reads the context and places it; `observe(aggregators)` records the turns. Python only: the Pipecat pipeline, where the model call happens, runs in Python; the JavaScript packages of Pipecat and Daily are browser clients, where a Niadra key must never go.
+
+## Install
+
+```sh
+pip install 'niadra[pipecat]'   # pipecat-ai 1.11.0 or newer, below 2; Python 3.11 or newer
+```
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | The pipeline's `StartFrame` starts the first read (`begin()`), and the first inference waits for it within `context_voice_start` (1.5 s; `ready()`). On each `LLMContextFrame`, between the user aggregator and the LLM, `context()` (the `voice` view), with the pinned body from the SDK's memory and the slots of the read the prefetch made of the turn's words, waited for 200 ms at most; the pack goes right after the leading `system` or `developer` messages and the `turn_block` at the end. The blocks placed on the previous turn are taken out first, so the shared context never piles them up. A speculative inference gets them too, in its provisional copy | The read sends the user's last turn as `query`; `memory.prefetcher()`, right after the STT service, sends the turn so far with `prefetch()` on each `InterimTranscriptionFrame` and `TranscriptionFrame`, holding no frame. The prefetch is reused only for the identical `query`; a longer transcript finds the memory already open, and a turn with time words or a count is recomputed at the read |
+| Turns | `observe()` subscribes to the aggregators: each user message written to the context (`on_user_turn_message_added`, final in cascade and realtime modes) is the customer's turn and each finished assistant turn (`on_assistant_turn_stopped`) is the agent's. `EndFrame` and `CancelFrame` end the conversation |
+| Tools | `history_tools()` gives the three history tools as `FunctionSchema`s that carry their own handlers, so the LLM service registers them from the context. Their JSON Schemas are the kit's |
+| Verification | `attestation=` with the carrier's STIR/SHAKEN level (`A`, `B`, `C`, or Twilio's `StirVerstat`), recorded once before the first context |
+| Handoff | `transferred_to_human()` and `transferred_to_agent()` record the transfer; call them where the pipeline (or Pipecat Flows) hands the call over |
+
+`conversation_for_call(niadra, call_sid, caller)` opens the conversation with the `CallSid` as id and the customer's number as subject.
+
+## Minimal example
+
+```python
+"""A Pipecat phone agent over Twilio Media Streams with the customer's memory."""
+
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+
+from niadra import AsyncNiadra
+from niadra.integrations.pipecat import NiadraMemoryProcessor, conversation_for_call, history_tools
+
+niadra = AsyncNiadra(channel="voice")
+
+
+def build(transport, stt, llm, tts, call_sid: str, caller: str, stir_verstat: str | None) -> Pipeline:
+    conversation = conversation_for_call(niadra, call_sid, caller)
+    memory = NiadraMemoryProcessor(conversation, attestation=stir_verstat)
+    context = LLMContext(
+        [{"role": "system", "content": "You are Acme's agent."}], tools=history_tools(conversation)
+    )
+    aggregators = LLMContextAggregatorPair(context)
+    memory.observe(aggregators)
+    user, assistant = aggregators.user(), aggregators.assistant()
+    return Pipeline([transport.input(), stt, user, memory, llm, tts, transport.output(), assistant])
+```
+
+The same code is in `examples/pipecat_bot.py`.
+
+## Agent memory
+
+With `agent_memory=True` (or `{"write": True, "max_tokens": 300, "tags": [...]}`), the agent's own notes go right before the customer's context, in the same message, and `history_tools(conversation, agent_memory=...)` adds `search_agent_memory` (and `remember`). See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- The processor always passes the frame on, even when Niadra fails: the pipeline never stops because of the memory.
+- It uses `LLMContext` and `LLMContextFrame`, Pipecat's universal context since 1.9; `OpenAILLMContext` and `LLMMessagesFrame` are no longer in Pipecat's `main` and are not handled.
+- Python 3.11 or newer only, because Pipecat asks for it. The `pipecat` and `crewai` extras pin incompatible versions of a shared dependency; install one per environment.
+- The shape of the processor follows Pipecat's own Mem0 memory service (BSD 2-Clause, credited in the file); the reading is Niadra's: one pinned pack per conversation, not a search per message.
+- Tested against `pipecat-ai` 1.11.0 with a real pipeline, a fake LLM and frames pushed by hand, without audio and without network.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Voice agents" href="/en/guides/voice-agents">
+    context before hello, network attestation and handoff.
+  </Card>
+  <Card title="Twilio" href="/en/integrations/twilio">
+    the call webhook and `StirVerstat` as proof.
+  </Card>
+</CardGroup>

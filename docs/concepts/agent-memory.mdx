@@ -1,0 +1,124 @@
+---
+title: "Memória do agente"
+description: "As notas de trabalho do próprio agente: procedimentos, como as ferramentas e os processos se comportam e armadilhas, nunca sobre um cliente."
+---
+
+A memória do cliente é o que a Niadra guarda sobre cada pessoa, conta e parceiro. A **memória do agente** é outra coisa: o que o agente aprendeu sobre o próprio trabalho. "No ERP, o crédito só aparece na fatura depois de `post_credit` e `refresh_invoice`, nessa ordem." "A API de agendamento recusa data sem fuso." "Quando o cliente pede segunda via, o procedimento é este." É o que o time hoje escreve no prompt à mão e esquece de atualizar.
+
+Ela mora numa tabela própria, com política, comprovante e apagamento próprios, e entra no prompt por um bloco separado do contexto do cliente. Nunca contém dado pessoal: uma nota com telefone, e-mail, documento ou nome de cliente é **recusada**, não mascarada. Por construção, o apagamento de um titular nunca a toca.
+
+O recurso vem ligado: um espaço novo já guarda e serve as notas dos agentes. Uma pessoa pode desligá-lo, ou exigir que alguém aprove cada nota, no Console, em **Memória dos agentes**, por um diff aprovado, como qualquer outra configuração do espaço.
+
+## O que é uma nota
+
+| Campo | O que é |
+|---|---|
+| `kind` | `procedure` (como fazer), `tool_note` (como uma ferramenta se comporta), `process_note` (como um processo da empresa funciona) ou `pitfall` (o que dá errado) |
+| `title`, `body` | Até 300 e 20.000 caracteres, em qualquer idioma |
+| `tags` | Até 8, em minúsculas (`invoice`, `credit`, `erp`): tipos de objeto, operações e sistemas do espaço. É por elas que a nota chega à view ou à tarefa certa |
+| `visibility` | `source` (só o agente dono, o padrão), `vendor` (todos os agentes do mesmo fornecedor) ou `space` (todos os agentes do espaço) |
+| `evidence` | O `conversation_id` ou o `task_id` de onde a nota saiu. Só o id, nunca o texto |
+| `origin` | `agent` (o agente escreveu), `human` (uma pessoa, no Console) ou `distilled` (proposta por destilação e aprovada) |
+| `version`, `supersedes_note_id` | Toda edição gera uma versão nova; a anterior fica `retired` e continua legível |
+| `valid_until` | Opcional. Depois desse momento a nota sai do bloco e da busca |
+
+O dono da nota é a fonte: o agente já é identificado pelo fornecedor, pelas finalidades e pela chave dele, então não há conceito novo. A visibilidade `vendor` é a mesma neutralidade da memória do cliente: o agente do fornecedor A nunca lê o que o agente do fornecedor B aprendeu.
+
+## Como entra no prompt
+
+Três caminhos, todos opcionais.
+
+**O bloco.** [`GET /v1/agent-memory/block`](/api/agent-memory-block) devolve as notas ativas que o agente pode ler como um texto pronto, entre `<agent_notes>` e `</agent_notes>`, aberto com "Do próprio agente (procedimentos e notas de trabalho, não dados de clientes)". As notas que uma pessoa escreveu vêm primeiro, depois as cujas tags casam com a view ou a tarefa, depois as mais revisadas, depois as mais antigas, sempre na mesma ordem: o bloco tem os mesmos bytes para todos os clientes, então fica no prefixo do prompt que o provedor guarda em cache. Coloque-o **depois das instruções do agente e antes do contexto do cliente**. O orçamento vai de 50 a 2.000 tokens, 300 por padrão, e a resposta tem `ETag`. O orçamento limita só este bloco: uma nota que não coube continua guardada e a busca nas notas a lê. Quando alguma fica de fora, `left_out` diz quantas e a última linha do bloco também ("+N notas fora do bloco: busque nas notas.").
+
+<CodeGroup>
+```python Python
+notes = conversation.agent_memory(max_tokens=300, tags=["scheduling"])  # the session's view orders the notes
+system_prompt = "\n\n".join(part for part in (AGENT_INSTRUCTIONS, notes.text, ctx.system_block) if part)
+```
+```typescript TypeScript
+const notes = await conv.agentMemory({ max_tokens: 300, tags: ["scheduling"] });
+const system = [AGENT_INSTRUCTIONS, notes.text, ctx.text].filter(Boolean).join("\n\n");
+```
+```bash cURL
+curl "https://acme-prod.us-east-2.api.niadra.com/v1/agent-memory/block?max_tokens=300&tags=scheduling&view=voice" \
+  -H "Authorization: Bearer $NIADRA_API_KEY"
+```
+</CodeGroup>
+
+Os SDKs guardam o bloco por chamada (`max_tokens`, `tags` e view) pelo mesmo tempo do contexto e revalidam pelo ETag. Com a memória dos agentes desligada no espaço, o bloco vem vazio e `enabled: false`; o agente segue sem ele. Cada [integração](/integrations/overview) recebe `agent_memory=True` (Python) ou `agentMemory: true` (TypeScript) e faz esse posicionamento sozinha.
+
+**As ferramentas.** `search_agent_memory` (leitura) e `remember` (escrita) entram no kit com `tools(agent_memory=True, write_agent_memory=True)` em Python e `tools({ agentMemory: true, writeAgentMemory: true })` em TypeScript, e no [servidor MCP](/guides/mcp) quando o espaço liga o recurso. A descrição de cada uma diz ao modelo quando não usar: "It holds nothing about customers; for the customer's history use search_customer_history" e "Never write anything about a customer here: no names, phones, e-mails, documents, ids or words from the conversation". `remember` só é oferecida a uma chave com o escopo `agent_memory:write`; uma nota recusada volta ao modelo como erro `personal_data_in_agent_memory`, para ele reescrever sem o dado.
+
+**A seção da tarefa.** Uma view de tarefa com `include_agent_memory: true` anexa até 200 tokens de notas com as tags dos tipos de objeto da tarefa ao fim do contexto. Serve para quem só consegue mudar o contexto do agente, não o prompt.
+
+## Escrever
+
+<CodeGroup>
+```python Python
+saved = conversation.remember(
+    "pitfall",
+    "Scheduling API",
+    "Dates without a time zone are refused; send the offset the customer's region uses.",
+    tags=["scheduling"],
+)  # the conversation id goes as evidence
+if saved.error == "personal_data_in_agent_memory":
+    ...  # rewrite without the customer's data
+```
+```typescript TypeScript
+const { data, error } = await conv.remember({
+  kind: "pitfall",
+  title: "Scheduling API",
+  body: "Dates without a time zone are refused; send the offset the customer's region uses.",
+  tags: ["scheduling"],
+});
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/agent-memory/notes" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"kind": "pitfall", "title": "Scheduling API",
+       "body": "Dates without a time zone are refused; send the offset the customer'"'"'s region uses.",
+       "tags": ["scheduling"], "evidence": {"conversation_id": "call-4471"}}'
+```
+</CodeGroup>
+
+Uma escrita passa por duas camadas antes de entrar: os detectores de dado pessoal do servidor de modelos, que rodam dentro da região (o mesmo redator que roda antes de qualquer chamada à IA da Niadra), e uma camada local que reconhece e-mail, telefone e dois formatos de documento sem depender dele. Organização e lugar não contam como dado pessoal: um procedimento cita sistemas, empresas e filiais o tempo todo. Se o redator não responder, a escrita espera; ela nunca entra sem passar por ele. A recusa é [`422 personal_data_in_agent_memory`](/errors), com os tipos de dado encontrados e sem o valor.
+
+Limites: um agente escreve até 20 notas por hora (acima disso, 429 com `Retry-After`). Não há teto de notas guardadas: nenhuma nota é recusada, apagada ou aposentada para abrir espaço, e a listagem e a busca leem todas, a listagem por página com `next_cursor`. Um agente edita e aposenta só as próprias notas; uma pessoa com o papel `integration` escreve em nome de qualquer agente, e o `source_id` vai no pedido.
+
+Num espaço com `writes: human_only`, o `remember` de um agente não grava: vira uma **proposta**, que uma pessoa aprova ou rejeita no Console. A resposta traz `proposal_id` no lugar da nota.
+
+## Destilar
+
+O que outras memórias chamam de memória procedural (um resumo por LLM da execução, gravado sem revisão) aqui é um pedido explícito. [`POST /v1/agent-memory/distill`](/api/agent-memory-distill) recebe um `conversation_id` ou `task_id` e cria uma proposta em `drafting`. Em segundo plano, o servidor lê a conversa ou a tarefa inteira, **já mascarada**: uma conversa longa é lida em janelas de turnos inteiros, com os últimos turnos de uma janela lidos de novo na seguinte, e um turno longo em partes que se sobrepõem; quando mais de uma janela propõe nota, uma última chamada junta as propostas. O modelo devolve uma nota no esquema fixo (`kind`, `title`, `body`, `tags`), guardada inteira, e o servidor passa o resultado pelo redator e deixa a proposta em `pending`. Ninguém grava nada até uma pessoa aprovar, com ou sem edição; a edição passa pelo redator de novo.
+
+Uma destilação que não rende nota fica `failed` com o motivo: `nothing_to_propose` (a conversa não tinha procedimento reaproveitável), `personal_data` (a proposta trazia dado pessoal e foi descartada), `unconfirmed_link` (a conversa falou só por um [vínculo não confirmado](/concepts/identity#proteções-contra-união-errada); o modelo nem é chamado, e o pedido vale depois da confirmação) ou `no_turns` (não há turnos dessa conversa ou tarefa).
+
+## Governança
+
+- **Escopos.** Uma chave lê com `agent_memory` (ou `context`, que toda chave de agente tem) e escreve com `agent_memory:write`. Pessoas leem e escrevem com o papel `integration`; apagar e aprovar pedem `admin`.
+- **Comprovantes.** Cada leitura do bloco e cada busca deixam um comprovante `agent_memory` na mesma cadeia dos outros, com os ids das notas entregues. Cada escrita, edição, aposentadoria, destilação, aprovação e apagamento deixa um comprovante `admin`. "Por que o agente fez isso?" continua respondível.
+- **Apagamento e exportação.** [`DELETE /v1/agent-memory/notes?source_id=`](/api/agent-memory-notes-erase) apaga toda nota e toda proposta de um agente, em todas as versões, com comprovante. [`GET /v1/agent-memory/export`](/api/agent-memory-export) devolve tudo para portabilidade, e as notas entram na exportação contínua do espaço como tabela própria. O apagamento de um titular não olha para esta tabela, porque ela não pode ter dado pessoal.
+- **Aviso.** Toda nota e toda proposta criadas emitem `agent_memory.note_created`, com ids, tipo e origem, nunca o texto, para um webhook que revise as notas.
+- **Console.** A tela **Memória dos agentes** lista as notas por agente e visibilidade, cria, edita (gera versão), aposenta, mostra as propostas para aprovar ou rejeitar e liga o recurso (`enabled`, `writes`) por diff aprovado.
+
+## O que fica de fora
+
+Nenhuma nota guarda o que um cliente disse. Nenhuma nota nasce sozinha de uma conversa: a destilação propõe, uma pessoa aprova. Nenhum modelo reordena as notas por "uso recente": a ordem é por tags, versão e idade, e a mesma para todos os clientes. Sem vetor no primeiro corte: a busca é por palavra e por tags, porque um agente tem dezenas a centenas de notas.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Bloco da memória do agente" href="/api/agent-memory-block">
+    a rota, com os parâmetros e o ETag.
+  </Card>
+  <Card title="Integrações" href="/integrations/overview">
+    cada adaptador coloca o bloco no lugar certo e liga as duas ferramentas.
+  </Card>
+  <Card title="MCP com qualquer LLM" href="/guides/mcp">
+    as duas ferramentas no servidor MCP do espaço.
+  </Card>
+  <Card title="Comprovantes e auditoria" href="/concepts/receipts">
+    o comprovante `agent_memory` e os `admin` das escritas.
+  </Card>
+</CardGroup>

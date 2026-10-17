@@ -1,0 +1,9 @@
+{
+  "type": "verify",
+  "idempotency_key": "call-5521/attestation",
+  "method": "network_attestation",
+  "level": "V2",
+  "conversation_id": "call-5521",
+  "handle": {"type": "phone_e164", "value": "+5511987654321"},
+  "occurred_at": "2026-09-22T14:07:02-03:00"
+}

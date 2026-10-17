@@ -1,0 +1,9 @@
+{
+  "kind": "preference",
+  "attr": "item_variant.color",
+  "op": "not_in",
+  "values": ["preto"],
+  "strength": "must_not",
+  "scope": "persistent",
+  "source": "stated"
+}

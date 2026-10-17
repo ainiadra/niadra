@@ -1,0 +1,487 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/coordination-decision.v0.json",
+  "title": "Niadra Coordination Decision v0",
+  "description": "Whether an agent may act on a subject or an object now, who holds it, and why. See spec/coordination.md.",
+  "$defs": {
+    "ChannelState": {
+      "additionalProperties": false,
+      "properties": {
+        "free_form_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Free Form Until"
+        },
+        "template_required": {
+          "default": false,
+          "title": "Template Required",
+          "type": "boolean"
+        },
+        "quiet_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quiet Until"
+        }
+      },
+      "title": "ChannelState",
+      "type": "object"
+    },
+    "ClaimKind": {
+      "enum": [
+        "owner",
+        "case",
+        "task_lock"
+      ],
+      "title": "ClaimKind",
+      "type": "string"
+    },
+    "ClaimVia": {
+      "description": "The three ways in: a declaration through the API, an observation mapped from a webhook, an observation the company's worker read and sent.",
+      "enum": [
+        "declaration",
+        "mapping",
+        "worker"
+      ],
+      "title": "ClaimVia",
+      "type": "string"
+    },
+    "CommitmentRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}$",
+          "title": "Type",
+          "type": "string"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "CommitmentRef",
+      "type": "object"
+    },
+    "ContactBudget": {
+      "additionalProperties": false,
+      "properties": {
+        "remaining": {
+          "title": "Remaining",
+          "type": "integer"
+        },
+        "next_allowed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Allowed At"
+        }
+      },
+      "required": [
+        "remaining"
+      ],
+      "title": "ContactBudget",
+      "type": "object"
+    },
+    "EffectStatus": {
+      "additionalProperties": false,
+      "description": "`none` means nothing held the key and this check reserved it: the caller acts and then declares.",
+      "properties": {
+        "state": {
+          "enum": [
+            "none",
+            "in_flight",
+            "done",
+            "unknown_outcome"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "attempt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempt"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "EffectStatus",
+      "type": "object"
+    },
+    "Lock": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task"
+        },
+        "holder": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Holder",
+          "type": "string"
+        },
+        "until": {
+          "format": "date-time",
+          "title": "Until",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "holder",
+        "until"
+      ],
+      "title": "Lock",
+      "type": "object"
+    },
+    "Owner": {
+      "additionalProperties": false,
+      "description": "Who holds the subject or the object now: the most restrictive valid claim, where it came from and until when. `epoch` fences a release.",
+      "properties": {
+        "holder": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Holder",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ClaimKind"
+        },
+        "level": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}$",
+          "title": "Level",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "via": {
+          "$ref": "#/$defs/ClaimVia"
+        },
+        "since": {
+          "format": "date-time",
+          "title": "Since",
+          "type": "string"
+        },
+        "valid_until": {
+          "format": "date-time",
+          "title": "Valid Until",
+          "type": "string"
+        },
+        "epoch": {
+          "title": "Epoch",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "holder",
+        "kind",
+        "level",
+        "source",
+        "via",
+        "since",
+        "valid_until",
+        "epoch"
+      ],
+      "title": "Owner",
+      "type": "object"
+    },
+    "PromiseRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "due": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Due"
+        },
+        "owner": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Owner",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "owner"
+      ],
+      "title": "PromiseRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "enum": [
+        "allow",
+        "defer",
+        "deny",
+        "handoff_to"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "reasons": {
+      "items": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Reasons",
+      "type": "array"
+    },
+    "holder": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Holder"
+    },
+    "owner": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Owner"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "locks": {
+      "items": {
+        "$ref": "#/$defs/Lock"
+      },
+      "title": "Locks",
+      "type": "array"
+    },
+    "effect": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EffectStatus"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "channel": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChannelState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "contact_budget": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ContactBudget"
+      },
+      "title": "Contact Budget",
+      "type": "object"
+    },
+    "suppressions": {
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]{0,39}$",
+        "type": "string"
+      },
+      "title": "Suppressions",
+      "type": "array"
+    },
+    "contact_window_until": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "With `contact_window`: when the subject's contact window on the channel ends, the first moment the contact may go.",
+      "title": "Contact Window Until"
+    },
+    "commitments_active": {
+      "items": {
+        "$ref": "#/$defs/CommitmentRef"
+      },
+      "title": "Commitments Active",
+      "type": "array"
+    },
+    "promises_open": {
+      "items": {
+        "$ref": "#/$defs/PromiseRef"
+      },
+      "title": "Promises Open",
+      "type": "array"
+    },
+    "decision_id": {
+      "format": "uuid",
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "valid_for_s": {
+      "minimum": 0,
+      "title": "Valid For S",
+      "type": "integer"
+    },
+    "contact_token": {
+      "anyOf": [
+        {
+          "maxLength": 1024,
+          "pattern": "^nct1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]{86}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Contact Token"
+    }
+  },
+  "required": [
+    "decision",
+    "decision_id",
+    "valid_for_s"
+  ],
+  "type": "object",
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "decision"
+        ],
+        "properties": {
+          "decision": {
+            "const": "handoff_to"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "holder"
+        ],
+        "properties": {
+          "holder": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "contact_token"
+        ],
+        "properties": {
+          "contact_token": {
+            "type": "string"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "decision": {
+            "const": "allow"
+          }
+        }
+      }
+    }
+  ]
+}

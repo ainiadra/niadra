@@ -1,0 +1,60 @@
+---
+title: "Claude Desktop"
+description: "O servidor MCP do seu espaço no Claude Desktop, pela ponte mcp-remote, que manda a chave e o subject token como cabeçalhos."
+---
+
+O servidor MCP do espaço exige dois cabeçalhos, `Authorization` e `Niadra-Subject-Token`. A tela de conectores do Claude Desktop recebe um URL e credenciais OAuth, sem campo para um cabeçalho próprio, então a ligação passa pela ponte `mcp-remote`, um servidor MCP local que repassa cada pedido ao endereço remoto com os cabeçalhos que você configura. Use uma chave do espaço de **sandbox** (`nia_sk_test_...`), nunca uma chave `live`.
+
+## O que a conexão precisa
+
+| Cabeçalho | Valor | De onde vem |
+|---|---|---|
+| `Authorization` | `Bearer` e a chave da fonte | O Console, em **Agentes e chaves**, no espaço de sandbox |
+| `Niadra-Subject-Token` | Um token assinado que amarra a conexão a um cliente de teste | [`POST /v1/subject-tokens`](/api/subject-tokens), com a mesma chave; vale 15 minutos |
+
+## Ligar
+
+Em `claude_desktop_config.json` (Configurações > Desenvolvedor > Editar configuração):
+
+```json
+{
+  "mcpServers": {
+    "niadra": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://acme-sandbox.us-east-2.api.niadra.com/mcp",
+        "--header",
+        "Authorization:${NIADRA_AUTH}",
+        "--header",
+        "Niadra-Subject-Token:${NIADRA_SUBJECT_TOKEN}"
+      ],
+      "env": {
+        "NIADRA_AUTH": "Bearer nia_sk_test_us-east-2_acme-sandbox_...",
+        "NIADRA_SUBJECT_TOKEN": "<token de POST /v1/subject-tokens>"
+      }
+    }
+  }
+}
+```
+
+O valor do cabeçalho vai por variável de ambiente, sem espaço no argumento: é a forma que o `mcp-remote` documenta para o Claude Desktop, que divide argumentos com espaço. Reinicie o Claude Desktop; as ferramentas aparecem no menu de ferramentas da conversa.
+
+## Limites
+
+- O token vale 15 minutos: quando vence, as ferramentas do cliente respondem `unauthenticated`. Emita outro, troque em `env` e reinicie o Claude Desktop. As duas ferramentas da memória do agente funcionam sem token, quando o espaço as liga.
+- O `mcp-remote` é um pacote do npm mantido fora da Niadra; ele precisa do Node instalado.
+- O cliente é o do token, sempre. O servidor só responde `POST`.
+- Cada chamada de ferramenta deixa um comprovante no espaço.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="MCP com qualquer LLM" href="/guides/mcp">
+    as ferramentas, o token e o que cada uma exige.
+  </Card>
+  <Card title="Claude Code" href="/integrations/mcp/claude-code">
+    a ligação direta, sem ponte.
+  </Card>
+</CardGroup>

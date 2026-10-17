@@ -1,0 +1,135 @@
+---
+title: "Registros de turno"
+description: "O que o agente leu, chamou, mostrou, afirmou e decidiu em cada turno, com a build fixada: modos de conteúdo, camadas, pinos e replay."
+---
+
+Um time que roda um agente de IA precisa ver por que o agente fez o que fez, turno a turno: o que leu, que ferramentas chamou com que argumentos, o que elas devolveram, o que mostrou à pessoa, o que afirmou e o que decidiu. O mesmo time precisa rodar de novo um turno real depois de trocar um prompt, um modelo ou os dados. O **registro de turno** é essa conta de um turno, num formato só para qualquer framework de agente. Ele é capturado dentro do processo do agente e enviado depois, então nunca atrasa a resposta; fixa a build em que o turno rodou, para um replay reproduzir a conversa que aconteceu; e os valores gravados podem ficar no seu próprio armazenamento, com só ponteiros e digests saindo da sua empresa.
+
+## Ligar e desligar
+
+Os registros de turno são a funcionalidade `turns` do espaço, ligada por padrão; um espaço a desliga no documento `features`, por um diff aprovado do papel `security`. Com ela desligada, [`POST /v1/turns`](/api/turns) e as rotas de replay respondem 404, e os SDKs não gravam nada, mesmo com a captura ligada no código. O documento `recording`, do papel `integration`, diz o modo de conteúdo do espaço e de cada fonte, os pinos exigidos, quanto tempo a camada guardada mantém um turno (`kept_days`, 30 por padrão, de 7 a 90), quanto tempo um cenário de replay guarda os turnos dele (`scenario_days`, 180 por padrão), se o modelo de dado pessoal passa nos registros guardados (`pii_model`) e a fração das conversas guardadas inteiras por amostra (`sample_rate`, 5% por padrão). Mudar o modo de conteúdo para um que guarda mais pede também o papel `security`.
+
+## O que é um turno
+
+Um turno vai da entrada dele até a última coisa que emitiu à pessoa ou a um documento. A entrada pode ser uma mensagem (`kind: message`), uma ação de interface, como um toque num item ou num "ver mais" (`action`), um evento de sistema (`event`) ou um temporizador que disparou (`timer`). Uma ação de interface é um turno por si, mesmo sem chamada de modelo. Um subagente, ou um agente chamado como ferramenta, abre um **subturno**, com `turn_id` próprio e o turno que o abriu em `agent.parent_turn_id`.
+
+## Capturar
+
+O SDK captura no processo do agente, no momento em que cada coisa acontece, por cópia: os argumentos e o resultado de uma ferramenta são copiados como JSON quando a chamada volta, o que custa a um resultado de 25 KB 0,05 ms no percentil 95; o digest é calculado depois, no envio. Quando um resultado existe em duas formas, as duas são gravadas: a que o modelo viu (`result_model`) e a que a interface recebeu (`result_ui`). Um gerador é gravado depois de consumido por inteiro. A captura nunca atrasa a resposta: o envio acontece depois e à parte do turno, e uma falha na gravação marca o registro `completeness: incomplete` sem tocar no agente.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+
+niadra = Niadra(channel="whatsapp")
+
+
+@Niadra.tool("search_products", provenance=lambda r: [{"ref": f"product:store:{r['sku']}", "fields": r["prices"]}])
+def search_products(sku: str) -> dict:
+    return catalog.find(sku)
+
+
+with niadra.conversation("wa-8812", subject=phone("+5511900005678"), agent_id="store") as conversation:
+    conversation.customer(text)
+    with conversation.turn(build=Niadra.build(prompts={"store": "v3"}, model="gpt-4.1-mini")):
+        context = conversation.context()
+        product = search_products("PX-4471")  # recorded: arguments, result, latency, the objects it showed
+        reply = model(prompt_with(context, product))
+        conversation.agent(reply)  # the record points at this event; the text is never repeated
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+const searchProducts = Niadra.tool("search_products", async (sku: string) => catalog.find(sku), {
+  provenance: (r) => [{ ref: `product:store:${r.sku}`, fields: r.prices }],
+});
+
+const convo = niadra.conversation({ subject: handles.phone("+5511900005678"), channel: "whatsapp", conversation_id: "wa-8812" });
+convo.customer(text, { idempotency_key: inbound.id });
+await convo.turn({ build: Niadra.build({ prompts: { store: "v3" }, model: "gpt-4.1-mini" }) }, async () => {
+  const ctx = await convo.context();
+  const product = await searchProducts("PX-4471"); // recorded: arguments, result, latency, the objects it showed
+  convo.agent(await model(promptWith(ctx, product))); // the record points at this event; the text is never repeated
+});
+```
+</CodeGroup>
+
+O `turn_id` é criado quando o turno começa e segue o turno através de tarefas assíncronas e sessões filhas, então toda chamada feita em nome dele cai no mesmo registro; em Python, um framework que roda ferramentas num pool de threads usa `niadra.turns.bind(fn)`, e em TypeScript o turno em andamento segue o `AsyncLocalStorage`. Os adaptadores de framework abrem e fecham o turno por você com `turns=True` (`turns: true`): Google ADK, OpenAI Agents, LangGraph e LangChain em Python; LangChain e LangGraph, Mastra, o Vercel AI SDK, OpenAI Agents JS, Google ADK e VoltAgent em TypeScript. Uma ferramenta envolvida com `tool()` dentro de uma ferramenta do framework toma a chamada que o adaptador já gravou, então cada chamada é gravada uma vez; num replay, as ferramentas do LangGraph, do Google ADK e do Mastra respondem do registro, e as do OpenAI Agents e do VoltAgent precisam estar envolvidas com `tool()`, porque os ganchos deles não param uma ferramenta. Uma chamada de modelo é gravada pelo adaptador que vê os tokens dela. `provenance` transforma o resultado de uma ferramenta nos objetos que ele mostrou, cada um com a referência, os campos e a proveniência; sem proveniência, uma observação é só para exibição e nunca atualiza o [estado tipado](/concepts/object-types).
+
+O registro também guarda o que o turno **leu** da memória, pela versão (o contexto pelo ETag, um bloco pela versão dele), as decisões de [coordenação](/concepts/coordination) em que se apoiou e os efeitos com o estado de cada um, o que a pessoa viu ou fez (as [interações](/concepts/signals)) e os vereditos do [contrato de afirmação](/concepts/claims). O que o turno disse não é repetido: `output.event_keys` aponta para os eventos que `track()` já enviou.
+
+## A build e os pinos
+
+`build.pins` guarda o que precisa ser igual para um replay reproduzir o turno: `prompts` (nome e versão de cada prompt), `corpus_digest` (um digest dos arquivos que o agente consulta, calculado por você, nunca os arquivos), `model` (o modelo exato), `assembler` (a versão do seu montador de contexto) e `tool_schemas` (o digest do esquema de cada ferramenta). O SDK preenche sozinho os pinos da Niadra: a versão do compilador de contexto e o hash do pacote que o turno leu. O documento `recording` diz quais pinos são exigidos (`prompts` e `model` por padrão); um turno sem um deles é guardado, marcado como não reproduzível, e o SDK avisa uma vez.
+
+## Modos de conteúdo
+
+O modo é configuração do espaço, por fonte, e o SDK o segue. Um blob é um valor grande do registro: os argumentos de uma ferramenta, um resultado, o texto de uma leitura, um documento que o turno escreveu.
+
+| Modo | O que um blob leva | Replay |
+|---|---|---|
+| `stored` | `sha256` e `content`, o próprio valor. A Niadra o guarda cifrado e mascara as folhas de texto com as mesmas regras dos eventos; com `pii_model`, o modelo de dado pessoal faz uma segunda passagem nos argumentos das ferramentas | Sim |
+| `pointer` | `sha256` e `pointer`, uma URI no seu armazenamento (`s3://...`). O SDK escreve o valor no seu bucket, com as suas credenciais, e manda só o ponteiro e o digest; nenhum valor gravado sai da sua empresa | Sim, dentro da sua empresa |
+| `hash_only` | Só `sha256` | Não; serve à estatística e às asserções estruturais |
+
+Uma fonte pode sempre mandar um modo que guarda menos, nunca mais: um turno recusado com `content_mode_refused` sai de novo só com digests. O digest é `sha256:` e o SHA-256 do JSON canônico do valor (RFC 8785), então o mesmo valor tem o mesmo digest em qualquer produtor, e um replay casa as chamadas pelo `args_hash` dos argumentos normalizados. Um turno grande demais é enviado com os blobs reduzidos a hashes, então um 413 `turn_too_large` nunca entra em laço. Um registro em `pointer` ou `hash_only` é aceito mesmo com o armazenamento da Niadra indisponível, porque o quadro é tudo o que ele tem. Veja [Só metadado](/guides/metadata-only).
+
+## Fidelidade e completude
+
+| Fidelidade | Produzida por | O que sustenta |
+|---|---|---|
+| `bronze` | A Niadra, a partir de spans `gen_ai` de [OpenTelemetry](/guides/opentelemetry) | Métricas e regressão por indicador. Nunca replay nem atribuição |
+| `silver` | A Niadra, a partir de spans que também levam os atributos de exposição | Também o que a pessoa viu |
+| `gold` | O SDK, interceptando as ferramentas e as chamadas de modelo no processo do agente | Tudo, inclusive o replay |
+
+`completeness` diz quanto do turno está no registro: `complete`, `partial` (o SDK descartou blobs para proteger a fila; o quadro fica), `incomplete` (a gravação falhou durante o turno) ou `unknown` (um registro bronze).
+
+## A fila e o envio
+
+Os turnos têm fila própria, separada da fila de eventos, limitada por bytes (64 MB por padrão) e por quantidade (2.000 turnos). Quando ela enche, o SDK descarta primeiro os blobs dos turnos sem marca, do mais antigo para o mais novo, marcando os registros `partial`, e só depois os quadros mais antigos inteiros; os dois são contados. Um turno marcado fica com os blobs por mais tempo, porque é ele que alguém vai reproduzir. O envio vai em lotes de até 50 registros e 4 MB comprimidos, por [`POST /v1/turns`](/api/turns), com o escopo `track`; a resposta é 200 quando todos entraram, 207 com um erro por registro recusado. Um turno que a Niadra já tem, pelo `turn_id`, é duplicata: o mesmo turno enviado duas vezes é um turno só. Um processo de escrita segura poucos corpos grandes (acima de 1 MB, enviados ou descomprimidos) ao mesmo tempo; passado esse limite, o lote volta com 429 e `Retry-After`, e o SDK o manda de novo.
+
+O mesmo código está em [`examples/turn_records.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/turn_records.py) e, em TypeScript, em [`examples/claim-guard.ts`](https://github.com/ainiadra/niadra-sdk-ts/blob/main/examples/claim-guard.ts), que abre o turno e passa a resposta pelo contrato de afirmação.
+
+## Camadas e promoção
+
+Todo turno fica na camada **curta**. Um turno também é copiado para a camada **guardada**, a que a busca e o replay leem, por um de três motivos: uma **marca** posta na captura (`error`, `guard_acted`, `handoff`, `assertion_failed`, `synthetic`, `incomplete` ou `negative_feedback`), um **pedido posterior**, por [`POST /v1/turns/promote`](/api/turns-promote), nomeando uma conversa ou ids de turno com o motivo (`complaint`, `bug_report`, `review` ou `other`), porque a reclamação chega dias depois do turno, ou a **amostra** determinística de conversas inteiras. Nenhuma camada expira sozinha: um registro fica até um apagamento ou até a retenção que você definir em `recording.kept_days` (no mínimo 7 dias, sem máximo), que vale para as duas camadas; passado esse prazo, nada do turno resta além dos totais do dia, que não nomeiam ninguém. Os turnos de um cenário de replay seguem `scenario_days`, também sem prazo quando não definido. Uma [retenção legal](/concepts/privacy#retenções-legais) mantém os turnos de uma conversa fora do expurgo até ser liberada.
+
+O webhook `turn.flagged` sai para cada turno guardado por uma marca, para os endpoints que o assinam: só ids e as marcas, nunca o que o turno disse ou leu.
+
+## O visualizador
+
+No Console, a tela Turnos dos agentes lista os turnos guardados, do mais novo para o mais antigo, e abre cada um: o que leu, chamou, afirmou e disse, com as marcas, os pinos e `replay_blockers`, por que o turno não pode ser reproduzido quando não pode (`content_mode` `hash_only`, fidelidade `bronze` ou `silver`, completude `partial`, `incomplete` ou `unknown`, ou um pino exigido que falta). Pela API, [`GET /v1/turns/{turn_id}`](/api/turn) e [`POST /v1/turns/search`](/api/turns-search), com o id da conversa no corpo, pedem uma chave com o escopo `replay` ou uma pessoa com o papel `integration` ou `security`.
+
+## Replay
+
+Um cenário guarda até 50 turnos com as asserções que eles devem continuar passando; o seu CI roda cada turno N vezes com a build fixada, dentro da sua empresa, e a Niadra decide o veredito estatístico. As ferramentas respondem do registro, os valores nunca saem, e o resultado nunca é enviado como turno. Veja [Replay no seu CI](/guides/replay-in-ci).
+
+## Custo e orçamento
+
+Cada registro leva o custo do turno em dólares e os tokens de cada chamada de modelo. O bloco `budget` de uma leitura de contexto (`include: ["budget"]`) mostra o que o pacote custa em tokens estimados, por seção, e o que os turnos gravados deste agente já somaram na conversa ou no caso (turnos, chamadas de modelo e de ferramenta, tokens de entrada, do cache e de saída, custo); `counted: false` diz que os contadores não puderam ser lidos, e um número que falta nunca é zero. O bloco é mostrado, nunca imposto. O [aproveitamento](/concepts/context-use) traz em `cost` chamadas, tokens e dinheiro por turno, por fonte e agente, contra o custo sem memória que a sua empresa mediu e declarou no documento `measurement`.
+
+## Privacidade
+
+- O registro repete nenhum texto da conversa: `output.event_keys` aponta para os eventos.
+- No modo `pointer`, nenhum valor gravado chega à Niadra; no `hash_only`, nenhum valor é gravado.
+- A Niadra nunca põe um id de conversa numa URL nem numa chave de armazenamento em claro: os turnos ficam sob um hash com chave da conversa, e o apagamento de uma pessoa apaga os turnos dela por esse prefixo.
+- Os registros servem à finalidade `quality`, com a retenção da camada. Uma retenção legal os segura; apagado o titular, `retained` no comprovante conta os turnos que uma retenção ainda mantém.
+- O índice da camada guardada entra na sua cadeia de auditoria: cada linha guardada tem uma entrada (id, fonte, agente, tipo, hora, modo, hash da build) com um digest SHA-256, as linhas de um dia UTC formam uma raiz de Merkle, e o evento diário `audit.root` a leva como `turns.root`, ao lado da raiz dos comprovantes. [`GET /v1/turns/index/{day}`](/api/turns-index) lista as linhas com os digests para a sua empresa recalcular a raiz; uma linha que vence ou é apagada depois deixa a raiz ancorada como estava.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Replay no seu CI" href="/guides/replay-in-ci">
+    cenários, asserções e o veredito estatístico.
+  </Card>
+  <Card title="Só metadado" href="/guides/metadata-only">
+    o modo `pointer`: os valores no seu bucket.
+  </Card>
+  <Card title="Afirmações" href="/concepts/claims">
+    os vereditos que cada turno carrega.
+  </Card>
+  <Card title="Registrar turnos" href="/api/turns">
+    a referência de `POST /v1/turns`.
+  </Card>
+</CardGroup>

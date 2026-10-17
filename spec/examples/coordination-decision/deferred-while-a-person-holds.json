@@ -1,0 +1,24 @@
+{
+  "decision": "defer",
+  "reasons": [
+    "owner_active"
+  ],
+  "owner": {
+    "holder": "human:attendant-7",
+    "kind": "owner",
+    "level": "human_active",
+    "source": "service_panel",
+    "via": "mapping",
+    "since": "2026-09-29T14:02:10Z",
+    "valid_until": "2026-09-29T14:32:10Z",
+    "epoch": 1790690530000
+  },
+  "contact_budget": {
+    "retention": {
+      "remaining": 2,
+      "next_allowed_at": null
+    }
+  },
+  "decision_id": "0199a3b3-0a00-7b2c-9d4e-5f6a7b8c9d02",
+  "valid_for_s": 30
+}

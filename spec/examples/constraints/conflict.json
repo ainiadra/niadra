@@ -1,0 +1,11 @@
+{
+  "version": "cv_c0ffee00beef",
+  "hard": [
+    {"id": "h1", "attr": "item_variant.color", "op": "not_in", "values": ["preto"], "source": "stated",
+     "scope": "persistent", "origin": {"kind": "stated", "event_key": "msg-100"}},
+    {"id": "h2", "attr": "item_variant.color", "op": "in", "values": ["preto"], "source": "stated",
+     "scope": "session", "origin": {"kind": "stated", "event_key": "msg-230"}}
+  ],
+  "conflicts": [{"ids": ["h1", "h2"], "kept": "h2", "by": "current_utterance"}],
+  "text": "<restrições>\n- exigido: color igual a preto\n</restrições>"
+}

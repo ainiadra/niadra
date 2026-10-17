@@ -1,0 +1,28 @@
+{
+  "tool": "quote_plan",
+  "element": "size",
+  "cases": [
+    {
+      "turn_id": "otel-4bf92f3577b34da6a3ce929d0e0e4736",
+      "call_id": "c7",
+      "status": "completed",
+      "dry_run": true,
+      "k": 3,
+      "overlap": 0.834,
+      "noise": 1.0,
+      "base_count": 3,
+      "variant_count": 3,
+      "engaged": [
+        {
+          "base": 1,
+          "variant": 2
+        }
+      ]
+    },
+    {
+      "turn_id": "t-legal-0042",
+      "call_id": "c1",
+      "status": "no_dry_run"
+    }
+  ]
+}

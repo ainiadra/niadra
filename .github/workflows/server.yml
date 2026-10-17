@@ -1,0 +1,127 @@
+# Checks every push and pull request that touches server/. It never deploys.
+name: server
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "!server/**.md"
+      - ".github/workflows/server.yml"
+  pull_request:
+    paths:
+      - "server/**"
+      - ".github/workflows/server.yml"
+permissions:
+  contents: read
+concurrency:
+  group: server-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    working-directory: server
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        # Like scripts/test-db.sh: no password (trust). The tests create the cell's roles and connect as
+        # niadra_app (and niadra_worker, its login for the workers), niadra_system and niadra_owner, one
+        # database per space.
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: niadra_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+      # The read path over the production adapters (tests/integration/serve/test_read_path_stack.py).
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 12
+      rabbitmq:
+        image: rabbitmq:4
+        env:
+          RABBITMQ_DEFAULT_USER: niadra
+          RABBITMQ_DEFAULT_PASS: niadra
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q check_port_connectivity" --health-interval 5s
+          --health-timeout 10s --health-retries 24
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: server/uv.lock
+      # pg_dump and pg_restore of the server's major version, for the backup and restore tests.
+      - name: PostgreSQL 17 client tools
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends postgresql-client-17
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+      # PgBouncer in transaction mode with production's pool sizes (the chart's pgbouncer.ini in deploy/).
+      - name: PgBouncer
+        run: |
+          sudo apt-get install -yq --no-install-recommends pgbouncer
+          sudo systemctl stop pgbouncer || true
+          mkdir -p "$RUNNER_TEMP/pgbouncer"
+          cat > "$RUNNER_TEMP/pgbouncer/pgbouncer.ini" <<EOF
+          [databases]
+          * = host=127.0.0.1 port=5432
+          [pgbouncer]
+          listen_addr = 127.0.0.1
+          listen_port = 6432
+          auth_type = trust
+          auth_file = $RUNNER_TEMP/pgbouncer/userlist.txt
+          pool_mode = transaction
+          max_client_conn = 1000
+          default_pool_size = 2
+          reserve_pool_size = 1
+          reserve_pool_timeout = 3
+          max_db_connections = 2
+          server_idle_timeout = 10
+          query_wait_timeout = 10
+          ignore_startup_parameters = extra_float_digits
+          logfile = $RUNNER_TEMP/pgbouncer/pgbouncer.log
+          pidfile = $RUNNER_TEMP/pgbouncer/pgbouncer.pid
+          [users]
+          niadra_worker = pool_size=1
+          EOF
+          printf '"niadra_app" ""\n"niadra_system" ""\n"niadra_owner" ""\n"niadra_worker" ""\n"postgres" ""\n' > "$RUNNER_TEMP/pgbouncer/userlist.txt"
+          pgbouncer -d "$RUNNER_TEMP/pgbouncer/pgbouncer.ini"
+      - run: uv sync --frozen
+      - name: Known vulnerabilities in the locked dependencies (pip-audit)
+        run: uv run scripts/audit.py
+      - name: Migrations match the models (control, cell, space)
+        run: |
+          for db in ci_control ci_cell ci_space; do
+            psql -h localhost -U postgres -d niadra_test -qc "CREATE DATABASE $db"
+          done
+          for history in control cell space; do
+            var="NIADRA_$(echo "$history" | tr a-z A-Z)_DATABASE_URL"
+            export "$var=postgresql://postgres@localhost:5432/ci_$history"
+            uv run alembic --name "$history" upgrade head
+            uv run alembic --name "$history" check
+          done
+      - name: Lint and format
+        run: uv run ruff check src tests migrations && uv run ruff format --check src tests migrations
+      - name: Types
+        run: uv run mypy
+      - name: Layers (import-linter)
+        run: uv run lint-imports
+      - name: Tests, unit and integration
+        run: uv run pytest -o addopts="" -q
+        env:
+          NIADRA_TEST_DSN: postgresql://postgres@localhost:5432/niadra_test
+          NIADRA_TEST_PGBOUNCER: 127.0.0.1:6432
+          NIADRA_TEST_RABBITMQ: amqp://niadra:niadra@localhost:5672/
+          NIADRA_TEST_REDIS: redis://localhost:6379/0

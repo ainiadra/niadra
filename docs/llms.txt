@@ -1,0 +1,98 @@
+# Niadra
+
+> The omnichannel memory layer for a company's AI agents. Niadra takes the events from every channel, platform and system in the company (WhatsApp, voice, e-mail, app, CRM, ERP, help desk, billing, orders, and the platforms that run them, such as LiveKit, Pipecat, Twilio, Vapi, Retell, ElevenLabs and n8n), builds one memory of each customer and delivers it to any AI agent, from any vendor, under governance. Agents read the same context before they act, search the same history when the conversation asks for more, and write back what they said and did. Fully managed; on your side there is the SDK (Python or TypeScript), the HTTP API or an MCP connection.
+
+Every page below is also served as Markdown at the same address with `.md` at the end. Portuguese pages live at the root (`https://docs.niadra.com/quickstart`), English pages under `/en`.
+
+## If you are an AI agent integrating Niadra
+
+1. Load the skill: https://docs.niadra.com/skill/niadra/SKILL.md (a `SKILL.md` for Claude Code, Cursor, Codex and any assistant that reads the skill format). It says how to find the model call, pick the adapter, wire the five primitives (context before the model call, turns, tools bound to the customer, verification, handoff) and test against the local emulator.
+2. Pick the adapter for the framework in the integrations overview: https://docs.niadra.com/en/integrations/overview.md
+3. Test without the cloud: `pip install niadra && niadra-mock --port 8765`, then `NIADRA_BASE_URL=http://127.0.0.1:8765` and the key `nia_sk_test_local_mock_k1_mocksecret`.
+4. Rules: the customer is never a value the model writes; Niadra never fails the agent (every call has its own time budget and returns an empty value); instructions first, then the agent's notes, then the customer's context, then the turn block; never a handle, a message or a key in a log or a URL.
+5. Everything beyond context and turns is off until the space turns it on (the `features` document: `turns`, `state`, `agent_state`, `signals`, `claims`, `coordination`, `measurement`, `notifications`, `legal_holds`). Wire turn records, coordination and working memory only when the profile (`GET /v1/sdk/profile`) lists the feature; a route of a feature that is off answers 404.
+
+## Start (English)
+
+- [Introduction](https://docs.niadra.com/en/index.md): what Niadra keeps, what each agent receives, and the three calls.
+- [Quickstart](https://docs.niadra.com/en/quickstart.md): from an API key to the first delivered context, in Python, TypeScript or cURL.
+- [Limits and conventions](https://docs.niadra.com/en/conventions.md): address, authentication, idempotency, pagination, rate limits, sizes, initial caps.
+- [Errors](https://docs.niadra.com/en/errors.md): application/problem+json, the code catalog and what to do with each one.
+- [FAQ](https://docs.niadra.com/en/faq.md)
+
+## Concepts (English)
+
+- [Spaces and keys](https://docs.niadra.com/en/concepts/spaces-and-keys.md): sources, scopes, audiences and revocation.
+- [Events and the batch](https://docs.niadra.com/en/concepts/events.md): messages, system events and actions in one shape; idempotency; late data; `valid_until`.
+- [Identity](https://docs.niadra.com/en/concepts/identity.md): the same person across channels and systems, with a verification level per conversation.
+- [Accounts and partners](https://docs.niadra.com/en/concepts/accounts.md): people linked to organizations, with a role.
+- [Context](https://docs.niadra.com/en/concepts/context.md): the Context Pack, its layers, views, the response fields and `format: "json"`.
+- [History navigation](https://docs.niadra.com/en/concepts/history.md): search (with `when` time words and `show_expired`), timeline, open an item with its versions, the tools for any LLM.
+- [Agent memory](https://docs.niadra.com/en/concepts/agent-memory.md): the agent's own working notes, never about a customer; the block, the tools, distillation, governance.
+- [Systems, objects and actions](https://docs.niadra.com/en/concepts/systems.md)
+- [Object types and state](https://docs.niadra.com/en/concepts/object-types.md): types declared or derived from your database, four logical values, freshness and the read purpose, computed values, timers, shared objects with their own values, timers and the quotes derived from them, watch revalidation, third-party content, field access and `mask_output`, coverage, data issues. The `state` feature.
+- [Object type reference](https://docs.niadra.com/en/concepts/object-type-reference.md): how each field type travels (money as a JSON number in the major unit, dates, durations in milliseconds), every member of a field, what the server refuses in a type, and the expression language niadra-expr with its grammar, operators, functions, errors and bounds.
+- [Turn records](https://docs.niadra.com/en/concepts/turn-records.md): what the agent read, called, showed, claimed and decided per turn, with the build pinned; content modes stored, pointer and hash-only; tiers; replay. The `turns` feature.
+- [Claims](https://docs.niadra.com/en/concepts/claims.md): the claim contract, the three natures of a number, verdicts, actions, the negative corpus, internal text. The `claims` feature.
+- [Coordination](https://docs.niadra.com/en/concepts/coordination.md): who holds the customer, effects exactly once, budgets, the channel window, the contact token, the suppression list, handoffs, shadow mode. The `coordination` feature.
+- [Signals and constraints](https://docs.niadra.com/en/concepts/signals.md): interactions, the constraints block for the tools with its server-rendered text, the `tool-bindings` document served in the SDK profile, beneficiaries, inferences and the reviewable profile. The `signals` feature.
+- [Working memory](https://docs.niadra.com/en/concepts/agent-state.md): an agent's working state with a declared schema, written by code. The `agent_state` feature.
+- [Outcomes and attribution](https://docs.niadra.com/en/concepts/outcomes.md): outcomes per order with the method of each attribution, BI reconciliation, experiments, interleaving, the tool counterfactual. The `measurement` feature.
+- [Patterns](https://docs.niadra.com/en/concepts/patterns.md)
+- [Context use](https://docs.niadra.com/en/concepts/context-use.md)
+- [Triggers and webhooks](https://docs.niadra.com/en/concepts/triggers-and-webhooks.md): the outgoing event types, the trigger catalog, signatures, and the notifications feed for those who pull (the `notifications` feature).
+- [Privacy](https://docs.niadra.com/en/concepts/privacy.md)
+- [Receipts and audit](https://docs.niadra.com/en/concepts/receipts.md): the receipt chain, the daily `audit.root` with the turn index root, and `GET /v1/turns/index/{day}` to anchor it in your own chain.
+- [Console access](https://docs.niadra.com/en/concepts/console-access.md)
+
+## Guides (English)
+
+- [Voice agents](https://docs.niadra.com/en/guides/voice-agents.md)
+- [WhatsApp agents](https://docs.niadra.com/en/guides/whatsapp-agents.md)
+- [Internal agents](https://docs.niadra.com/en/guides/internal-agents.md)
+- [MCP with any LLM](https://docs.niadra.com/en/guides/mcp.md): the space's MCP server, the subject token, the eight customer tools, the two agent memory tools and `get_constraints`, the constraints block rendered for a tool.
+- [System webhooks](https://docs.niadra.com/en/guides/system-webhooks.md)
+- [OpenTelemetry](https://docs.niadra.com/en/guides/opentelemetry.md)
+- [Coming from Mem0](https://docs.niadra.com/en/guides/from-mem0.md): the name and route of every Mem0 call in Niadra, and what stays out
+- [Replay in your CI](https://docs.niadra.com/en/guides/replay-in-ci.md): scenarios, assertions, `niadra replay` and the statistical verdict.
+- [Gateways and the contact token](https://docs.niadra.com/en/guides/gateways.md): checking the token offline at your dispatch point.
+- [The resolver worker](https://docs.niadra.com/en/guides/resolver-worker.md): the re-reads Niadra asks for and your code performs, the release of a request it cannot answer, and watch revalidation.
+- [Metadata only](https://docs.niadra.com/en/guides/metadata-only.md): the pointer mode, with the values in your own storage.
+- [Derive types from your database](https://docs.niadra.com/en/guides/derive-types.md): `niadra types derive`, the review and the drift check, reported to `POST /v1/types/fingerprint`.
+- Sector guides, with synthetic examples: [Retail agents](https://docs.niadra.com/en/guides/retail-agents.md), [Legal agents](https://docs.niadra.com/en/guides/legal-agents.md), [Health agents](https://docs.niadra.com/en/guides/health-agents.md)
+
+## Integrations (English)
+
+- [Overview](https://docs.niadra.com/en/integrations/overview.md): the five primitives every adapter wires, the full list, testing without a paid account, and the names for those coming from another memory.
+- [Coding assistants](https://docs.niadra.com/en/integrations/coding-assistants.md): the `niadra` skill and how to load it.
+- Voice: [LiveKit Agents](https://docs.niadra.com/en/integrations/livekit.md), [Pipecat](https://docs.niadra.com/en/integrations/pipecat.md), [ElevenLabs Agents Platform](https://docs.niadra.com/en/integrations/elevenlabs.md), [Vapi](https://docs.niadra.com/en/integrations/vapi.md), [Retell AI](https://docs.niadra.com/en/integrations/retell.md)
+- Channels: [WhatsApp Cloud API](https://docs.niadra.com/en/integrations/whatsapp.md), [Twilio](https://docs.niadra.com/en/integrations/twilio.md)
+- Agent frameworks: [OpenAI Agents SDK](https://docs.niadra.com/en/integrations/openai-agents.md), [LangChain](https://docs.niadra.com/en/integrations/langchain.md), [LangGraph](https://docs.niadra.com/en/integrations/langgraph.md), [Vercel AI SDK](https://docs.niadra.com/en/integrations/ai-sdk.md), [Mastra](https://docs.niadra.com/en/integrations/mastra.md), [Google ADK](https://docs.niadra.com/en/integrations/google-adk.md), [Strands Agents](https://docs.niadra.com/en/integrations/strands.md), [Pydantic AI](https://docs.niadra.com/en/integrations/pydantic-ai.md), [LlamaIndex](https://docs.niadra.com/en/integrations/llamaindex.md), [CrewAI](https://docs.niadra.com/en/integrations/crewai.md), [Agno](https://docs.niadra.com/en/integrations/agno.md), [Microsoft Agent Framework](https://docs.niadra.com/en/integrations/agent-framework.md), [Semantic Kernel](https://docs.niadra.com/en/integrations/semantic-kernel.md), [Haystack](https://docs.niadra.com/en/integrations/haystack.md), [CAMEL-AI](https://docs.niadra.com/en/integrations/camel.md), [DSPy](https://docs.niadra.com/en/integrations/dspy.md), [AG2](https://docs.niadra.com/en/integrations/ag2.md), [Genkit](https://docs.niadra.com/en/integrations/genkit.md), [VoltAgent](https://docs.niadra.com/en/integrations/voltagent.md), [Cloudflare Agents](https://docs.niadra.com/en/integrations/cloudflare-agents.md)
+- Model SDKs: [OpenAI and Azure OpenAI](https://docs.niadra.com/en/integrations/openai.md), [Anthropic](https://docs.niadra.com/en/integrations/anthropic.md), [Amazon Bedrock](https://docs.niadra.com/en/integrations/bedrock.md), [Google GenAI](https://docs.niadra.com/en/integrations/google-genai.md), [LiteLLM](https://docs.niadra.com/en/integrations/litellm.md)
+- Automation platforms: [n8n](https://docs.niadra.com/en/integrations/n8n.md), [Flowise](https://docs.niadra.com/en/integrations/flowise.md), [Langflow](https://docs.niadra.com/en/integrations/langflow.md), [Dify](https://docs.niadra.com/en/integrations/dify.md)
+- MCP clients: [Claude Code](https://docs.niadra.com/en/integrations/mcp/claude-code.md), [Claude Desktop](https://docs.niadra.com/en/integrations/mcp/claude-desktop.md), [Cursor](https://docs.niadra.com/en/integrations/mcp/cursor.md), [VS Code](https://docs.niadra.com/en/integrations/mcp/vscode.md)
+
+## SDKs (English)
+
+- [Python SDK](https://docs.niadra.com/en/sdk/python.md): `niadra` 0.11.7 on PyPI; every method with parameters, return and example; turn records, the claim guard, coordination, working memory, replay, the tool counterfactual and the `niadra` command (`replay`, `counterfactual`, `resolver-worker`, `types derive`, `contract test`); the local emulator `niadra-mock`.
+- [TypeScript SDK](https://docs.niadra.com/en/sdk/typescript.md): `@niadra/sdk` 0.11.7 on npm; Node 20+, Deno, Bun, Cloudflare Workers and the Vercel Edge Runtime; the same agent features and the `npx niadra` command.
+
+## API reference (English)
+
+- [Overview](https://docs.niadra.com/en/api.md): address, authentication, route groups and conventions.
+- [Data API contract, OpenAPI 3.1](https://docs.niadra.com/openapi/en/cell.json): writing, context, agent memory, history, objects, typed state, turn records and replay, signals, coordination, outcomes, identity, privacy and governance of one space.
+- [Control API contract, OpenAPI 3.1](https://docs.niadra.com/openapi/en/control.json): tenants, projects, sources, keys, people, configuration and usage.
+
+## Em português
+
+- [Introdução](https://docs.niadra.com/index.md), [Início rápido](https://docs.niadra.com/quickstart.md), [Limites e convenções](https://docs.niadra.com/conventions.md), [Erros](https://docs.niadra.com/errors.md), [Perguntas frequentes](https://docs.niadra.com/faq.md)
+- Conceitos: [Espaços e chaves](https://docs.niadra.com/concepts/spaces-and-keys.md), [Eventos e o lote](https://docs.niadra.com/concepts/events.md), [Identidade](https://docs.niadra.com/concepts/identity.md), [Contas e parceiros](https://docs.niadra.com/concepts/accounts.md), [Contexto](https://docs.niadra.com/concepts/context.md), [Navegação do histórico](https://docs.niadra.com/concepts/history.md), [Memória do agente](https://docs.niadra.com/concepts/agent-memory.md), [Sistemas, objetos e ações](https://docs.niadra.com/concepts/systems.md), [Tipos de objeto e estado](https://docs.niadra.com/concepts/object-types.md), [Referência dos tipos de objeto](https://docs.niadra.com/concepts/object-type-reference.md), [Registros de turno](https://docs.niadra.com/concepts/turn-records.md), [Afirmações](https://docs.niadra.com/concepts/claims.md), [Coordenação](https://docs.niadra.com/concepts/coordination.md), [Sinais e restrições](https://docs.niadra.com/concepts/signals.md), [Memória de trabalho](https://docs.niadra.com/concepts/agent-state.md), [Desfechos e atribuição](https://docs.niadra.com/concepts/outcomes.md), [Padrões](https://docs.niadra.com/concepts/patterns.md), [Aproveitamento do contexto](https://docs.niadra.com/concepts/context-use.md), [Gatilhos e webhooks](https://docs.niadra.com/concepts/triggers-and-webhooks.md), [Privacidade](https://docs.niadra.com/concepts/privacy.md), [Comprovantes e auditoria](https://docs.niadra.com/concepts/receipts.md), [Acesso ao Console](https://docs.niadra.com/concepts/console-access.md)
+- Guias: [Agentes de voz](https://docs.niadra.com/guides/voice-agents.md), [Agentes de WhatsApp](https://docs.niadra.com/guides/whatsapp-agents.md), [Agentes internos](https://docs.niadra.com/guides/internal-agents.md), [Agentes de varejo](https://docs.niadra.com/guides/retail-agents.md), [Agentes jurídicos](https://docs.niadra.com/guides/legal-agents.md), [Agentes de saúde](https://docs.niadra.com/guides/health-agents.md), [MCP com qualquer LLM](https://docs.niadra.com/guides/mcp.md), [Webhooks de sistema](https://docs.niadra.com/guides/system-webhooks.md), [OpenTelemetry](https://docs.niadra.com/guides/opentelemetry.md), [Vindo da Mem0](https://docs.niadra.com/guides/from-mem0.md), [Replay no seu CI](https://docs.niadra.com/guides/replay-in-ci.md), [Gateways e o token de contato](https://docs.niadra.com/guides/gateways.md), [O worker de resolução](https://docs.niadra.com/guides/resolver-worker.md), [Só metadado](https://docs.niadra.com/guides/metadata-only.md), [Derivar tipos do seu banco](https://docs.niadra.com/guides/derive-types.md)
+- Integrações: [Visão geral](https://docs.niadra.com/integrations/overview.md), [Assistentes de código](https://docs.niadra.com/integrations/coding-assistants.md) e uma página por integração em `https://docs.niadra.com/integrations/<nome>.md`, com os mesmos nomes da lista em inglês; clientes MCP em `https://docs.niadra.com/integrations/mcp/<cliente>.md`
+- SDKs: [Python](https://docs.niadra.com/sdk/python.md), [TypeScript](https://docs.niadra.com/sdk/typescript.md)
+- Referência da API: [Visão geral](https://docs.niadra.com/api.md), [contrato da API de dados](https://docs.niadra.com/openapi/pt/cell.json), [contrato da API de controle](https://docs.niadra.com/openapi/pt/control.json)
+
+## Optional
+
+- [Website](https://niadra.com/en): products, pricing and the contact form.
+- [Python SDK repository](https://github.com/ainiadra/niadra-sdk-python), [TypeScript SDK repository](https://github.com/ainiadra/niadra-sdk-ts): Apache 2.0, with one runnable example per integration and per agent feature under `examples/` (`turn_records.py`, `claim_guard.py`, `coordination.py`, `object_state.py`, `working_state.py`, `masked_tool.py`, `tool_counterfactual.py`, `replay_demo.py` and `ci/niadra-checks.yml` in Python; `claim-guard.ts`, `coordination.ts`, `object-state.ts`, `working-state.ts`, `masked-tool.ts`, `tool-counterfactual.ts` and `ci/niadra-checks.yml` in TypeScript).

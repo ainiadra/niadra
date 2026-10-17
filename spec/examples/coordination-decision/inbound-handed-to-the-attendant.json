@@ -1,0 +1,26 @@
+{
+  "decision": "handoff_to",
+  "reasons": [
+    "owner_active"
+  ],
+  "holder": "human:attendant-7",
+  "owner": {
+    "holder": "human:attendant-7",
+    "kind": "owner",
+    "level": "human_active",
+    "source": "service_panel",
+    "via": "mapping",
+    "since": "2026-09-29T14:02:10Z",
+    "valid_until": "2026-09-29T14:32:10Z",
+    "epoch": 1790690530000
+  },
+  "promises_open": [
+    {
+      "id": "oi_0199a2f0",
+      "due": "2026-09-30T18:00:00Z",
+      "owner": "company"
+    }
+  ],
+  "decision_id": "0199a3b5-2c00-7d4e-9f60-7b8c9d0e1f04",
+  "valid_for_s": 30
+}

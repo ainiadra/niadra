@@ -1,0 +1,73 @@
+---
+title: "CrewAI"
+description: "A memória do cliente numa crew, pelos callbacks de kickoff e pelas ferramentas do histórico."
+---
+
+`NiadraCrew` entrega `before_kickoff` (que põe o contexto nos inputs da crew como `niadra_context`), `after_kickoff` (que registra a resposta final) e `tools`. Só em Python.
+
+## Instalar
+
+```sh
+pip install 'niadra[crewai]'   # crewai 1.15 ou mais novo, abaixo da 2; Python 3.11 a 3.13
+```
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | `before_kickoff` acrescenta `niadra_context` aos inputs da crew: as notas do agente (com `agent_memory=`), o contexto e o `turn_block`. Ponha `{niadra_context}` na descrição de uma tarefa ou no backstory de um agente, depois do seu texto |
+| Turnos | O input em `message` (ou `message_key=`) é o turno do cliente, registrado antes de a crew começar; a resposta final da crew é o turno do agente, registrado quando ela termina |
+| Ferramentas | `tools`: ferramentas do CrewAI cujo esquema de argumentos é o do kit, amarradas ao cliente |
+| Verificação | `conversation.verify()` antes do kickoff |
+| Transbordo | `transferred_to_agent()` e `transferred_to_human()` registram a transferência |
+
+## Exemplo mínimo
+
+```python
+"""A CrewAI crew whose task reads the customer's context."""
+
+from crewai import Agent, Crew, Task
+
+from niadra import Niadra, phone
+from niadra.integrations.crewai import NiadraCrew
+
+niadra = Niadra(channel="chat")
+memory = NiadraCrew(niadra.conversation("thread-81", subject=phone("+5511912345678")))
+support = Agent(role="Support", goal="Help the customer", backstory="You work for Acme.", tools=memory.tools)
+answer = Task(
+    description="Answer the customer: {message}\n\nWhat the company knows:\n{niadra_context}",
+    expected_output="A short, specific answer.",
+    agent=support,
+)
+crew = Crew(
+    agents=[support],
+    tasks=[answer],
+    before_kickoff_callbacks=[memory.before_kickoff],
+    after_kickoff_callbacks=[memory.after_kickoff],
+)
+print(crew.kickoff(inputs={"message": "Where is my replacement lid?"}).raw)
+```
+
+O mesmo código está em `examples/crewai_crew.py`.
+
+## Memória do agente
+
+`NiadraCrew(conversation, agent_memory=True)` põe as notas do próprio agente antes do contexto do cliente dentro de `niadra_context` e acrescenta as duas ferramentas. Veja [Memória do agente](/concepts/agent-memory).
+
+## Limites
+
+- A memória da própria crew (curta, longa, de entidades) continua do CrewAI; a Niadra é a memória da empresa sobre o cliente, compartilhada com todos os outros agentes.
+- Só Python 3.11 a 3.13: o armazenamento vetorial do CrewAI depende do `onnxruntime`, que não tem wheels para o 3.10. Os extras `crewai`, `pipecat` e `openai-agents` fixam versões incompatíveis de uma dependência comum; instale um por ambiente.
+- Só a resposta final da crew é registrada como turno do agente, não cada passo.
+- Testado contra `crewai` 1.15 com o modelo substituído por um fake e a Niadra no emulador.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Agentes internos" href="/guides/internal-agents">
+    tarefas, objetos e ações que fecham pendências.
+  </Card>
+  <Card title="Navegação do histórico" href="/concepts/history">
+    as três ferramentas que o agente recebe.
+  </Card>
+</CardGroup>

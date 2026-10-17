@@ -1,0 +1,257 @@
+---
+title: "Privacy, erasure and export"
+description: "Data subject rights by API, erasure by lineage, and continuous export to your bucket."
+---
+
+Your company is the controller of the data; Niadra acts as the processor, under a signed DPA. Every data subject right has an API: access and portability through `export`, correction through an agent's `feedback` or through [`POST /v1/corrections`](/en/api/corrections), which a Console person with the `security` role uses on the data subject's behalf (retract or correct a fact, resolve an open item), with the Correct, Retract and Resolve actions on the profile in the Console; it becomes the same correction event, from the space's own governance source, with who asked for it among its fields, and leaves an `admin` receipt; erasure through `forget`, and objection to profiling through the pattern opt-out. Erasure follows lineage, walks through everything derived from the data and ends with a receipt. Your data never trains models, neither ours nor anyone else's.
+
+## The laws, by name
+
+The same design covers the common core of GDPR and UK GDPR, CCPA/CPRA and the US state privacy laws, PDPA, APPI, DPDP, PIPA and LGPD: data residency in a single region, controller and processor roles, rights by API, configurable retention, erasure with a receipt and no training on your data. For other countries, the applicable law goes in the contract annex. Sector regimes, such as those for healthcare and financial services, are assessed case by case, in the contract annex.
+
+Each space’s data stays in its region. The control plane holds no customer content. Only already masked text leaves the region, the conversation text and the event samples the configuration assistant reads, to Niadra's AI, with zero retention requested and no training. It extracts the memory of each session and writes the assistant's proposals, and answers, always as labels and probabilities, never as text, whether a session is worth extracting, whether a turn tries to instruct the agent, the sensitive category of a text, the kind of an agent question and whether two statements contradict each other. The read path calls no model. Webhooks and the SIEM stream carry ids and hashes, never content, and the continuous export writes to a bucket in the space's region.
+
+## Forget
+
+[`POST /v1/forget`](/en/api/forget) takes a `target` (`profile`, `handle` or `conversation`) and the matching `profile_id`, `handle` or `conversation_id`. It takes a Console person with the `security` role, or a key with the `admin` scope, and requires an `Idempotency-Key`: the same request sent twice starts one erasure. The same key with another body, such as another handle or another profile, is refused with 409, never treated as a replay of the first request, because the second person would stay in memory.
+
+Only what the customer said supports the memory. A retraction, a correction or a restore made by the company leaves a mention on the fact but never holds it: when the events of the customer that stated a fact are erased, the fact goes, with the corrections only that feedback held, and every feedback event that named it keeps ids and kinds only (no value, no reason). The resolution of an erased open item is rewritten the same way; a working note of an agent loses the id of the erased conversation (often a phone number or an e-mail) and stays valid; and a conversation whose events already left for the cold archive is found by its own row and erased whole, including what the archived events produced. The counts of the request say each step (`feedback_values`, `open_item_feedback`, `agent_note_evidence`). A fact an erasure took does not come back: [restoring it](/en/api/facts-restore) answers 404. A feedback event is an audit record of ids and kinds, in the live database and in the cold archive: when the feedback that acted on an erased fact or open item already left the hot window, the same pass that takes the rows of the data subject out of the archive rewrites its rows with ids and kinds only (`cold_feedback_values` in the counts); the record stays, and a rerun changes nothing. Every resolution that named an erased open item is rewritten that way, including the ones memory refused (the item was already closed, or it belonged to another customer), in the live database and in the archive; `open_item_feedback` counts each resolution event that named it.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/forget" \
+  -H "Authorization: Bearer $NIADRA_TOKEN" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target": "handle",
+    "handle": {"type": "phone_e164", "value": "+14155550123"}
+  }'
+```
+```python Python
+import os
+import uuid
+import httpx
+
+response = httpx.post(
+    "https://acme-prod.us-east-2.api.niadra.com/v1/forget",
+    headers={
+        "Authorization": f"Bearer {os.environ['NIADRA_TOKEN']}",
+        "Idempotency-Key": str(uuid.uuid4()),
+    },
+    json={
+        "target": "handle",
+        "handle": {"type": "phone_e164", "value": "+14155550123"},
+    },
+)
+erasure = response.json()  # {"request_id": "...", "status": "pending", "target_kind": "handle", ...}
+```
+```typescript TypeScript
+const response = await fetch("https://acme-prod.us-east-2.api.niadra.com/v1/forget", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.NIADRA_TOKEN}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    target: "handle",
+    handle: { type: "phone_e164", value: "+14155550123" },
+  }),
+});
+const erasure = await response.json();
+```
+</CodeGroup>
+
+The answer is 202 with a `request_id` and `status: "pending"`. Follow it with [`GET /v1/forget/{request_id}`](/en/api/forget-status) (`pending`, `running`, `completed` or `failed`, with what was `erased` and when it `completed_at`), or list every erasure of the space with [`GET /v1/forget`](/en/api/forget-list), filtered by `status`. An erasure that runs out of retries reads `failed`, never `running` for good. It shows in [`GET /v1/operations/dead-tasks`](/en/api/dead-tasks), the list of the space's stuck work (ids and task names only, never content), and comes back with [`POST /v1/operations/dead-tasks/replay`](/en/api/dead-tasks-replay), with `task: "erase"` or no filter: it goes on from where it stopped, because every step of the cascade is idempotent, and ends `completed`; the replay leaves an `admin` receipt. The Console's Data screen shows the list and the replay button to the `security` role, and Niadra's operations do the same for any space. A completed erasure also leaves a sealed entry outside the database (ids and the request's digest only, encrypted with the space's key), which a backup restore does not roll back: when a space is restored from a dump, every erasure the dump does not know as completed comes back `pending`, with its scope, the cascade runs again as the first time, and the restore receipt lists them. That ledger lives 40 days, longer than the 35 of the dumps, and a deleted space takes it along. The erasure walks the whole lineage, in this order:
+
+1. The content of the events (a minimal tombstone stays).
+2. Mentions, and the facts left without evidence, including facts about an account the person spoke about.
+3. Episodes and open items.
+4. Business objects owned by the handle.
+5. The actions about the person, in full.
+6. Patterns, derived again without the erased evidence.
+7. Links to accounts and partners, which are erased.
+8. Measurement rows, review samples and trigger payloads.
+9. Vectors, compiled context, files in storage and the data subject's export packages.
+10. Tombstones in the continuous export; the recent turns and all of the profile's compiled context leave the cache. If the cache is down at that moment, the context left there is refused on read and expires within 72 hours.
+11. In spaces with the agent features on: the person's [turn records](/en/concepts/turn-records), by the keyed-hash prefix of each of their conversations, and the replay scenarios that kept them; the [working memory](/en/concepts/agent-state) of their scopes and the one naming them in `subject`; their interactions, signals and [inferences](/en/concepts/signals), with those of every beneficiary; their typed objects and observations; the claims, contact log and handoffs of [coordination](/en/concepts/coordination); and the outcome links. The contact suppression survives, as a keyed hash only: an opt-out does not leave with the person.
+
+**What names the person in someone else's data.** The person's phone, e-mail, document or id written in what belongs to someone else (a customer's message that gave their sister's phone) does not take the other person's record with it: `[erased]` stands where each one was, and the rest of the record stays. The erasure takes them out of:
+
+- the raw content and the text, fields and action result of events, including the recent turns kept in the cache;
+- events already in the cold archive, rewritten in the archive part that keeps them, with the part's digest updated in the archive's index;
+- facts, open items, the summaries and resolutions of every version of an episode, profile fields, the profile's rolling summaries and stored extraction results;
+- settled values, which are no longer found by the erased value;
+- the results of agent actions;
+- business objects mirrored from your company's system, in their state and in every source's observation, the value an observation replaced included, and their computed values (see below);
+- the instructions, preferences and traits kept in [signals](/en/concepts/signals), and the interactions not yet folded into signals, in the database and in the session layer;
+- agent working notes and note proposals, whatever their status;
+- other customers' [working state](/en/concepts/agent-state), in the database and in the cached copies, including the state on its way to the database when the erasure started;
+- the terms of commitments and the package and outcome of [coordination](/en/concepts/coordination) handoffs;
+- [turn records](/en/concepts/turn-records), in every tier that keeps a copy, with the digest of each stored value recomputed, and a turn's part that waits to be merged into it;
+- the batches of events and turns set aside after failing (`kept_aside`): the person's go, and other people's keep with `[erased]`.
+
+**Objects mirrored from your company's system.** Niadra rewrites its own copy; the system of record keeps its own, and the request counts each object in `named_objects_in_source`, for your company to erase it there. Until the record is erased at the source, each update of it sends the old value again: the object keeps the keyed hash of each erased identifier, and the next push arrives with them replaced by `[erased]`, so it does not bring the person back, while the rest of the push updates the object as usual. A reverse relation no longer finds the object by the erased value, and the copies of the objects the read path serves are read again from the database.
+
+Patterns keep no free text: a pattern's value is a configured category, a channel or a count, and it is derived again, after the erasure, from memory that no longer holds the person.
+
+Each row and object is indexed, when it is written, by what it names a person by (phone, e-mail, document and id), each term hashed with the space's key, and the erasure looks the person's terms up in those indexes instead of reading the space. A phone is indexed and looked up in every form of its line: as written, in E.164 and, for a Brazilian mobile, without its ninth digit (a Mexican or Argentine mobile, with its mobile prefix). The handle keeps E.164 while a summary keeps the number as it was said, and erasing the handle still finds it; entries indexed before match as they are, with no reindexing. Each page of the lookup costs one query, whatever the size of the space. What was written before those indexes is read once, by the space's first erasure. A rewritten fact, open item or episode loses its vector, which is made again from the text without the person; the other profile's compiled context stops being served (its privacy version moves and the cache drops it) and is compiled again, with its patterns and summaries. What is under a [legal hold](#legal-holds) is not rewritten and is counted in `named_held`; the request's other counts say what was rewritten (`named_payloads_redacted`, `named_events_redacted`, `named_rows_redacted`, `named_archived_redacted`, `named_objects_in_source`). The erasure runs after what was waiting to be taken in is stored, so nothing that arrives next brings the person back. An access package already made for another person that names the erased one stays as it is until it expires, in 24 hours; a new package comes out without them. An export package already delivered to your bucket stays with you, as with the continuous export.
+
+The receipt lists in `retained` what stayed under a legal obligation: the turns of a conversation under a [legal hold](#legal-holds) (`held_turn_conversations`), the review requests and the holds themselves.
+
+It ends with the **erasure receipt** (its hash comes back as `receipt_hash`), which also lists, in `export_run_ids`, the export runs that already contained the data, and with the `erasure.completed` webhook, so you can purge your own data lake. Niadra never enters your bucket to delete. Old read receipts keep only ids and hashes: they prove a read happened without keeping the content.
+
+Forgetting a person never erases the account it was linked to, and forgetting an account never erases its contacts' personal memory. See [Accounts and partners](/en/concepts/accounts).
+
+## Where each copy lives, and how long it stays
+
+| Storage | Retention | How forget reaches it | Deadline |
+|---|---|---|---|
+| Live database | Events for the hot window, 90 days by default (adjustable from 30 to 90); each month that leaves it goes to the cold archive and out of the database. Facts, episodes, closed open items, receipts and sessions stay until erased, or for the window your company sets in `retention_days` (`facts`, `episodes`, `open_items`, `receipts` and `sessions`, the last two at least 30 days, which measurement and a late turn read back): the daily sweep then deletes, in short batches, the facts last confirmed before the window with their mentions and relations, every version of the episodes that ended before it, the open items resolved before it (an item still open never expires), the closed sessions last heard before it with what extraction kept of them, and the receipts of the days before it with those days' chain heads and root rows (the anchored copies hold only roots and stay); each fact, episode and open item that leaves leaves a tombstone for the continuous export, and a customer who lost any of them gets its packs and patterns rebuilt without them. The rest of the memory stays until it is erased | Deletion and tombstone | 24 hours |
+| Automatic backups | Up to 35 days | Expiry | 35 days |
+| Raw payloads and media | Kept until an erasure, or for the window you set in `retention_days` (`raw_content`, at least 7 days, so a new mapping remaps what arrived); an unmapped type's raw payload too | Deletion by space and handle; raw content kept under no handle is indexed when written by what names a person (phone, email, document and id, from 4 characters when it is a whole value), each term keyed-hashed with the space's key, and the erasure looks the person's terms up in that index instead of reading every payload. The `raw_content` retention reads the same index, page by page, only what expired | 24 hours |
+| Cold event archive | Kept until an erasure, or for the window your space sets in `retention_days` (`cold_events`) | Only the affected rows are rewritten; the feedback of the company on erased rows keeps ids and kinds, in the same pass; values are not stripped before archiving, so an export or a timeline past the hot window keeps the reason of the company on what nobody erased | 30 days |
+| On-demand export package | 24 hours; then it leaves storage | The data subject's packages are deleted | Right away |
+| Recent turns | 24 hours after the context covers them, 72 hours at most | Keys purged right away | Minutes |
+| Compiled context in cache | Up to 72 hours, encrypted | Leaves the cache at the erasure; with the cache down, it is refused on read and expires on its own | Right away; up to 72 hours with the cache down |
+| Niadra's AI | Zero retention | Nothing to erase | None |
+| Logs | 30 days, with no customer data (see below) | Expiry | 30 days |
+| Turn records | Kept until an erasure, or for the window you set in `recording.kept_days` (at least 7 days, no maximum), in every tier; a replay scenario's turns, `scenario_days` after its last run, if set. In `pointer` mode, the values stay in your bucket | Deletion by the conversation's prefix; a legal hold keeps them until it is released | 24 hours |
+| The agents' working memory | Kept until the agent's type sets a retention (`retention.state`), and less per field when the type says so | Deletion by scope and by `subject` | 24 hours |
+| Raw interactions | Kept until an erasure, or for the window you set in `raw_content` | Deletion | 24 hours |
+| Subject signals | What memory **derived** (affinity, interests, what the person was shown) decays over time and leaves after 13 months without activity; what the person **said** (preferences, attributes, instructions and restrictions) and **decided** (inferences they deleted, objects they turned down) stays until an erasure or the retention you set: inactivity never deletes what was said. An interaction of a conversation that has not said who the person is yet is kept until it does, and then goes to them | Deletion, the one still waiting for its conversation to say who it is too | 24 hours |
+| Coordination contact log | 90 days | Deletion; the suppression stays as a keyed hash | 24 hours |
+| Outcome links | 13 months | Deletion through the lineage | 24 hours |
+| Your bucket (export) | Set by you, the controller | Tombstones and `erasure.completed` | Yours |
+
+## Export on demand
+
+[`POST /v1/export`](/en/api/export) builds the access and portability package of one data subject, by `profile_id` or `handle`: events, facts, episodes, settled values, open items, objects, actions (only those that came through confirmed handles: what arrived through an [unconfirmed link](/en/concepts/identity#safeguards-against-wrong-merges) stays out of the package until the confirmation, and in the Console only `admin` and `security` see it), every pattern of the profile (retracted and expired ones too, with their evidence and dates), the objections to profiling (`profiling_objections`, with the handle and the time of each), links, the data subject's events and turns in batches kept after failing (`kept_aside`), and the turn records of their conversations (`turn_recordings`). It answers 201 with the `run_id`, the list of `files`, their `sha256`, and a `download_url` valid for 15 minutes (until `download_expires_at`). [`GET /v1/exports/{run_id}/download`](/en/api/export-download) serves the package again with the same authorization. The package comes out whole, with no size cut: a zip written section by section as it is generated, with episodes, objects, actions, events and receipts read in pages of 1,000 rows, each page in its own short transaction; archived events come in one part at a time, and an event of a month archived but not yet purged is written once. The package is the data subject's data decrypted, so it lives 24 hours: after that the download route answers 404, the file leaves storage in the daily cleanup, and you ask for a new `export`. Erasing the data subject also deletes their packages. Both are `security` routes, and every package request and every download through the cell leave a receipt in the trail.
+
+## Continuous export to your bucket
+
+Besides the on-demand package, your space can schedule a continuous export that writes the memory, incrementally, to your own bucket. The data is yours; Niadra is not your data lake.
+
+- **Destination:** S3 or S3-compatible storage, Google Cloud Storage (through its S3-compatible API, with an HMAC key) or Azure Blob (block blobs, with a container SAS), in the region of your space. The configuration refuses, on submit and on approval, a schedule outside the space's region, and every run checks again. The destination's address (the S3 endpoint, the host of an Azure SAS) must resolve only to public addresses, checked when the credential is registered and before every run connects, as webhook deliveries are.
+- **Credential:** a write-only credential you provide, written from the Console, or with [`PUT /v1/exports/destinations/{schedule_id}/credential`](/en/api/export-destination-credential), straight into the vault of your cell; the answer carries only the new `version`. On registration, an S3 or GCS key that can list the bucket is refused, and so is a SAS with more than create, write and add, or one for another container or host; the export writes through a port that only puts.
+- **Format:** Parquet, one file per table and period, with a schema version, a JSON manifest and a SHA-256 per file.
+- **Tables:** events, conversations, episodes, facts and mentions, open items, objects and object events, actions, patterns and evidence, receipts and context use, and the identity that ties it all to the customer (handles, profiles, links, assertions, merge log).
+- **Pseudonymized, if you ask (`pseudonymize`):** the handles table leaves out the value of each phone number, e-mail, document or system id and keeps its HMAC (`value_hmac`, under the space's key), so rows still join across files and runs without naming the person. The other tables go as they are.
+- **Incremental:** every row comes with `op` (`upsert` or `delete`); tombstones have a file of their own. Erased rows are skipped and listed as `erased` in the manifest, and a correction file closes any gap. The first run of a schedule starts at the beginning: the months past the hot window live only in the cold archive, and that run writes them to the events table before the live rows, with `change_seq` 0, and the manifest lists the archived months it sent.
+- **Frequency:** every so many hours, as you set it, one at least. Each destination takes one schedule: the configuration refuses, on submit and on approval, a second schedule on the same kind, bucket and prefix.
+
+Content leaves decrypted only on its way to your bucket, which encrypts it as its own configuration says. Every run, scheduled or on demand, is listed with its sequence range, status and manifest at [`GET /v1/exports/runs`](/en/api/export-runs).
+
+## Access denied by default, released by purpose
+
+Your space's policy decides, item by item, what each reader receives, and it starts from no:
+
+- A fact whose category the policy never declared reaches nobody.
+- The categories the law calls sensitive are fixed by the product: `health`, `religion`, `philosophical_belief`, `political_opinion`, `union_membership`, `sexual_life`, `sexual_orientation`, `racial_or_ethnic_origin`, `genetic`, `biometric` and `criminal_record`. They are also recognized by other names (`medical`, `clinical`, `saude`, `religiao`, `genetica`, `biometria`, `antecedentes_criminais`) and by the family before the dot, such as `health.exam`. A category with one of these names is sensitive even if your policy says otherwise, and without a declaration it is born sensitive, with a V3 minimum.
+- A sensitive item reaches an agent only when the policy releases it to a purpose the source holds: through the category's own purposes or through an `allow` rule that names the purpose. An `allow` rule with no purpose is not enough.
+- An item about a conversation also carries the conversation's category: a promise made in a conversation about health is health data.
+- People in the Console do not read by purpose but by the audience of their role: admin and security as a person, review as a reviewer, analysis and integration as an analyst. Sensitivity, rules and visibility apply all the same.
+
+A new space starts with a policy (version `starter-3`) that already works this way: health only for the `care` purpose, at V3, and never for whoever reads as an analyst; billing for the `billing` and `support` purposes, at V2; technical matters for `support` and `technical`; and the mirror on in every category but health. The billing agent never sees health data, with no configuration at all.
+
+### The mirror rule
+
+Every category of the policy has a `mirror` switch, off by default. In a category with it on, an item that is the customer's own words reaches the reader from V1, whatever minimum level the category asks for: the company only hands back to the customer what they told it themselves. Only the level changes; purposes, rules, audiences and competitors apply as before. What the company holds about the customer (a balance it stated, a record from its systems) keeps the category's level.
+
+Whose words they are comes from the evidence, never from a model's opinion. A fact is the customer's when its first evidence is a customer turn. A conversation is the customer's when only they spoke, and mixed when the company answered without stating anything it holds about them; an amount, a postal code or a code the company said first, or a fact whose first evidence is a company turn, make the conversation the company's, and the whole of it keeps the category's level, even when the customer repeats the value later. The protocol the company gave is the receipt of the conversation, not data about the person, and does not change whose it is. A promise made in a customer's or a mixed conversation is as much theirs as the conversation. Every conversation records whose words it holds (`spoken_by`: `customer`, `mixed` or `company`); a conversation written before that record existed is never mirrored.
+
+The mirror never applies:
+
+- at V0: whoever has proved nothing yet hears nothing;
+- through a handle an assertion linked to the profile and nobody confirmed: neither to the items that came through it, nor for a reader coming in through it;
+- to an organization, nor to an item about another contact;
+- to a text that names a sensitive topic (health, belief), whatever category it was filed under;
+- in a sensitive category: the policy ignores the switch, and the configuration refuses the document that turns it on (`policy category health is sensitive and cannot mirror`).
+
+A space turns the mirror off per category, with `mirror: false` on the category in the policy document: a bank that wants V2 even for the dispute the customer wrote turns it off in `billing`, and at V1 the context says a protocol is on record, withheld until the verification, instead of saying there is none ([context and views](/en/concepts/context#skeleton-and-per-turn-slots)). The extraction schema does not change with the switch: nothing is extracted again. The decision names the rule: in the [delivery manifest](/en/concepts/receipts#what-a-receipt-holds), an item the mirror released carries `rule: mirror`, with `spoken_by` and `own_words`, and the [policy simulation](/en/api/policy-simulate) shows the same `rule` on every item the mirror released, so you see what a reader at V1 gets before changing the policy.
+
+## Purpose and legal basis per item
+
+Every memory item (fact, conversation, open item and settled value) keeps the purposes it was collected for and the legal basis each one had at that moment. The rules live in the `purposes` configuration document, written by the `security` role through an approved diff, like the policy:
+
+- **Purposes:** each with its name, its legal basis (`consent`, `contract`, `legal_obligation`, `legitimate_interest`, `vital_interest`, `health_protection`, `public_task`, `research`, `legal_claims`, `credit_protection` or `fraud_prevention`, the bases of LGPD arts. 7 and 11 and GDPR art. 6) and, if you want, a retention in days.
+- **Where an item's purpose comes from:** the first rule that names one decides. The fact's category or the conversation's category (`categories`), the system event types the item came from (`event_types`, with a trailing `*` for a prefix), the declared purposes of the source that collected it, and finally `default`. Only purposes declared in the document count. A settled value follows the conversation it was said in.
+- **When:** an item gets its purposes in the same transaction that writes it. What was written before the document existed gets them in a per-space pass, in short batches, and what no rule named is looked at again when the document or a source's purposes change.
+
+The legal basis stored is the one in force at collection: changing the document later never rewrites older items, because the law fixes the basis before the processing.
+
+**Reading by compatible purpose.** An agent reads an item collected for one of its purposes, or for a purpose the policy declares compatible: `compatible_purposes` in the policy document, written by the client's legal team (what LGPD calls compatibility, art. 6, I, and GDPR art. 6(4)). Without a declaration only the purpose itself counts: a marketing read never sees what billing collected. The compatibility lives in the policy so that changing it invalidates the compiled contexts like any policy change. An agent that declares no purpose reads no item collected for one. None of this calls a model, and a space without the `purposes` document stays as it was, byte for byte.
+
+**Retention by purpose.** Once a day, after 03:00 in the space's time zone, an item leaves when every purpose it has carries a limit and all of them ran out: the last purpose to end decides. The limit runs from a fact's last confirmation, from the end of a conversation or a value, and from the closing of an open item; a promise still open never expires by purpose. The removal leaves a tombstone for the [continuous export](#continuous-export-to-your-bucket) and recompiles the customer's context. These limits add to the space's retention by data class.
+
+**Objection to a purpose.** [`POST /v1/forget`](/en/api/forget) with `purpose` and a `profile` or `handle` target records the data subject's objection to one purpose, or the withdrawal of consent to it (LGPD art. 18; GDPR arts. 7(3) and 21). What was collected only for that purpose leaves; an item that also serves another stays, without it. What is written afterwards already arrives without that purpose, and an item that would be left with none is not kept. The answer is final (`completed`), with the rows deleted per table and `purpose_narrowed`, the items that stay for other purposes. The objection is kept on the customer's confirmed identifiers, applies again every day to what a merge or a confirmation brought later, leaves with the customer on erasure and appears in the subject's file. Whether the objection applies is the company's decision; Niadra carries it out. The conversations stay as the record of what was said.
+
+**In the subject's file.** Every fact, conversation, open item and value comes with `purposes`, the list of purposes and the legal basis of each, and the file holds `purpose_objections.jsonl` with the objections.
+
+## Legal holds
+
+A dispute, an investigation or a court order may require that the data of a person, an object or a conversation not be purged while it lasts. A **legal hold** ([`POST /v1/legal-holds`](/en/api/legal-holds-create), with an `Idempotency-Key`) names exactly one `handle`, `object` or `conversation_id` and keeps its data out of purging: the retention sweeps skip it, an erasure of the subject leaves that data waiting and counts it in `retained`, and the conversation's [turn records](/en/concepts/turn-records) are copied to a prefix with no lifecycle rule. Once the hold is released ([`/release`](/en/api/legal-hold-release)), what erasures left waiting goes, and the copy of the turns is deleted. Both routes need the `security` role, leave an `admin` receipt and are the space's `legal_holds` feature, off by default and turned on in the `features` document. A hold also protects the person's [coordination](/en/concepts/coordination) rows.
+
+## The reviewable profile
+
+A person can see what the memory inferred about them, correct it and contest it. What the memory **inferred** (an affinity, an inferred size, an interest) is kept apart from what the person said, in [`GET /v1/profiles/{profile_id}/inferences`](/en/api/profile-inferences), each inference with its origin, evidence as counts, confidence, purposes of use and date; your team corrects one with what the person says ([`/correct`](/en/api/profile-inference-correct)) or deletes it with a tombstone ([`DELETE`](/en/api/profile-inference-delete)), and the same evidence never infers it again. An automated decision can be contested: a **review request** ([`POST /v1/profiles/{profile_id}/review-requests`](/en/api/review-requests-create)) takes to the controller's data protection officer the explanation built from the decision's [receipts](/en/concepts/receipts) (ids, kinds, surfaces, rules, versions and inputs, by reference, never personal content), and the controller's decision is recorded once ([`/resolve`](/en/api/review-request-resolve)). Requests stay at least 395 days after resolution, as a legal obligation, and appear in `retained` on an erasure. All of this needs the `security` role and the `signals` feature (the inferences and the requests, which coordination also opens); objection to profiling stays at [`POST /v1/profiles/{profile_id}/traits/opt-out`](/en/api/traits-opt-out). See [Signals and constraints](/en/concepts/signals#inferences-and-the-reviewable-profile).
+
+## Cards, security codes and passwords are never stored
+
+Before anything is stored, ingestion holds back, in the text of every event, the card number (the last four digits stay), the card security code, the password and the credentials inside a URL, and leaves a marker saying what was there: `[withheld:card ****1234]`, `[withheld:cvv]`, `[withheld:password]`, `[withheld:secret]` (in Portuguese `[retido:cartão ****1234]`, in Spanish `[retenido:tarjeta ****1234]`, by the language of the space). It applies to message text, the fields of a system event, the text of an action, the text extracted from a media file (the photo of a card), the raw payload, queued history files and the hot layer. None of those copies keeps the value, and extraction receives it already as a marker: "the customer gave a card" is still extractable, the number is not.
+
+What memory needs is never touched: protocol, order, ticket, tracking, invoice and bill numbers, postal codes, amounts and dates stay as they were said. A card has to pass the check digit and have the shape of a card (groups of four) or a card word nearby, never an order or protocol word right before it; a bare number with no word of its own takes the word from the turn before ("what is your card number?", up to 30 minutes earlier), so a customer who answers with the number alone is protected too. A security code is a lone group of three or four digits right after its word (`cvv`, "security code"), never part of a postal code, a date, a time or an amount; a password is what comes right after its word ("password:", "the password is"), and "I forgot my password" holds back nothing. The rules are written for Portuguese, English and Spanish and are idempotent: masking masked text changes nothing.
+
+The batch answer counts what was held by type, in `masked` ([`POST /v1/batch`](/en/api/batch)), and [`POST /v1/ingest/status`](/en/api/ingest-status) carries the same count per conversation or task. The `ingest-masking` configuration document, written by the `security` role through an approved diff, lists the types held (`card`, `cvv`, `password`, `secret`); all four start on. On the Regulado plan, `card`, `cvv` and `password` are held whatever the list says.
+
+What was already stored goes through the same rules: the first time a space receives them, and whenever the rules or the space types change, a bounded per-space pass masks the events in the database, their raw payloads and the hot layer of their handles, in short pages between other work, and bumps the change sequence of each row, so the [continuous export](#continuous-export-to-your-bucket) resends those rows to your bucket. Months already in the cold archive are not rewritten: every row read from the archive is masked on the way out, so an export or a timeline never serves a card. Episodes, facts and summaries already extracted go through a pass of their own, described right below. This holds back data before, and independently of, the replacement of personal data by placeholders that precedes the AI model, described below.
+
+
+## What extraction never keeps
+
+After the extraction model answers and before anything is stored, every text extraction can keep (summary, resolution, intent, category, outcome, fact values, promises, profile slots, what the agent claimed and the [settled values](/en/concepts/events#settled-values)) goes through the ingestion rules (card, security code, password, secret) and the vetoes of settled values (individual or company document numbers, bank accounts), plus the numbers the session's own turns called a document: a number the customer said as "my ID number" is withheld wherever the model repeats it, even alone. Each becomes a typed marker in the space's language: `[withheld:document]`, `[withheld:account]`, `[withheld:card ****1234]`, `[withheld:secret]` (in Portuguese `[retido:documento]`, in Spanish `[retenido:documento]`). A fact, promise, profile slot or settled value that would be only such a number is not stored, and the run counts how many were dropped. Protocol, order and ticket numbers, postal codes, amounts and dates stay as they were said.
+
+Content of a sensitive category (health, religion, politics, sex life, union membership, biometrics, genetics, origin, criminal record) that extraction filed under an ordinary predicate, by the answer of Niadra's AI on each text that would stay ordinary (in doubt, unanswered or with the model down, the text is treated as sensitive of unknown category), moves to the sensitive predicate of the same category when the space's schema has one, and is dropped when it has none: the schema says what sensitive data the space collects, and never as ordinary data. The conversation's episode moves under that category too, so its summary and promises follow the category's policy.
+
+Extraction also names the matter of each conversation: a short English key (`delivery_failed`), which the customer's conversations about the same problem share, and a label in their words, which the [count by matter](/en/concepts/context#skeleton-and-per-turn-slots) reads and writes into the context. Both are stored in the clear, unmasked, so they can never carry an identifier or a withheld value: a key or a label holding a digit, a bracket, an at sign or another placeholder mark is dropped, and so is a key built on a word that names no thing (service, product, support). A conversation that touches sensitive content, by its text or by the category it was filed under, keeps no matter at all: neither the key nor the label says what the category's policy holds back.
+
+What was already stored goes through the same screen: a bounded, idempotent pass per space reviews stored facts, episode versions, open items, settled values, profile slots and extraction results, replaces the numbers with the markers and deletes, with a tombstone, what was only a number or sensitive content the space does not collect. Its logs keep counts only.
+
+## What stays protected by design
+
+- The database role that serves every request only appends events: it changes or deletes no row of the events table, neither on the table nor on any weekly partition, and a restore applies the same rule again. The marks on an event (injection, media text), erasure and the purge of an archived month run as the system role.
+- Handles, search queries and free text travel only in the request body, never in the URL, so they do not reach balancer logs. Every read that takes a `conversation_id` has a `POST` form, with the id in the body, and the Console and the SDKs use it; in the `GET` forms, which stay, use an opaque id from your system. See [Limits and conventions](/en/conventions).
+- No log line carries customer data. A logged error keeps where it failed (file, line and function) and the class of each exception, never the message, and a database statement that fails does not quote its parameters. A test of the server suite sends a canary value through ingestion (an item the batch accepts and one it refuses), extraction (one that succeeds and one whose provider error quotes the prompt), the context read with a query and a `delta`, and the history search, and checks that it appears in no log line, at any level, through the production formatter.
+- Content is encrypted with AES-256-GCM under your space's data key, which exists only wrapped by the cell's encryption master key. That master key lives in AWS KMS, in FIPS 140-3 validated HSMs, and never leaves it. Under contract, the key that wraps your space's data keys can be yours, in the key service of your own cloud account: Niadra's operations name it ([`PUT /v1/spaces/{space_id}/kms-key`](/en/api/control/space-kms-key)), the cell generates the space's next data key under it and keeps opening what was already written with the key that wrapped it; if you disable the key or withdraw the grant, the space stops writing instead of falling back to Niadra's key. In transit, TLS 1.3: the edge and the database refuse older versions, and the cloud services and Niadra's AI, which the cell talks to, negotiate 1.3. On a delivery to an endpoint of yours (webhook, SIEM, export), the highest version it accepts applies.
+- Before a conversation reaches any third-party model, the generation one or the decision one, deterministic rules and the cell's personal-data model replace with placeholders e-mail addresses, phone numbers, card numbers (checked with Luhn), IBANs, postal codes, street addresses, the individual and company registration numbers of several countries checked by their check digit or written form (the two Brazilian formats, the US Social Security Number, the Canadian SIN, the UK National Insurance number, the Spanish DNI and NIE, the Portuguese NIF, the Mexican CURP, the Chilean RUT, the Indian Aadhaar) and, next to their names, the Brazilian RG, passports, the Argentinian DNI and the cedula, plus bank agency and account numbers and random PIX keys (`bank_account`); the rules version is `pii-rules@3`. A number written after a country code (`+55 11 91234-567`) or an area code in parentheses (`(11) 91234-567`) is a phone, in any country, even when its last groups have the shape of a postal code: no country writes a postal code that way. A Brazilian mobile from before the ninth digit, written after the country code, is a phone too. Lookalikes that fail the check digit, lowercase chat and numbers without their name stay as they are, and the value of a sensitive fact already stored never goes along. When the model's answer comes back, e-mail and phone placeholders turn back into their values inside the cell, but a document, card or bank account placeholder comes back as a withheld marker, never as the value.
+- Events leave the live database once they pass the hot window and stay encrypted in the cold archive. The cold archive is kept until your space sets a retention for it; review samples and the webhook delivery log have configurable retention, and what expires is erased for real.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Receipts and audit" href="/en/concepts/receipts">
+    the trail every erasure and read leaves.
+  </Card>
+  <Card title="Forget" href="/en/api/forget">
+    the endpoint in detail.
+  </Card>
+  <Card title="Patterns" href="/en/concepts/patterns">
+    objection to profiling and pattern retraction.
+  </Card>
+  <Card title="Security and privacy on the site" href="https://niadra.com/en/recursos">
+    the six layers that protect the data.
+  </Card>
+  <Card title="Threat model" href="/en/security/threat-model">
+    assets, boundaries, control per component and residual risks.
+  </Card>
+  <Card title="Security questionnaire" href="/en/security/questionnaire">
+    the security review's questions, answered with evidence.
+  </Card>
+  <Card title="Data use" href="/en/security/data-use">
+    what leaves the cell, and what Niadra never does with the data.
+  </Card>
+  <Card title="Incident response" href="/en/security/incident-response">
+    roles, severities and notification within the contract's deadline.
+  </Card>
+</CardGroup>

@@ -1,0 +1,5 @@
+{"version": "cv_8f2c41d9a07b",
+ "soft": [{"id": "s1", "attr": "item_variant.color", "value": "bege", "weight": 1.5, "confidence": 0.7,
+           "source": "inferred"}],
+  "text": "<restrições>\n- prefere: color bege\n</restrições>"
+}

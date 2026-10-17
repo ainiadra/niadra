@@ -1,0 +1,43 @@
+---
+title: "Assistentes de código"
+description: "Uma skill que ensina o Claude Code, o Cursor, o Codex ou qualquer assistente a ligar um repositório à Niadra, e a documentação em texto puro."
+---
+
+Quem integra a Niadra hoje costuma fazê-lo com um assistente de código ao lado. Dois arquivos servem a ele:
+
+- **A skill `niadra`**, em [`/skill/niadra/SKILL.md`](https://docs.niadra.com/skill/niadra/SKILL.md): o roteiro que um assistente segue para ligar um repositório à Niadra. Achar o ponto da chamada ao modelo e de onde vem o identificador do cliente, escolher o adaptador certo pela tabela, ligar as cinco primitivas, testar contra o emulador e conferir a lista final. Segue o formato de skill que o Claude Code, o Cursor e o Codex leem (um `SKILL.md` com `name` e `description` no cabeçalho).
+- **`llms.txt`**, em [`/llms.txt`](https://docs.niadra.com/llms.txt): a documentação inteira como lista de páginas em texto puro, com o bloco "Se você é um agente de IA integrando a Niadra" e o link da skill. Cada página desta documentação também sai em Markdown no mesmo endereço com `.md` no fim, e cada uma tem no alto o comando que a copia para o seu assistente.
+
+## Carregar a skill
+
+<CodeGroup>
+```sh Claude Code
+mkdir -p .claude/skills/niadra
+curl -fsSL https://docs.niadra.com/skill/niadra/SKILL.md -o .claude/skills/niadra/SKILL.md
+# Then ask: "integrate Niadra into this agent"
+```
+```sh Cursor e Codex
+mkdir -p .agents/skills/niadra
+curl -fsSL https://docs.niadra.com/skill/niadra/SKILL.md -o .agents/skills/niadra/SKILL.md
+# Or point the assistant at the URL and ask it to follow the skill
+```
+</CodeGroup>
+
+A skill é a mesma para os três assistentes: ela não depende do editor, só de o assistente conseguir ler o repositório e rodar o emulador. Ela pede uma chave do espaço de sandbox na variável `NIADRA_API_KEY` e nunca a escreve em arquivo.
+
+## O que a skill faz e não faz
+
+Ela liga o agente que o repositório já tem: não troca o modelo, não reescreve o prompt e não escolhe o fornecedor. Ela insiste em três regras que o assistente tende a errar sozinho: o cliente nunca vem do modelo, a Niadra nunca derruba o agente (então nada de retry próprio em volta das chamadas) e as instruções ficam antes do contexto, para continuarem o prefixo que o provedor guarda em cache.
+
+Para o assistente **consultar** a memória enquanto trabalha, e não só integrá-la, ligue o [servidor MCP do espaço](/guides/mcp) ao editor: [Claude Code](/integrations/mcp/claude-code), [Claude Desktop](/integrations/mcp/claude-desktop), [Cursor](/integrations/mcp/cursor) e [VS Code](/integrations/mcp/vscode).
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Integrações" href="/integrations/overview">
+    a tabela de adaptadores que a skill consulta.
+  </Card>
+  <Card title="Início rápido" href="/quickstart">
+    a chave de sandbox que a skill pede.
+  </Card>
+</CardGroup>

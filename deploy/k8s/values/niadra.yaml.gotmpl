@@ -1,0 +1,41 @@
+image:
+  registry: {{ requiredEnv "NIADRA_REGISTRY" }}
+  # Each image's own tag, from what it is built of (scripts/image_tags.py): a release that leaves an
+  # image's inputs alone leaves its pods alone. A dedicated cell builds no site.
+  tags:
+    server: {{ requiredEnv "NIADRA_SERVER_TAG" }}
+    models: {{ requiredEnv "NIADRA_MODELS_TAG" }}
+    site: {{ env "NIADRA_SITE_TAG" | quote }}
+    site-api: {{ env "NIADRA_SITE_API_TAG" | quote }}
+# The release (/opt/niadra/releases/<release>), for the rollback after a failed check; no template
+# reads it, so a new release alone changes no object.
+release: {{ requiredEnv "NIADRA_VERSION" }}
+region: {{ requiredEnv "NIADRA_REGION" }}
+database:
+  host: {{ requiredEnv "NIADRA_DB_HOST" }}
+  masterSecret: {{ requiredEnv "NIADRA_DB_MASTER_SECRET" | quote }}
+objectStorage:
+  bucket: {{ requiredEnv "NIADRA_CELL_BUCKET" }}
+keys:
+  kmsKeyId: {{ requiredEnv "NIADRA_KMS_KEY_ARN" | quote }}
+audit:
+  bucket: {{ requiredEnv "NIADRA_AUDIT_BUCKET" | quote }}
+tls:
+  route53Zone: {{ env "NIADRA_ROUTE53_ZONE" | quote }}
+hosts:
+  site: {{ requiredEnv "NIADRA_SITE_HOSTS" | splitList "," | toJson }}
+  api: {{ requiredEnv "NIADRA_API_HOSTS" | splitList "," | toJson }}
+  control: {{ requiredEnv "NIADRA_CONTROL_HOST" }}
+  grafana: {{ requiredEnv "NIADRA_GRAFANA_HOST" }}
+{{- with env "NIADRA_CONTROL_URL" }}
+# A dedicated cell (scripts/cell.sh): the default cell's control plane, and its own secrets path.
+cellId: {{ requiredEnv "NIADRA_CELL_ID" }}
+controlPlane:
+  url: {{ . }}
+sandbox:
+  enabled: false
+secretStore:
+  app: {{ requiredEnv "NIADRA_SECRETS_PREFIX" }}/app
+  llm: {{ requiredEnv "NIADRA_SECRETS_PREFIX" }}/platform/llm
+  siteAdmin: {{ requiredEnv "NIADRA_SECRETS_PREFIX" }}/admin/site
+{{- end }}

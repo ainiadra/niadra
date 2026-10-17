@@ -1,0 +1,1 @@
+{"idempotency_key": "k8", "channel": "chat", "handles": [{"type": "email", "value": "m@example.com"}], "speaker": {"role": "ai_agent"}, "content": {"text": "I see the credit."}, "occurred_at": "2026-09-22T14:02:11Z", "context_stamp": {"etag": "b3f1c2a9d8e7"}}

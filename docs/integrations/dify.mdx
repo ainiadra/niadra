@@ -1,0 +1,51 @@
+---
+title: "Dify"
+description: "Um plugin do Dify com um provedor de ferramentas: o contexto para o prompt, a resposta registrada, as três do histórico e a busca nas notas do agente."
+---
+
+O plugin em `integrations-extras/dify` no repositório do SDK de Python é um provedor de ferramentas com seis ferramentas:
+
+| Ferramenta | O que faz | Quem preenche |
+|---|---|---|
+| Get context | Registra a mensagem do cliente e devolve o contexto para o prompt: as notas do próprio agente (com **Agent memory** ligado), o contexto do cliente e o que mudou em outros canais | o app |
+| Record reply | Registra a resposta do agente | o app |
+| Search customer history | O histórico inteiro do cliente, por pergunta e período (`when`) | o modelo |
+| Customer timeline | As conversas e ações de agentes do cliente, das mais novas para as mais antigas | o modelo |
+| Open history item | Uma conversa ou objeto de negócio vindo de uma busca ou da linha do tempo | o modelo |
+| Search agent memory | As notas de trabalho do próprio agente: procedimentos, ferramentas, armadilhas; nada sobre clientes | o modelo |
+
+O cliente (tipo e id), o id da conversa e o canal são definidos por quem monta o app, em geral a partir das variáveis do app (`sys.user_id`, `sys.conversation_id`), e nunca pelo modelo.
+
+## Instalar
+
+1. Gere o pacote a partir do repositório (`pip install dify_plugin niadra` e `dify plugin package ./dify` produzem o `.difypkg`), instale-o no seu Dify e adicione o provedor com uma chave de fonte da Niadra (do Console). O campo de endereço da API fica vazio; ele só serve para o emulador local.
+2. Num chatflow: um nó Get context antes do nó LLM (mensagem do cliente = `sys.query`, id da conversa = `sys.conversation_id`), o texto dele no prompt de sistema do LLM depois das suas instruções, e um nó Record reply depois do LLM.
+3. Num agente: acrescente as ferramentas do histórico; as descrições são as mesmas que o modelo recebe de todo SDK da Niadra.
+
+## As cinco primitivas
+
+| Primitiva | Como o plugin liga |
+|---|---|
+| Contexto | Get context, com a view (`chat`, `voice`, `brief`, `full`), ligado ao prompt de sistema depois das suas instruções |
+| Turnos | Get context registra a mensagem do cliente; Record reply, a resposta do agente |
+| Ferramentas | Search customer history, Customer timeline, Open history item e Search agent memory, com as descrições do kit |
+| Verificação | Fora do plugin; use o SDK ou a API |
+| Transbordo | Fora do plugin; use o SDK ou a API |
+
+## Limites
+
+- As seis recebem os mesmos campos de conexão: o tipo e o id do cliente, o id da conversa e o canal, mapeados das variáveis do app.
+- Com a Niadra lenta ou fora, o contexto sai vazio e uma ferramenta diz que o histórico está indisponível; o app nunca para.
+- O plugin não guarda nada; `PRIVACY.md` no pacote lista o que ele envia à Niadra (o handle do cliente, o id da conversa, as mensagens de cada turno e as consultas do modelo).
+- Testado com o SDK de plugins do Dify (`dify-plugin` 0.10.2) e a Niadra no emulador, em `integrations-extras/dify/test_niadra_plugin.py`.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Langflow" href="/integrations/langflow">
+    os três componentes do Langflow.
+  </Card>
+  <Card title="SDK de Python" href="/sdk/python">
+    a biblioteca que o plugin usa.
+  </Card>
+</CardGroup>

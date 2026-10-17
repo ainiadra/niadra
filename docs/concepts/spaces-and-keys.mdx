@@ -1,0 +1,173 @@
+---
+title: "Espaços e chaves"
+description: "Projeto, ambiente, fonte e chave: quem fala com a Niadra e o que cada chave pode fazer."
+---
+
+Tudo o que fala com a Niadra fala por uma chave, e toda chave pertence a uma fonte dentro de um espaço. Esses três nomes decidem onde o dado mora, quem está lendo e o que cada agente pode fazer com a memória. Entender os três antes de integrar evita a maior parte das dúvidas de permissão.
+
+## Projeto, ambiente e espaço
+
+Um **projeto** é a memória de uma empresa, ou de uma linha de negócio que precisa ficar separada. Cada projeto tem dois **ambientes**: `sandbox`, para desenvolver e testar, e `production`, para o tráfego real.
+
+O **espaço** é o par projeto e ambiente. É a unidade de isolamento da Niadra: o espaço é a primeira coluna de toda chave de banco, de cache e de cifra, então um evento de sandbox nunca aparece numa leitura de produção, e o dado de uma empresa nunca decifra com a chave de outra.
+
+Cada espaço tem também o próprio banco de dados: o sandbox e a produção de um projeto nunca dividem um. Um espaço recém-criado fica pronto assim que a Niadra cria e prepara o banco dele; até lá, as chamadas respondem 503 com `Retry-After`: os eventos que o SDK põe na fila esperam e são reenviados sozinhos, e uma leitura de contexto ou do histórico volta vazia, como em qualquer falha. Apagar um espaço (uma pessoa com o papel admin, pela API do controle) remove o banco dele e destrói as chaves de dados, o que torna ilegível qualquer cópia que ainda exista, e devolve um [comprovante de apagamento](/api/control/space-deletion-receipt).
+
+Cada espaço vive numa região, a do projeto, e tem um endereço estável:
+
+```text
+https://<espaço>.<região>.api.niadra.com
+```
+
+O SDK monta esse endereço a partir da chave. Você não configura URL nenhuma, a não ser para apontar para o emulador local.
+
+## Ambiente dedicado (plano Regulado)
+
+No plano Regulado, "servidores, banco de dados e chaves exclusivos da sua empresa" é uma célula dedicada: uma segunda pilha com o mesmo modelo da célula compartilhada, na mesma região (`us-east-2`), com a própria máquina, a própria instância de banco, os próprios buckets, o próprio grupo de logs e o próprio tópico de alertas, e uma chave-mestra própria no KMS, que cifra o disco do banco e o da máquina e embrulha as chaves de dados dos seus espaços. Só a máquina dessa célula lê os segredos dela. A célula roda só a célula: o plano de controle, o site e o Console continuam na Niadra, e ela busca a própria configuração com uma credencial só dela, que o plano de controle conhece só pelo SHA-256 e que não serve para nenhuma outra célula; a credencial das células compartilhadas não a abre.
+
+Todo espaço novo do seu tenant na região nasce nessa célula, inclusive os criados pelo Console, como espaços de nível `t2`; a célula cria cada banco de espaço na própria instância. O endereço não muda: os SDKs continuam falando com `<espaço>.us-east-2.api.niadra.com`, por um registro por espaço que aponta para a sua célula. Um limite: um espaço que já tem dados na célula compartilhada não é movido para a dedicada; um cliente do Regulado começa na célula dele.
+
+## A cifra de cada espaço
+
+O conteúdo de cada espaço é cifrado com AES-256-GCM sob chaves de dados só dele, e cada valor cifrado leva o próprio lugar (tabela, linha e coluna) como dado autenticado, então não abre se for copiado para outra linha. Uma chave de dados nunca fica guardada aberta: ela fica embrulhada pela chave mestra de cifra da célula, que mora no AWS KMS, em HSMs com validação FIPS 140-3 nível 3, e nunca sai de lá. O KMS gera cada chave de dados nova e só a desembrulha com o contexto de cifra `niadra:space` igual ao id do espaço, então uma chave embrulhada copiada para outro espaço não abre, e cada desembrulho fica registrado no CloudTrail. Cada processo pede cada chave de dados ao KMS uma vez e a mantém só na memória, então as leituras não esperam pelo KMS depois da primeira. Os hashes com chave que a memória usa para achar valores sem abri-los também usam uma chave derivada para cada espaço, cuja raiz fica embrulhada do mesmo jeito.
+
+As chaves giram em dois níveis. O KMS troca o material da chave mestra todo ano e guarda o anterior, então o que ele embrulhou antes continua abrindo. Cada espaço também pode ganhar uma versão nova da chave de dados: o que é gravado depois usa a versão nova, e o que já estava gravado continua abrindo com a sua. Sob contrato, a chave que embrulha as chaves de dados de um espaço pode ser a do cliente, no KMS da conta dele: a operação da Niadra a nomeia por [`PUT /v1/spaces/{space_id}/kms-key`](/api/control/space-kms-key), o instantâneo leva o `kms_key_arn` à célula, a próxima chave de dados do espaço nasce sob ela, e uma chave desligada ou sem concessão faz o espaço parar de gravar (503) em vez de voltar à chave da célula. Quem usa a chave mestra não a administra: a política da chave deixa só o papel da máquina da célula cifrar e decifrar, a conta só a administra, e cada mudança da política e cada uso da chave ficam no CloudTrail.
+
+## Fontes
+
+Uma **fonte** é cada coisa que fala com a memória: o agente de voz de um fornecedor, o agente de WhatsApp de outro, o agente interno de cobrança, o CRM que manda eventos por webhook, o atendente humano que recebe o contexto na ferramenta que a empresa já usa. Toda fonte tem:
+
+| Atributo | Para quê |
+|---|---|
+| `purposes` | O que ela lê e para quê, como `customer_service` ou `billing`. A política libera cada categoria de memória por finalidade. Uma fonte que declara finalidades lê exatamente essas, sem nenhuma somada; só uma fonte que não declara nenhuma lê para `service` e `support`. |
+| `audience` | `customer_agent`, `internal_agent`, `human`, `reviewer`, `analyst`, `trigger_target` ou `export`. Decide o que a fonte pode ler, define os escopos padrão das chaves dela e aparece em todo comprovante. Numa conversa, uma fonte interna só continua interna quando quem fala é da equipe, nomeado por `staff()`; com qualquer outra pessoa, a conversa é lida como voltada ao cliente. |
+| `vendor` e `channel` | Quem fez o agente e onde ele trabalha. A medição agrupa por eles. |
+| `verification_ceiling` | O nível mais alto que a fonte pode declarar, V2 por padrão. Agente automatizado: V2. Fonte que executa OTP: V3. Na criação da fonte, a API de controle recusa um teto acima do que a audiência permite: V4 só para `human` ou `internal_agent` (mesa humana ou sistema de registro), `no_customer` só para `internal_agent`, e as demais audiências vão até V3. |
+| `confirms_before_acting` | Marca o agente que confirma valores por regra de prompt, para a medição não contar essa confirmação como repetição. |
+| `navigation_enabled` | Se a fonte pode usar as ferramentas do histórico. Ligado por padrão. |
+| `trusted_action_ops` | Com `act`, a lista fechada de operações que a fonte pode registrar, como `credit`. Vazia quer dizer qualquer operação. |
+| `critical` | Deixa a fonte fora dos grupos de controle de experimento: os clientes dela sempre recebem a memória. |
+
+A fonte é criada e configurada no Console ou pela [API de controle](/api/control/sources-create). Acesso à memória é negado por padrão e liberado por finalidade: dar acesso amplo ao ERP para um agente interno não dá acesso amplo à memória. Antes de liberar, [`POST /v1/policy/simulate`](/api/policy-simulate) mostra o que uma fonte, audiência ou finalidade veria de um perfil, item a item, com o que ficaria retido e por quê, e também as falas recentes de outras conversas que o bloco `live` da mesma leitura levaria ou reteria, pela mesma política: a fala retida aparece só com o canal, a hora e o motivo, nunca com o texto.
+
+## Chaves
+
+Cada fonte tem uma ou mais chaves. O formato carrega tudo o que o SDK precisa para achar o endereço:
+
+```text
+nia_sk_<live|test>_<região>_<espaço>_<key_id>_<segredo>
+```
+
+- `live` chega aos espaços de produção; `test`, aos de sandbox.
+- `região` e `espaço` viram o endereço `https://<espaço>.<região>.api.niadra.com`.
+- `key_id` é público e aparece nos registros; sozinho, nunca autentica.
+- O segredo aparece uma vez só, quando a chave é criada. Guarde no seu cofre de segredos.
+
+A chave vai no cabeçalho `Authorization: Bearer`. Os SDKs leem a variável `NIADRA_API_KEY` quando você não passa a chave no construtor.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra
+
+niadra = Niadra()  # lê NIADRA_API_KEY
+print(niadra.base_url)  # https://acme-prod.us-east-2.api.niadra.com
+```
+```typescript TypeScript
+import { Niadra } from "@niadra/sdk";
+
+const niadra = new Niadra(); // lê NIADRA_API_KEY
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/context" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"subject": {"type": "phone_e164", "value": "+14155550123"}, "view": "chat", "verification": "V1", "conversation_id": "wa-8812"}'
+```
+</CodeGroup>
+
+<Warning>
+A chave de fonte é segredo de servidor. Nunca coloque uma chave no navegador, num app móvel ou no prompt do modelo. Para ligar um cliente a uma conexão MCP, o seu backend emite um [subject_token](/api/subject-tokens) de 15 minutos.
+</Warning>
+
+## Escopos
+
+Cada chave tem escopos. A rota confere o escopo antes de qualquer outra coisa, e a falta dele volta como 403 com o código `scope_missing`. No lote, o escopo é conferido item a item: o item sem o escopo volta recusado com o mesmo código, e os demais seguem.
+
+| Escopo | O que libera |
+|---|---|
+| `track` | Enviar mensagens e eventos de sistema no lote, pedir upload de mídia, corrigir a memória |
+| `act` | Registrar ação de agente, dentro das `trusted_action_ops` da fonte quando ela tem lista |
+| `context` | Ler o contexto e objetos, emitir `subject_token` |
+| `search` | Buscar no histórico, linha do tempo, abrir item |
+| `identify` | Mandar itens `identify` no lote; a ferramenta MCP `resolve_identity` |
+| `admin` | Toda rota de governança: identidade, apagamento, exportação, comprovantes, linhagem, simulação de política, medição, gatilhos, entregas. As mesmas rotas aceitam também pessoas do Console com o papel certo |
+| `analytics` | [Análise da base](/api/insights-aggregate), com pseudônimo por padrão, e os [relatórios de medição](/concepts/context-use#leia-os-números) somados de todas as fontes. Só fontes com a audiência `analyst` recebem |
+| `agent_memory` | Ler a [memória do próprio agente](/concepts/agent-memory): o bloco, a busca e as ferramentas. Toda chave com `context` também lê |
+| `agent_memory:write` | Gravar, editar e aposentar as notas do próprio agente e pedir uma destilação; a ferramenta `remember` |
+| `replay` | Ler [registros de turno](/concepts/turn-records), criar cenários e reportar execuções de replay e de contrafactual; as mesmas rotas aceitam pessoas com o papel `integration` ou `security` (`analysis` para o contrafactual) |
+| `coordinate` | Perguntar antes de agir, declarar o que aconteceu, reivindicar um cliente ou uma tarefa, criar e aceitar transferências, ler a [lista de supressão](/concepts/coordination#a-lista-de-supressão) |
+| `state:push` | Enviar o estado de um sistema de registro para os [tipos declarados](/concepts/object-types), reconciliar por snapshot e tomar os pedidos de releitura do [worker de resolução](/guides/resolver-worker) |
+| `agent_state` | Ler e gravar a [memória de trabalho](/concepts/agent-state) do próprio agente |
+| `identity:link` | Vincular uma pessoa à conta ou ao parceiro em nome de quem ela age, e encerrar o vínculo, como um sistema de registro que sabe quem trabalha para quem; mais nada da governança de identidade. Nunca é dado a uma fonte voltada ao cliente, e um vínculo com `can_see_contacts` ainda pede `admin` |
+
+Os quatro últimos escopos só valem num espaço que ligou a funcionalidade correspondente (abaixo); uma chave pode tê-los antes disso, e as rotas respondem 404 até a funcionalidade ligar. O escopo `track` também envia os registros de turno, e `context` lê o estado tipado e o bloco de restrições.
+
+O escopo `act` merece atenção. `track` sozinho não registra ação: uma ação pode fechar uma promessa feita ao cliente, então só a fonte com `act` consegue registrá-la, e a fonte que declara `trusted_action_ops` (por exemplo, só `credit`) não registra mais nada. É a primeira barreira contra uma ação forjada por injeção de prompt. Uma operação fora da lista volta como erro do item, com o código `operation_not_allowed`.
+
+Uma chave criada sem escopos recebe os padrões da audiência da fonte: `customer_agent` recebe `track`, `context`, `search` e `identify`; `internal_agent` recebe também `act`; `human` recebe `context` e `search`; `analyst` recebe só `analytics`.
+
+Uma divisão comum:
+
+| Fonte | Escopos |
+|---|---|
+| Agente de voz ou de WhatsApp | `context`, `search`, `track`, `identify` |
+| Agente interno de cobrança | `context`, `search`, `track`, `act`, com `trusted_action_ops: ["credit"]` na fonte |
+| CRM ou ERP por webhook | autenticação do mapeamento da fonte |
+| Serviço de governança do seu time | `admin` |
+| Seu BI ou LLM de análise | `analytics`, numa fonte com a audiência `analyst` |
+| Agente que grava turnos, coordena e guarda estado de trabalho | `context`, `search`, `track`, `identify`, `coordinate`, `agent_state` |
+| O seu CI, para replay | `replay`, numa fonte própria |
+| O worker de resolução e o sistema de registro que envia estado | `state:push` |
+
+As pessoas do seu time usam o Console com o próprio token e os próprios papéis (`admin`, `security`, `integration`, `review`, `analysis`, `vendor`), nunca uma chave de fonte. Veja [Limites e convenções](/conventions#autenticação).
+
+## Funcionalidades do espaço
+
+Todas as funcionalidades começam **ligadas**: um espaço que ninguém configurou já usa todas, e a memória funciona sem nenhuma mudança. O documento de configuração `features` lista o que fica ligado; um espaço desliga uma funcionalidade por um diff aprovado no Console ou pela [API de controle](/api/control/config-diffs), pelo papel `security`, e a mudança vale por espaço, então o sandbox e a produção de um projeto decidem cada um a sua.
+
+| Funcionalidade | O que liga | Documento das regras |
+|---|---|---|
+| `turns` | [Registros de turno](/concepts/turn-records), replay e cenários, o registro de mudanças, os problemas de dados | `recording` (`integration`) |
+| `state` | [Tipos de objeto e estado tipado](/concepts/object-types): push, snapshot, leituras, releitura, cobertura, conferência de deriva, conteúdo de terceiros | `object-types` (`integration`) |
+| `agent_state` | [Memória de trabalho](/concepts/agent-state) dos agentes | `object-types`, um tipo com `ownership: agent` |
+| `signals` | [Interações, o bloco de restrições, inferências](/concepts/signals) e os pedidos de revisão | `tool-bindings` (`integration`) |
+| `claims` | O [contrato de afirmação](/concepts/claims) no perfil do SDK e as taxas de afirmação na medição | `claim-contract` (`integration` e `security`) |
+| `coordination` | [Coordenação](/concepts/coordination): perguntas, declarações, posse, efeitos, transferências, lista de supressão, token de contato | `coordination` (`integration`) |
+| `measurement` | [Desfechos, atribuição, experimentos e contrafactual](/concepts/outcomes) | `measurement` (`analysis`) |
+| `notifications` | O [feed de avisos](/concepts/triggers-and-webhooks#o-feed-de-avisos), para puxar em vez de receber webhooks | |
+| `legal_holds` | [Retenções legais](/concepts/privacy#retenções-legais) | |
+
+Uma rota de uma funcionalidade desligada responde 404, como se não existisse, e uma leitura de contexto que pede um bloco de uma funcionalidade desligada recebe o contexto sem o bloco. [`GET /v1/sdk/profile`](/api/sdk-profile) diz ao SDK o que está ligado, com o contrato de afirmação, o registro de tipos resumido e o modo de gravação dos turnos; o SDK o lê no início e o revalida por ETag, e um adaptador com a captura ligada só grava quando o perfil lista `turns`.
+
+## Girar e revogar
+
+[Gire](/api/control/keys-rotate) uma chave para ganhar uma nova com os mesmos escopos; `grace_seconds` (até 7 dias) mantém a antiga válida enquanto você publica a nova no seu cofre. Para cortar o acesso, [revogue a chave](/api/control/keys-revoke) ou [a fonte inteira](/api/control/source-revoke), com um motivo, no Console ou pela API de controle. A revogação chega a todas as instâncias da célula em segundos. A célula também aceita um corte direto, [`POST /v1/sources/{source_id}/revoke`](/api/source-revoke), para o papel `security`: todas as chaves da fonte param de autenticar ali na hora.
+
+Quando uma chave recebe 401 ou 403, o SDK descarta o contexto que tinha guardado para ela e devolve contexto vazio. Assim o corte de acesso de um fornecedor vale também para o que já estava no cache dele.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Eventos e o lote" href="/concepts/events">
+    o que cada fonte envia e como o lote responde.
+  </Card>
+  <Card title="Identidade e verificação" href="/concepts/identity">
+    handles, perfis e os níveis V0 a V4.
+  </Card>
+  <Card title="Limites e convenções" href="/conventions">
+    versão, idempotência, limites de taxa e ETag.
+  </Card>
+  <Card title="Erros" href="/errors">
+    o catálogo de códigos, incluindo `scope_missing`.
+  </Card>
+</CardGroup>

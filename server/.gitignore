@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+dist/
+build/
+*.egg-info/
+.env
+.env.*
+*.pem
+*.key
+kek.bin
+.import_linter_cache/

@@ -1,0 +1,50 @@
+---
+title: "Cursor"
+description: "Your space's MCP server in Cursor, with the key and the subject token read from environment variables in mcp.json."
+---
+
+Cursor connects to MCP servers over Streamable HTTP and takes headers in `mcp.json`, with environment variables interpolated as `${env:NAME}`. Use a key of the **sandbox** space (`nia_sk_test_...`), never a `live` one.
+
+## What the connection needs
+
+| Header | Value | Where it comes from |
+|---|---|---|
+| `Authorization` | `Bearer` and the source key | The Console, under **Agents and keys**, in the sandbox space |
+| `Niadra-Subject-Token` | A signed token that binds the connection to a test customer | [`POST /v1/subject-tokens`](/en/api/subject-tokens), with the same key; valid for 15 minutes |
+
+## Connect
+
+In `.cursor/mcp.json` in the project (or `~/.cursor/mcp.json` for every project):
+
+```json
+{
+  "mcpServers": {
+    "niadra": {
+      "url": "https://acme-sandbox.us-east-2.api.niadra.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:NIADRA_API_KEY}",
+        "Niadra-Subject-Token": "${env:NIADRA_SUBJECT_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Export `NIADRA_API_KEY` and `NIADRA_SUBJECT_TOKEN` in the environment Cursor is opened from, and turn the server on under Cursor Settings > MCP. The tools become available to Cursor's agent; with agent memory on in the space, `search_agent_memory` (and `remember`, with the `agent_memory:write` scope) show up next to the customer tools (eight; seven for a customer-facing source, without `resolve_identity`).
+
+## Limits
+
+- The token lasts 15 minutes: once it expires, the customer tools answer `unauthenticated`. Mint another, update the variable and reload the server. The two agent memory tools work without a token.
+- The customer is always the token's. The server answers `POST` only.
+- Every tool call leaves a receipt in the space.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="MCP with any LLM" href="/en/guides/mcp">
+    the tools, the token and what each one requires.
+  </Card>
+  <Card title="Coding assistants" href="/en/integrations/coding-assistants">
+    the skill that teaches Cursor to connect a repository to Niadra.
+  </Card>
+</CardGroup>

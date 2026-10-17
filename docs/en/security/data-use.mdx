@@ -1,0 +1,53 @@
+---
+title: "Data use"
+description: "What Niadra does and does not do with your customers' data: never sold, used only for your company's purpose, never used to train models. Each statement checked in the code and the configuration."
+---
+
+Your company is the controller of your customers' data; Niadra processes it on your behalf, as the processor, for one purpose only: giving your agents each customer's memory. This page says what follows from that, in terms your legal and security teams can check, and points, for every statement, to the code or configuration that holds it up on 30/09/2026.
+
+## The three statements
+
+**Data is never sold, rented or shared for another purpose.** Nothing in Niadra's code sends customer data to a destination outside the ones this page lists, and each of them receives it for your company's purpose: hosting (AWS), extracting the memory of a conversation and deciding about it (Niadra's AI). No marketing, market analysis or "partner" destination exists in the server. All outbound HTTP from the cell goes through one adapter, `server/src/niadra/adapters/outbound/egress.py`, which delivers only to endpoints your company configured (webhooks, SIEM, export bucket); the other destinations are AWS's and Niadra's AI, named in the code.
+
+**Data is used only for the controller's purpose.** What Niadra stores, extracts, compiles and delivers serves your agents' memory and your company's governance tools (erasure, export, audit, measurement). The space's policy decides who reads what ([Access denied by default](/en/concepts/privacy#access-denied-by-default-released-by-purpose)), and every item keeps the purposes and the legal basis it was collected under ([Purpose and legal basis per item](/en/concepts/privacy#purpose-and-legal-basis-per-item)). Niadra does not read the content for any purpose of its own: logs carry no content (test `server/tests/unit/flow/test_log_canary.py`), metrics carry no space or customer id, and billing counts conversations and tasks without reading what they say.
+
+**Data never trains models, neither Niadra's nor third parties'.** Niadra trains no model: the models that run inside the cell (the personal-data detector, the semantic search one, the document reader) are published models, pinned by version in the image (`server/models/src/niadra_models/onnx/pinned.py`), and there is no training or fine-tuning code in the repositories. For Niadra's AI, which runs outside the cell, every request forbids whoever processes it from keeping it for training or product improvement and requires zero retention (`server/src/niadra/adapters/outbound/llm/`). A destination that does not offer both does not receive the request.
+
+## What leaves the cell, and where to
+
+| Destination | What goes | For what | Where it is |
+|---|---|---|---|
+| Niadra's AI, outside the region | The masked text of conversations (e-mail, phone, card, IBAN, address, postal codes, documents and bank accounts replaced by placeholders inside the cell) and the configuration assistant's event samples | Extracting each conversation's memory; deciding whether a conversation is worth extracting, whether a turn tries to instruct the agent, the sensitive category of a text, the type of a question, whether two claims contradict each other | `server/src/niadra/domain/extract/redaction.py`; `adapters/outbound/llm/` |
+| Your company's endpoints | Webhooks (ids and hashes, never content), the SIEM stream (ids and hashes) and continuous export (the memory, in Parquet, decrypted only on the way to your bucket) | Notifying, auditing and giving the data back to you | `egress.py`; [Continuous export](/en/concepts/privacy#continuous-export-to-your-bucket) |
+| AWS, inside `us-east-2` | Everything the platform stores, encrypted | Hosting | `deploy/aws/cluster.yaml` |
+
+Nothing else. There is no analytics SDK, pixel or third-party service in the Console or on the site that receives customer data: the site's and the Console's Content Security Policy only allows scripts from their own origin (`web/deploy/Caddyfile`), and site visits are counted by Niadra itself, with no third party.
+
+## What Niadra's operation sees
+
+- **By default, ids, hashes and counts.** Logs, metrics, alerts and dashboards carry no customer content. Receipts say who read what by id, never the text.
+- **Operational access exists and leaves a trace.** To restore a space, check a backup or delete a space, the founder runs the runbooks in `server/README.md` on the machine, through Systems Manager, which the account's CloudTrail records. An access to a space through the Console leaves an `admin` receipt, which your company sees. That access is not used to read customer content; there is no second approver for it, and that is stated in the [threat model](/en/security/threat-model#residual-risks).
+- **Tests and measurements use synthetic data.** The end-to-end check of every deploy runs on Niadra's own synthetic tenant; the CI tests and the published measurements use made-up conversations.
+
+## What your company controls
+
+- **Retention**, by data class and by purpose, and erasure with a receipt ([Privacy](/en/concepts/privacy)).
+- **Who reads what**, through the policy, with a simulation before changing it ([`POST /v1/policy/simulate`](/en/api/policy-simulate)).
+- **Export**, on demand and continuous: the data is yours and leaves when you ask, to your bucket.
+- **The third parties that process the data**: the list goes into the contract, and a change to it is notified within the contract's deadline, with a right to object.
+- **Leaving the region.** If your company does not accept masked text going to Niadra's AI outside the region, that is a contract condition; today the platform has no mode that keeps that text in the region, and none is promised.
+
+## Contractual commitment
+
+What this page describes is the behaviour of today's code. The three statements enter as clauses of your company's data processing agreement (DPA) with Niadra, with the list of those third parties as an annex. The contract is what binds; this page is how to check that the code does what the contract says.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Threat model" href="/en/security/threat-model">
+    the boundary with Niadra's AI and its residual risk.
+  </Card>
+  <Card title="Privacy, erasure and export" href="/en/concepts/privacy">
+    the data subject's rights, by API.
+  </Card>
+</CardGroup>

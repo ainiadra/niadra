@@ -1,0 +1,201 @@
+---
+title: "Identidade e verificação"
+description: "Handles, asserções, perfis que se unem e se separam, e os níveis V0 a V4."
+---
+
+A Niadra reconhece o mesmo cliente no WhatsApp, na voz, no app e no CRM. Ela faz isso sem adivinhar: cada ligação entre dois identificadores é uma asserção registrada, com método e evidência, e pode ser desfeita. Esta página explica handles, perfis, asserções e os níveis de verificação que decidem o que cada conversa pode ler.
+
+## Handles
+
+Um **handle** é um identificador de um sujeito num canal ou sistema. Ele tem um `type`, um `value` e, quando o tipo pede, um `scope`:
+
+| `type` | O que é | `scope` |
+|---|---|---|
+| `phone_e164` | Telefone no formato E.164, como `+14155550123` | |
+| `wa_id`, `wa_jid`, `wa_lid` | Identificadores que o WhatsApp entrega | |
+| `wa_bsuid` | Id do usuário do WhatsApp por conta comercial | A conta WhatsApp Business |
+| `email` | E-mail, em minúsculas | |
+| `gov_id_hmac` | O número do documento de uma pessoa como está, como `529.982.247-25` | O país |
+| `app_user_id` | O id do usuário no seu app ou site | |
+| `system_id` | O id do sujeito num sistema de registro | O sistema, como `crm` |
+| `org_registry_hmac` | O número do registro de uma empresa como está, como `11.222.333/0001-81` | O país |
+| `email_domain` | Domínio de e-mail de uma organização, só como pista | |
+| `anon_id` | Visitante ou aparelho ainda sem identificação | |
+
+O valor é classificado pelo formato, nunca pelo nome do campo de onde veio, e normalizado no servidor, para que o mesmo telefone ou e-mail chegue ao mesmo handle por qualquer canal:
+
+- **Telefone:** fica em E.164. Um número brasileiro sem código do país ganha `55`, também depois de um código de operadora (`0 21 11 98765-4321`), e um celular antigo de 8 dígitos ganha o 9; um fixo nunca ganha. Onze dígitos sem o 9 do celular não são número brasileiro: `14155550123` é `+14155550123`. O `1` que o WhatsApp ainda põe nos celulares do México (`521...`) e o `9` dos celulares da Argentina (`549...`) saem, então o `wa_id` e o número que uma ligação mostra são o mesmo telefone. Um `(0)` depois do código do país (`+44 (0) 20 ...`) sai.
+- **E-mail:** fica em minúsculas, sem mais nada mudar: pontos e sufixos com + continuam no valor (no Gmail, eles viram [sugestão](#governar-a-identidade)). `mailto:` e o nome de `Ana Silva <ana@acme.com>` saem.
+- **Documento:** o documento de uma pessoa e o registro de uma empresa passam pelo dígito verificador do esquema do país. Um documento brasileiro que perdeu os zeros à esquerda numa planilha (`1234567890` para `012.345.678-90`) os recupera, e o dígito verificador ainda decide. Mande o próprio número, nunca um hash dele: o espaço guarda só um HMAC com o segredo dele, para casar, e uma cópia cifrada, para exportar, e mostra o número mascarado. Um hash falha no dígito verificador, e o item volta `invalid_input`.
+- Marcas invisíveis (o WhatsApp envolve um número copiado em marcas de direção), dígitos de largura total e o prefixo `tel:` saem de telefones, e-mails e documentos. Ids opacos (`system_id`, `app_user_id`, BSUID) ficam como chegaram.
+- O id de um grupo, lista de transmissão ou canal do WhatsApp (`@g.us`, `@broadcast`, `@newsletter`) não é de ninguém e é recusado com `invalid_input`: mande o participante, nunca o grupo.
+
+Os SDKs têm funções que montam cada tipo:
+
+<CodeGroup>
+```python Python
+from niadra import phone, email, whatsapp, whatsapp_bsuid, system_id, app_user, anonymous
+
+phone("+1 415 555 0123")          # phone_e164: +14155550123
+system_id("crm", "48213")         # system_id no namespace crm
+whatsapp_bsuid("US.1a2b3c", "waba-771")
+```
+```typescript TypeScript
+import { handles } from "@niadra/sdk";
+
+handles.phone("+14155550123");
+handles.systemId("48213", "crm");
+handles.waBsuid("US.1a2b3c", "waba-771");
+```
+</CodeGroup>
+
+Todo handle pertence a um tipo de sujeito, em `subject_kind`: `person` (o padrão), `account` ou `partner`. `org_registry_hmac` e `email_domain` já nascem de organização. Veja [Contas e parceiros](/concepts/accounts).
+
+## Perfis e asserções
+
+Um **perfil** é o cliente como a memória o enxerga: o conjunto de handles ligados entre si. Cada ligação é uma **asserção** num registro imutável, com o método que a produziu:
+
+| Método | Quando acontece |
+|---|---|
+| `explicit_identify` | Você afirmou, por `identify()`. Sem um id de cadastro confirmado entre os handles, é uma afirmação: o handle entra provisório |
+| `otp`, `login` | O cliente provou a posse do handle |
+| `system_import` | Carga inicial a partir do seu CRM ou de um arquivo |
+| `same_event` | Dois handles fortes chegaram no mesmo evento, como telefone e `wa_id` |
+| `external_resolver` | O seu sistema de identidade já resolveu e mandou o resultado |
+| `declared` | O cliente disse, e o seu agente registrou (é o que a ferramenta MCP `resolve_identity` envia). Vale pouco até ser confirmado: liga um handle novo ao perfil como provisório, mas nunca une dois perfis que já existem. O par vai para a fila de sugestões, e só une quando uma pessoa aceita |
+
+Quando dois handles do mesmo evento resolvem para perfis diferentes, a união acontece fora da resposta do lote, com trava. A memória fica presa ao handle de origem de cada fato, então separar dois perfis unidos por engano é uma operação de verdade: os fatos, os pedidos e as faturas voltam sozinhos para o dono certo. Quando dois perfis se unem e cada um tem um valor para o mesmo campo do perfil, vale a regra de sobrevivência que o esquema de extração do espaço dá ao campo: `latest` (o mais recente, o padrão), `most_frequent` (o que mais fontes afirmam) ou `source_priority` (a ordem de fontes que você lista, por nome ou id). O perfil unido guarda uma linha por handle e fonte, então a separação devolve a cada lado o que era dele.
+
+<CodeGroup>
+```python Python
+niadra.identify(
+    [phone("+14155550123"), system_id("crm", "48213")],
+    method="system_import",
+)
+```
+```typescript TypeScript
+await niadra.identify({
+  handles: [handles.phone("+14155550123"), handles.systemId("48213", "crm")],
+  method: "system_import",
+});
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/batch" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"items": [{"type": "identify", "idempotency_key": "idf-48213", "method": "system_import",
+       "handles": [{"type": "phone_e164", "value": "+14155550123"}, {"type": "system_id", "value": "48213", "scope": "crm"}],
+       "occurred_at": "2026-09-22T17:00:00Z"}]}'
+```
+</CodeGroup>
+
+`identify()` sai na hora, fora da fila do SDK: handles novos entram no perfil na mesma resposta, e quando os handles já eram de dois perfis, a união roda antes da resposta, sob a trava dos dois perfis e com as mesmas proteções de toda união. Se um worker segura um dos perfis por mais de 2 segundos, a união fica para a tarefa de identidade, que roda em seguida.
+
+## Proteções contra união errada
+
+- Dois perfis que já têm handle com nível V3 ou mais nunca se unem sozinhos; só por união forçada, com ator e motivo.
+- Valores de teste e marcadores de QA ficam bloqueados por tipo, numa lista fixa que você pode estender.
+- Cada perfil tem até três telefones por tipo, e o mais fraco é rebaixado quando chega o quarto; documento (um por país) e `system_id` (um por namespace) não se repetem, e o segundo valor fica num perfil à parte. A ingestão nunca é recusada.
+- Handle ligado a três ou mais ids diferentes do mesmo tipo em 24 horas, ou a cinco em 30 dias (tablet de loja, número de PABX, WhatsApp de atendimento), vira `ambiguous`: não une mais nada, não serve para leitura, e o mesmo passo desfaz o que ele uniu: o handle sai do perfil e as pessoas que ele ligou antes de parecer compartilhado se separam, união por união. Uma pessoa com dois ou três e-mails ao longo de um mês fica com o número.
+- Número que fica mais de 180 dias sem aparecer e volta num evento pode ter mudado de dono, e o mesmo vale para um número que os sistemas da empresa ligam ao id de cadastro de outro cliente enquanto o perfil dele tem um id diferente. O handle antigo fica suspenso no perfil antigo (`suspected_recycled`), com a memória daquela pessoa, e o número volta como um handle novo: os eventos de quem tem o número agora constroem um **perfil provisório** só deles, e a leitura por esse número traz só o que essa pessoa disse desde então, nunca o que o dono anterior contou. Só um id de registro do perfil anterior (`system_id`, `app_user_id` ou `gov_id_hmac`), vindo dos sistemas da empresa, de um login ou de um evento comum de um sistema de registro, com método `explicit_identify`, `login` ou `system_import`, devolve o número ao perfil antigo. Um código mandado para o próprio número, ou um e-mail digitado, nunca o traz de volta: quem está com o aparelho hoje passaria nele.
+- **Uma separação vale.** Dois perfis que alguém separou (pelo `unmerge` ou retirando a asserção que os unia) não voltam a se unir sozinhos: quando o mesmo cadastro ou o mesmo evento chega de novo com os dois handles, a união vira uma [sugestão](#governar-a-identidade) com `features.after_split`, e só uma pessoa que a aceite, que afirme o par ou que force a união os junta de novo.
+- Troca de número ou de BSUID cria um alias, nunca uma união automática: `identify()` aceita o método `channel_rotation` para dizer isso, e uma asserção com esse método nunca une perfis.
+- Pessoa e organização nunca se unem. O que liga as duas é um vínculo.
+- Um handle que uma afirmação (`declared`, ou `explicit_identify` sem id de cadastro) liga a um perfil é **provisório** (`provisional` no handle): resolve para o perfil, para a continuidade, mas uma leitura por ele fica no máximo em V1, com `reason: unconfirmed_link`, seja o que for que a conversa provou naquele handle, até a ligação ser confirmada por um evento de sistema ou um `login` que o amarre a um id de cadastro confirmado do perfil, ou por um operador que afirme o par. Um OTP nunca confirma: prova a posse do número, não que o número é daquele cliente. O que se liga depois por um handle provisório é provisório também; uma separação que deixa só handles provisórios num perfil tira o teto. Uma afirmação nunca eleva o nível dos handles que nomeia, os provisórios são os primeiros rebaixados quando o perfil passa do limite, e uma afirmação que não nomeia nada conhecido não liga nada. Perfis ligados por um evento de sistema (o cadastro do CRM que nomeia telefone, e-mail e ids) continuam se unindo na hora.
+- **A memória que chegou por um vínculo não confirmado fica com esse vínculo.** Todo item de memória fica ancorado no handle por onde chegou, e enquanto o handle é provisório os itens dele e os do resto do perfil ficam separados: quem lê pelo handle provisório vê os itens dele e os confirmados (em V1); quem lê por um handle confirmado, por id de perfil ou por objeto, os agentes internos e as chaves de fonte veem só os itens dos handles confirmados; no Console, só os papéis `admin` e `security` veem tudo, cada item marcado `unconfirmed_link`. Isso vale para o contexto compilado e a reserva, os turnos ao vivo, os encaixes e os valores fixados, a busca e a linha do tempo, o MCP, a simulação de política e o pacote de exportação; um padrão sustentado só por itens escondidos fica de fora, e os resumos de cauda são refeitos com as conversas visíveis. Uma conversa só por vínculos não confirmados reconcilia, supera e fecha só contra os próprios itens, e a extração dela não vê os fatos confirmados; uma conversa por handles confirmados nunca toca os itens de um vínculo não confirmado. A confirmação torna o handle membro comum e tudo volta a ser compartilhado; uma separação leva os itens com o handle. Os bytes fixados de uma conversa mudam uma vez, na ligação, na confirmação ou na separação; um perfil sem handle provisório lê como sempre. O que o perfil deriva segue a mesma regra: padrões, avisos e os webhooks deles, os Insights (o pseudônimo lista o handle não confirmado à parte, em `hidden_handle_ids`), os resumos guardados e as notas destiladas dos agentes contam só os handles confirmados; uma confirmação, uma união ou uma separação recomputam tudo isso na hora, e uma separação leva os itens junto.
+
+Um handle desconhecido, ou um em dúvida (`ambiguous`, `blocked` ou `suspected_recycled`), não leva a perfil nenhum: a leitura é um primeiro contato, com contexto vazio e comprovante, nunca um erro, e nada do dono anterior aparece. Na dúvida, a memória não revela nada; o agente lê de novo por um handle que não está em dúvida.
+
+## O que uma leitura aquecida vê
+
+Uma leitura de `context()` com o contexto aquecido não consulta o banco: o processo de leitura guarda, entre leituras, para quem um handle ou um id de perfil resolve e o que uma conversa provou. Cada banco de espaço mantém um registro de mudanças, escrito por gatilhos na própria transação de quem grava handles, perfis, vínculos e sessões, e o processo de leitura o consulta a cada 2 segundos, junto com o feed de privacidade. Uma união, uma separação, um handle que virou `ambiguous` ou saiu do perfil, um apagamento e o fim de uma conversa chegam às leituras aquecidas na consulta seguinte, em cerca de 2 segundos; uma leitura logo depois da gravação pode ainda ver o estado anterior nesse intervalo. Um `verify` conta na hora: a prova guardada só serve às leituras que não pedem mais do que ela provou, e uma leitura que pede mais vai ao banco. Um handle que a leitura não conhece, ou em dúvida, nunca é guardado: vai ao banco a cada vez. Um espaço cujo registro não foi consultado nos últimos 5 segundos não serve nada da memória do processo, e uma pausa de mais de 30 segundos entre duas consultas descarta o que ele guardava.
+
+## Governar a identidade
+
+O seu time corrige a identidade pelas rotas de governança, com uma pessoa do Console que tenha o papel `security` ou `integration`, ou com uma chave de fonte de escopo `admin`. Toda escrita exige o cabeçalho `Idempotency-Key` e é aplicada sob a trava do perfil, em ordem. A que entra na fila responde **202** com o id da operação; a que não precisa de fila responde **200**: asserção entre handles do mesmo perfil, asserção entre pessoa e organização, que vira vínculo, e bloqueio de um valor ainda não visto. Criar um vínculo responde 201.
+
+| O quê | Rota |
+|---|---|
+| Ver por que dois handles são um perfil só | [`GET /v1/identity/assertions`](/api/identity-assertions), filtrando por `profile_id` e `state` (`applied`, `pending`, `rejected`) |
+| Afirmar que handles são do mesmo sujeito | [`POST /v1/identity/assertions`](/api/identity-assertions-create), com `handles`, `method` e `reason` |
+| Desfazer uma ligação errada | [`POST /v1/identity/assertions/{assertion_id}/retract`](/api/identity-assertion-retract) |
+| Forçar uma união que as proteções recusaram | [`POST /v1/identity/merge`](/api/identity-merge), com `profile_ids`, `force` e `reason` |
+| Separar um perfil | [`POST /v1/identity/unmerge`](/api/identity-unmerge), com `profile_id` e os `handle_ids` ou `assertion_ids` a separar |
+| Impedir que um valor ligue perfis | [`POST /v1/identity/handles/block`](/api/identity-handles-block) |
+
+A Niadra também propõe ligações que não consegue provar, como dois e-mails do Gmail que só diferem por ponto ou por um sufixo com +, dois perfis que um `identify` sem id de cadastro (`declared` ou `explicit_identify`) tentou unir (`features.agree` traz o método) ou que uma separação manteve longe (`features.after_split`). A pontuação é de cada par de perfis e soma o que os handles dos dois têm em comum: a mesma parte local de e-mail em domínios diferentes, sozinha, não basta, nem os mesmos 8 últimos dígitos de telefone; as duas juntas, sim. Um par de perfis descartado não volta para revisão, seja qual for o par de handles que concorde depois. Ela nunca aplica sozinha: [`GET /v1/identity/suggestions`](/api/identity-suggestions) lista as sugestões com um `score` e os sinais que o sustentam, [aceitar](/api/identity-suggestion-accept) transforma uma delas numa asserção `accepted_suggestion`, e [descartar](/api/identity-suggestion-dismiss) encerra a sugestão.
+
+Cada handle de um perfil diz quanto pesa, em `weight`: `hint` (um domínio de e-mail, um id anônimo), `declared`, `verified` (provou V2 ou V3), `authenticated` (V4) ou `system` (o id de um sistema de registro ou o registro de uma organização), derivado do tipo e do maior nível que o handle já provou. Para achar um perfil a partir de um handle, use [`POST /v1/profiles/search`](/api/profiles-search): o valor vai no corpo e nunca entra em log. [`GET /v1/profiles/{profile_id}`](/api/profile) devolve os handles, os vínculos, o tipo de sujeito e o pseudônimo, com a máscara do papel de quem lê. Para navegar sem saber um handle, [`GET /v1/profiles`](/api/profiles) lista os perfis do espaço pela atividade mais recente, uma página por vez, com o pseudônimo, o tipo e até três handles sempre mascarados, seja qual for o papel; um perfil apagado não aparece, e cada página deixa um comprovante.
+
+## Níveis de verificação
+
+O mesmo cliente recebe contextos diferentes conforme o quanto a conversa provou quem ele é:
+
+| Nível | Significado | Exemplo |
+|---|---|---|
+| `V0` | Autodeclarado | "Sou a Marina" num chat anônimo |
+| `V1` | Plausível pelo canal | Chegou daquele número, sem atestado forte |
+| `V2` | Atestado pelo canal | Chamada com atestado de rede A, remetente autenticado do WhatsApp |
+| `V3` | Desafiado | OTP no mesmo canal ou login no seu app |
+| `V4` | Documental ou por atendente | Conferido contra o sistema de registro ou por uma pessoa |
+| `no_customer` | Tarefa sem cliente presente | Agente interno de cobrança |
+
+A sua política diz, por categoria de memória, o nível mínimo. Numa categoria com o [espelho](/concepts/privacy#o-espelho-da-política) ligado, o que o cliente disse ele mesmo volta para ele a partir de V1, seja qual for o mínimo; o que a empresa guarda sobre ele fica no nível da categoria. O contexto informa em `withheld` quantos itens ficaram retidos: o agente sabe que verificar libera mais, sem ver o conteúdo, e em V0 o próprio contexto lhe diz para pedir a confirmação da identidade antes de responder sobre eles. `no_customer` fica fora da escala e só é aceito de fontes com audiência `internal_agent`; esse contexto nunca vai ao cliente final.
+
+## Nível efetivo
+
+O nível que vale é o menor entre três: o que você pediu, o **teto da fonte** e o que **esta conversa** provou. O teto é atributo da fonte, definido quando ela é criada: V2 por padrão, no máximo V3 para uma fonte que atende o cliente (o OTP que ela consegue rodar), V4 só para fontes com audiência `human` ou `internal_agent`, e `no_customer` só para `internal_agent`. Uma fonte com teto acima disso é recusada com 422 `verification_not_allowed`. Uma chave de agente vazada não consegue declarar V4.
+
+A prova é da conversa, não do handle. Vale o nível mais alto, ainda dentro da validade, que aquela conversa ou tarefa provou. O passado do número nunca conta: a próxima chamada do mesmo número, que pode ser falsificada ou de alguém que herdou a linha, começa de novo pelo que ela mesma provar. Sem `conversation_id` nem `task_id`, nada foi provado, e a leitura fica em V0.
+
+A resposta do contexto mostra os dois lados em `verification`: `requested`, `effective` e, quando o efetivo é menor, `reason` (`source_ceiling`, `not_proven` ou `unconfirmed_link`, quando a leitura passou por um handle provisório).
+
+## Elevar o nível
+
+O nível de uma conversa sobe de dois jeitos, nunca por inferência. O primeiro é o próprio canal: um turno do cliente que chega com `verification_hint` prova até V2 para aquela conversa, nunca acima do teto da fonte, e o atestado de rede de uma chamada (STIR/SHAKEN e equivalentes) prova V2 no nível A e V1 nos níveis B e C. Dica em turno do agente ou em mensagem de saída não prova nada. O segundo é o evento `verify`, para desafio, login ou conferência: ele exige `conversation_id` ou `task_id`, vale só ali e pode ter validade (`valid_until`). Quando a validade passa, a prova vence, e o nível volta ao que um turno novo do cliente provar pelo canal. A prova é da conversa, não de uma sessão aberta: uma sessão que ninguém encerrou fecha após 3 minutos de silêncio para seus turnos virarem memória, e a prova continua valendo enquanto um turno novo ainda reabriria essa sessão (a inatividade do canal desde o último turno, [cerca de 20 minutos no WhatsApp](/concepts/events#conversas-tarefas-e-sessões)), ou até o `valid_until`, se ele vier antes. Uma chamada provada no início e lida por minutos sem turno mantém o nível, os episódios e os itens que abre. Uma conversa encerrada com `conversation.ended` ou passada adiante não prova nada depois do fim, nem uma que ficou em silêncio por mais que a inatividade do canal. Um `verify` de nível menor nunca apaga uma prova maior ainda válida. Depois dele, peça um `context()` novo: o SDK já descarta o contexto guardado daquela conversa.
+
+<CodeGroup>
+```python Python
+niadra.verify(
+    "otp_whatsapp",
+    "V3",
+    handle=phone("+14155550123"),
+    conversation_id="wa-8812",
+)
+ctx = niadra.context(subject=phone("+14155550123"), verification="V3", conversation_id="wa-8812")
+```
+```typescript TypeScript
+await niadra.verify({
+  handle: handles.phone("+14155550123"),
+  method: "otp_whatsapp",
+  level: "V3",
+  conversation_id: "wa-8812",
+});
+const ctx = await niadra.context({ subject: handles.phone("+14155550123"), verification: "V3", conversation_id: "wa-8812" });
+```
+</CodeGroup>
+
+Os métodos são `otp_whatsapp`, `otp_sms`, `login`, `kba`, `network_attestation` e `human_agent`. Um `verify` acima do teto da fonte volta no 207 com o código `verification_not_allowed`.
+
+## Beneficiários
+
+Uma pessoa compra para um dependente, pergunta por um plano para os pais, escolhe um presente. Nos [sinais](/concepts/signals) do cliente, cada interação diz para quem é (`for`): `self`, o próprio cliente; `beneficiary:<id>`, uma pessoa sob o perfil dele, como um dependente, com um id que a sua empresa dá e a Niadra nunca resolve para um perfil próprio; ou `gift`, um presente. Os sinais ficam separados por beneficiário: o tamanho de quem vai usar decide a busca, o que o cliente compra para um dependente nunca vira o gosto dele, e um presente vai para um balde descartável que nunca vira atributo de ninguém. O beneficiário é dado do cliente, não um perfil: um apagamento do cliente leva os sinais de todos os beneficiários dele, e o pacote do titular os traz.
+
+Um beneficiário nunca é adivinhado: uma entrega em outro endereço, por si, não cria um, e o bloco de restrições pergunta `for_whom` quando a conversa deixa a dúvida. Isso é diferente de um [vínculo](/concepts/accounts) entre uma pessoa e uma organização, que liga dois perfis com um papel.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="O contexto e as views" href="/concepts/context">
+    o que cada nível libera no contexto.
+  </Card>
+  <Card title="Contas e parceiros" href="/concepts/accounts">
+    organizações e vínculos com papel.
+  </Card>
+  <Card title="Listar asserções" href="/api/identity-assertions">
+    a API do registro de identidade.
+  </Card>
+  <Card title="Sugestões de identidade" href="/api/identity-suggestions">
+    ligações para revisar, nunca aplicadas sozinhas.
+  </Card>
+</CardGroup>

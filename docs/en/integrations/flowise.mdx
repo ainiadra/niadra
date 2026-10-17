@@ -1,0 +1,48 @@
+---
+title: "Flowise"
+description: "Two Flowise nodes: a memory with the customer's context and a tool with the customer's history, for the Tool Agent and the Conversational Agent."
+---
+
+`flowise-nodes-niadra` brings two nodes for Flowise:
+
+- **Niadra Customer Memory** (Memory): connect it to an agent's Memory input (Tool Agent, Conversational Agent). Before every model call it hands the agent the customer's context as a system message right after the agent's system prompt, followed by the chat's own messages (from the memory you connect as **Chat History**, or the last 100 kept in the process). What the agent adds is recorded as the customer's and the agent's turns.
+- **Niadra Customer History** (Tools): connect it to an agent's Tools input. It gives the model `search_customer_history`, `get_customer_timeline` and `open_history_item` (and `search_agent_memory` with **Agent Memory** on), bound to the chat's customer. No tool has a parameter that names a customer.
+
+## Install
+
+Flowise loads nodes from its components package. Build and copy, from `packages/flowise-nodes-niadra` in the TypeScript SDK repository:
+
+```sh
+pnpm build                                   # dist/NiadraMemory.js, dist/NiadraTools.js, the icon
+cp dist/*.js dist/niadra.svg <flowise>/packages/components/dist/nodes/niadra/
+cd <flowise>/packages/components && pnpm add @niadra/sdk
+```
+
+Restart Flowise; the nodes appear under Memory and Tools. The package depends on `@niadra/sdk`. Tested with `@langchain/core` 1.2 through the same prompt the Tool Agent builds.
+
+## The five primitives
+
+| Primitive | How the nodes wire it |
+|---|---|
+| Context | The memory node hands over the pack as a system message right after the agent's system prompt |
+| Turns | What the agent adds to the memory is recorded as the customer's and the agent's turns |
+| Tools | The tool node gives the model the three history tools, bound to the chat's customer |
+| Verification | The field for the verification level the chat proved, on both nodes |
+| Handoff | Outside the nodes; use the SDK or the API |
+
+## Limits
+
+- Both nodes take the customer's handle (bind it to a variable or the override config, never to text the model writes), the channel, the verification level the chat proved and the key (or the `NIADRA_API_KEY` environment variable). The Flowise chat session is the Niadra conversation.
+- When Niadra is slow or down, the agent gets the chat's messages alone.
+- The node interface types and the memory node's layout come from Flowise (Apache 2.0), credited in `NOTICE`.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="n8n" href="/en/integrations/n8n">
+    the n8n community node.
+  </Card>
+  <Card title="Langflow" href="/en/integrations/langflow">
+    the three Langflow components.
+  </Card>
+</CardGroup>

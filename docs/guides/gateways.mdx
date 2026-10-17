@@ -1,0 +1,125 @@
+---
+title: "Gateways e o token de contato"
+description: "Faça o seu gateway ou middleware deixar sair só as mensagens ativas que a coordenação permitiu, conferindo um token assinado sem falar com a Niadra."
+---
+
+Uma [decisão de coordenação](/concepts/coordination#perguntar-antes-de-agir) é um aviso até o ponto que manda a mensagem a impor. Esse ponto é seu: o gateway de WhatsApp, o disparador de e-mail, o middleware por onde toda mensagem ativa passa. O **token de contato** deixa esse ponto impor a decisão sem chamar ninguém: a Niadra assina, com a chave Ed25519 do espaço, que um contato de saída de uma finalidade, num canal, para um destino, por um gateway, pode sair nos próximos dois minutos, e o gateway confere a assinatura e os campos com as chaves públicas que já tem em memória. Sem token válido, a mensagem não sai. É assim que `marketing`, `retention` e `collection` falham fechadas mesmo com a Niadra fora do alcance, e é a única barreira que a Niadra não é.
+
+## Antes de começar
+
+- A funcionalidade `coordination` ligada no espaço.
+- O gateway declarado no documento `coordination`: um `gateway_id` (`^[a-z][a-z0-9_]{0,39}$`), os canais que ele serve e `secret_ref`, a referência à chave de 32 bytes que ele compartilha com a Niadra, gravada no cofre do espaço por [`PUT /v1/secrets/{kind}/{secret_id}`](/api/secrets). Um canal com um gateway só não precisa de `gateway_id` na pergunta; com vários, a pergunta nomeia um, ou é recusada.
+- As finalidades que precisam de token, em `purposes[].token`: `marketing`, `retention` e `collection` por padrão. Mensagens do cliente, `transactional` e `service` nunca precisam.
+- Uma chave de fonte para o gateway, com que ele lê as chaves públicas do espaço (a rota é pública) e, se quiser, declara `contact.made` (escopo `coordinate`).
+
+## O caminho de uma mensagem
+
+1. O agente pergunta ([`POST /v1/coordination/check`](/api/coordination-check)) com `direction: outbound`, a finalidade, o canal e, quando há mais de um gateway no canal, o `gateway_id`. Um `allow` de uma finalidade que precisa de token traz `contact_token`.
+2. O agente entrega a mensagem ao gateway com o token num cabeçalho ou num campo de metadado do pedido de despacho, nunca na URL.
+3. O gateway confere o token contra o canal e o destino da mensagem, deixa a mensagem sair uma vez e declara `contact.made` com o `jti` do token.
+4. Uma mensagem sem token, ou com token recusado, não sai. O agente não tenta o mesmo token de novo: pede uma decisão nova.
+
+## O token
+
+```text
+nct1.<payload>.<assinatura>
+```
+
+O payload é JSON compacto, com os membros nesta ordem: `kid` (a chave que assinou), `space`, `jti` (o id do token, um UUIDv7 igual ao `decision_id` da pergunta), `purpose`, `channel`, `rcpt`, `gateway`, `iat` e `exp` (em segundos Unix, `exp` até 120 segundos depois de `iat`). A assinatura é Ed25519 sobre os bytes ASCII de `nct1.<payload>`, como aparecem no token. Nada nele é dado pessoal: o destino vai só como `rcpt`, o HMAC-SHA256 em base64url da forma canônica do destino (`phone:+5511987654321`, `email:ana@example.com`) com a chave compartilhada do gateway, que só o gateway e a Niadra têm. Um token tem no máximo 1.024 caracteres.
+
+## As chaves públicas
+
+[`GET /.well-known/niadra-contact-keys.json?space=<id do espaço>`](/api/contact-keys) devolve o conjunto de JWKs do espaço (RFC 8037: `kty: OKP`, `crv: Ed25519`, `x`, `kid`, `space`, `status`, `not_after`). Uma chave é `active` ou `retiring`: a em retirada não assina nada novo e ainda verifica o que assinou, até `not_after`; a Niadra gira publicando a próxima como ativa e a anterior em retirada por ao menos a vida de um token. Guarde o conjunto em cache, renove ao menos de hora em hora e, diante de um `kid` desconhecido, renove no máximo uma vez por minuto antes de recusar. A resposta vem com `Cache-Control: public, max-age=300`. Um gateway nunca para de conferir porque a Niadra está fora do alcance: ele fica com o último conjunto que tem, por mais velho que esteja, e recusa o token que não consegue conferir.
+
+## Conferir
+
+Os SDKs trazem a conferência, com as chaves lidas e guardadas por você:
+
+<CodeGroup>
+```python Python
+from niadra import Niadra
+from niadra.coordination.token import ContactTokenError
+from niadra.models.coordination import ContactMade, ContactMadeDetail
+
+niadra = Niadra()  # a source key of the gateway; pip install 'niadra[gateway]'
+gateway = niadra.contact_gateway("wa_gateway", space=SPACE_ID, key=GATEWAY_SHARED_KEY)
+
+
+def dispatch(message):
+    try:
+        claims = gateway.verify(message.token, channel="whatsapp", destination=f"phone:{message.to}")
+    except ContactTokenError as refused:
+        log.warning("refused %s", refused.code)  # never the destination
+        return
+    provider.send(message)
+    niadra.api.declare(
+        ContactMade(kind="contact.made", agent="wa_gateway", detail=ContactMadeDetail(jti=claims.jti, purpose=claims.purpose, channel="whatsapp", gateway_id="wa_gateway")),
+        idempotency_key=str(claims.jti),
+    )
+```
+```typescript TypeScript
+import { Niadra, NiadraContactTokenError } from "@niadra/sdk";
+
+const niadra = new Niadra(); // a source key of the gateway
+const gateway = niadra.contactGateway("wa_gateway", { space: SPACE_ID, key: GATEWAY_SHARED_KEY });
+
+async function dispatch(message: Outbound) {
+  let claims;
+  try {
+    claims = await gateway.verify(message.token, { channel: "whatsapp", destination: `phone:${message.to}` });
+  } catch (refused) {
+    if (refused instanceof NiadraContactTokenError) log.warn("refused", refused.code); // never the destination
+    return;
+  }
+  await provider.send(message);
+  await niadra.api.declare({ kind: "contact.made", agent: "wa_gateway", detail: { jti: claims.jti, purpose: claims.purpose, channel: "whatsapp", gateway_id: "wa_gateway", unchecked: false } }, { idempotency_key: claims.jti });
+}
+```
+</CodeGroup>
+
+O gateway confere treze passos em ordem e recusa com o primeiro código que se aplica: `malformed`, `unsupported_version`, `unknown_key`, `bad_signature`, `wrong_space`, `wrong_gateway`, `lifetime_too_long`, `not_yet_valid` (`iat` mais de 5 segundos no futuro), `expired` (`exp` passou, com 5 segundos de folga), `wrong_channel`, `wrong_recipient` (comparação em tempo constante) e `replayed`. Depois de aceitar, ele lembra o `jti` até `exp + 5` segundos e o recusa de novo; um gateway com vários processos compartilha essa memória (a interface `SeenTokens` em Python e em TypeScript, com `add(jti, until)`) ou roteia as mensagens de um token para um processo só. `MemorySeen` é a memória de um processo. Um destino que não é telefone nem e-mail válido é `invalid_handle`, e um tipo de handle fora da lista, `unsupported_type`.
+
+Um gateway que não roda os SDKs confere os mesmos passos com qualquer biblioteca Ed25519 e HMAC. O token é `nct1.<payload>.<signature>`: `<payload>` é o base64url (sem preenchimento) do payload, JSON compacto com os membros nesta ordem: `kid`, `space`, `jti`, `purpose`, `channel`, `rcpt`, `gateway`, `iat`, `exp`; `<signature>` é o base64url da assinatura Ed25519 de 64 bytes dos bytes ASCII de `nct1.<payload>`, exatamente como chegaram, nunca decodificados e recodificados antes. Um token tem no máximo 1.024 caracteres. Os treze passos, em ordem:
+
+| Passo | Recusa com |
+|---|---|
+| 1. Exatamente três segmentos, nenhum vazio. | `malformed` |
+| 2. O primeiro segmento é `nct1`. | `unsupported_version` |
+| 3. Os dois segmentos se decodificam em base64url; a assinatura tem 64 bytes; o payload é um objeto JSON com exatamente esses membros, nos tipos deles. | `malformed` |
+| 4. O conjunto de chaves tem o `kid` do payload para o `space` do payload. | `unknown_key` |
+| 5. A assinatura confere com essa chave. | `bad_signature` |
+| 6. `space` é o espaço do gateway. | `wrong_space` |
+| 7. `gateway` é este gateway. | `wrong_gateway` |
+| 8. `exp` vem depois de `iat`, por no máximo 120 segundos. | `lifetime_too_long` |
+| 9. `iat - 5 <= agora`. | `not_yet_valid` |
+| 10. `agora < exp + 5`. | `expired` |
+| 11. `channel` é o canal da mensagem. | `wrong_channel` |
+| 12. `rcpt` é igual ao base64url do HMAC-SHA256, com a chave de 32 bytes do gateway, da forma canônica do destino (`phone:+5511987654321`, `email:ana.souza@example.com`), comparado em tempo constante. | `wrong_recipient` |
+| 13. Este `jti` não passou antes. | `replayed` |
+
+Guarde o conjunto de chaves em cache e o atualize pelo menos de hora em hora; diante de um `kid` desconhecido, atualize no máximo uma vez por minuto antes de recusar. Os dois repositórios de SDK trazem `spec/vectors/contact-token.v0.json`: tokens de teste com o resultado esperado de cada um, assinados com uma chave privada de teste, nunca uma real.
+
+## Declarar o contato
+
+`contact.made` fecha o ciclo: com o `jti` do token, o contato conta uma vez no registro de contatos e no orçamento da finalidade; dois `contact.made` com o mesmo `jti` mostram um token usado duas vezes, que o relatório de sombra conta em `tokens_used_twice`. Uma mensagem que saiu numa pergunta que a Niadra não respondeu (`service` fora do alcance) é declarada com `unchecked: true`, e conta no orçamento mesmo assim. O agente que faz a pergunta pode declarar em vez do gateway (`conversation.declare.contact_made(decision, ...)` nos SDKs); o que importa é que alguém declare.
+
+## Quando o despacho é de terceiro
+
+Onde o ponto de despacho é um software de terceiro que não confere token, a coordenação é [sombra mais supressão](/concepts/coordination#níveis-de-adoção): o relatório de sombra conta os conflitos que uma pergunta teria apontado, e a [lista de supressão](/concepts/coordination#a-lista-de-supressão) continua sendo o piso que o terceiro honra por conta própria, lendo-a a cada 60 segundos.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Coordenação" href="/concepts/coordination">
+    a pergunta, a decisão e os efeitos que acontecem uma vez só.
+  </Card>
+  <Card title="Chaves públicas do token de contato" href="/api/contact-keys">
+    a referência da rota pública.
+  </Card>
+  <Card title="Declarar o que aconteceu" href="/api/coordination-declare">
+    `contact.made` e as outras declarações.
+  </Card>
+  <Card title="Agentes de varejo" href="/guides/retail-agents">
+    um orçamento de marketing e o gateway de WhatsApp.
+  </Card>
+</CardGroup>

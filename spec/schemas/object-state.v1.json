@@ -1,0 +1,1156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/object-state.v1.json",
+  "title": "Niadra Object State v1",
+  "description": "One object as a state read serves it: fields with four logical values, their stamps and source, freshness computed at the read, computed values, lifecycle, timers, readings and what may not be claimed. See spec/object-state.md.",
+  "$defs": {
+    "ContentMarker": {
+      "additionalProperties": false,
+      "description": "A content field whose text Niadra does not hold (`pointer`, `hash_only`), or holds under scan.",
+      "properties": {
+        "mode": {
+          "enum": [
+            "full",
+            "pointer",
+            "hash_only"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "pointer": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where the SDK reads the text inside the company's boundary.",
+          "title": "Pointer"
+        },
+        "scan": {
+          "enum": [
+            "pending",
+            "clean",
+            "flagged"
+          ],
+          "title": "Scan",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode",
+        "scan"
+      ],
+      "title": "ContentMarker",
+      "type": "object"
+    },
+    "DerivedState": {
+      "additionalProperties": false,
+      "description": "A field the type derives from the related objects of one relation (a look's pieces), computed at this read and never stored. A related object whose data is not known leaves it `unobserved`, unless the answer is already decided.",
+      "properties": {
+        "v": {
+          "default": null,
+          "title": "V"
+        },
+        "logic": {
+          "enum": [
+            "yes",
+            "no",
+            "unobserved"
+          ],
+          "title": "Logic",
+          "type": "string"
+        },
+        "over": {
+          "description": "The related objects it was computed over.",
+          "minimum": 0,
+          "title": "Over",
+          "type": "integer"
+        },
+        "unknown": {
+          "description": "How many of them were not known: out of the working set, not an exact match (`status_field`), or with the data the condition reads not observed.",
+          "minimum": 0,
+          "title": "Unknown",
+          "type": "integer"
+        },
+        "pieces_out": {
+          "description": "When it is not `yes`, the related objects, as `type:namespace:id`, that kept it from `yes`: for `all` and `any` the ones the condition does not hold for or that are not known, for `count`, `min` and `max` the ones not known. In the relation's order, the first 10.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Pieces Out",
+          "type": "array"
+        },
+        "partial": {
+          "default": false,
+          "description": "The relation names more related objects than one read takes: the first ones were read and the rest counted as not known, so `over` and `unknown` are at least what they say.",
+          "title": "Partial",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "logic",
+        "over",
+        "unknown"
+      ],
+      "title": "DerivedState",
+      "type": "object"
+    },
+    "FieldState": {
+      "additionalProperties": false,
+      "description": "One field as a read serves it: the value with its logical value, stamps, source and observer, and the freshness computed now against the type's current rule.",
+      "properties": {
+        "v": {
+          "default": null,
+          "title": "V"
+        },
+        "logic": {
+          "enum": [
+            "yes",
+            "no",
+            "unobserved",
+            "known_defect"
+          ],
+          "title": "Logic",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "fresh",
+            "stale",
+            "expired"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "age_s": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Seconds since `observed_at`.",
+          "title": "Age S"
+        },
+        "observed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the source observed the value.",
+          "title": "Observed At"
+        },
+        "src": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Src"
+        },
+        "observer": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observer"
+        },
+        "valid_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid At"
+        },
+        "known_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When Niadra first knew it; never moves.",
+          "title": "Known At"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "claim_safe": {
+          "title": "Claim Safe",
+          "type": "boolean"
+        },
+        "completeness": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completeness"
+        },
+        "masked": {
+          "default": false,
+          "description": "The reader's access masks the value: `v` is absent.",
+          "title": "Masked",
+          "type": "boolean"
+        },
+        "was": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviousValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "content": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContentMarker"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "logic",
+        "status",
+        "claim_safe"
+      ],
+      "title": "FieldState",
+      "type": "object"
+    },
+    "ObjectMemoryOut": {
+      "additionalProperties": false,
+      "description": "What the owner and participants of an object said about it (memory bound to the object), newest first, at most 20 of each kind, as this reader may read it.",
+      "properties": {
+        "said": {
+          "description": "Observations about the object.",
+          "items": {
+            "$ref": "#/$defs/SaidAbout"
+          },
+          "title": "Said",
+          "type": "array"
+        },
+        "instructions": {
+          "description": "What must or must not be done about the object.",
+          "items": {
+            "$ref": "#/$defs/SaidAbout"
+          },
+          "title": "Instructions",
+          "type": "array"
+        },
+        "items": {
+          "description": "Promises, disputes and requests about the object still open.",
+          "items": {
+            "$ref": "#/$defs/SaidAbout"
+          },
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "title": "ObjectMemoryOut",
+      "type": "object"
+    },
+    "OutcomeState": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "description": "A canonical state of the type, or `expired_without_outcome`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "State",
+          "type": "string"
+        },
+        "final": {
+          "title": "Final",
+          "type": "boolean"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "At"
+        }
+      },
+      "required": [
+        "state",
+        "final"
+      ],
+      "title": "OutcomeState",
+      "type": "object"
+    },
+    "PreviousValue": {
+      "additionalProperties": false,
+      "description": "A field's value before its latest change, kept for the fields that declare `track_changes`.",
+      "properties": {
+        "v": {
+          "default": null,
+          "title": "V"
+        },
+        "logic": {
+          "enum": [
+            "yes",
+            "no",
+            "unobserved",
+            "known_defect"
+          ],
+          "title": "Logic",
+          "type": "string"
+        }
+      },
+      "required": [
+        "logic"
+      ],
+      "title": "PreviousValue",
+      "type": "object"
+    },
+    "ReadingResult": {
+      "additionalProperties": false,
+      "description": "A named reading's value, as niadra-expr computes it: the logical value, and the kind and value when known (dates as `YYYY-MM-DD`, times in UTC, durations in milliseconds).",
+      "properties": {
+        "logic": {
+          "enum": [
+            "yes",
+            "no",
+            "unobserved",
+            "known_defect"
+          ],
+          "title": "Logic",
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "enum": [
+                "bool",
+                "number",
+                "string",
+                "duration",
+                "date",
+                "datetime",
+                "list"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type"
+        },
+        "v": {
+          "default": null,
+          "title": "V"
+        },
+        "absent": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Absent"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For a reading that includes its inputs: the derived object's inputs, by the name its type gives them, as `type:namespace:id`.",
+          "title": "Inputs"
+        }
+      },
+      "required": [
+        "logic"
+      ],
+      "title": "ReadingResult",
+      "type": "object"
+    },
+    "Refetch": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "priority": {
+          "enum": [
+            "high",
+            "normal",
+            "low"
+          ],
+          "title": "Priority",
+          "type": "string"
+        },
+        "admitted": {
+          "title": "Admitted",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reason",
+        "priority",
+        "admitted"
+      ],
+      "title": "Refetch",
+      "type": "object"
+    },
+    "Refusal": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "action": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "Refusal",
+      "type": "object"
+    },
+    "SaidAbout": {
+      "additionalProperties": false,
+      "description": "One row of what people and agents said about an object, kept under the person who said it.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "observation",
+            "item",
+            "instruction"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "id": {
+          "description": "The fact, open item or instruction it is.",
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "said_at": {
+          "format": "date-time",
+          "title": "Said At",
+          "type": "string"
+        },
+        "audience": {
+          "description": "`shared` reaches every participant of the object, a customer-facing agent included; `internal`, the internal readers only.",
+          "enum": [
+            "shared",
+            "internal"
+          ],
+          "title": "Audience",
+          "type": "string"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The role of who said it on the object (`owner`, `participant`, `lawyer`).",
+          "title": "Role"
+        },
+        "by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The handle of who said it; only in the Console.",
+          "title": "By"
+        },
+        "predicate": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Predicate"
+        },
+        "item_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "promise",
+                "dispute",
+                "request"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Item Kind"
+        },
+        "due_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Due At"
+        },
+        "overdue": {
+          "default": false,
+          "title": "Overdue",
+          "type": "boolean"
+        },
+        "strength": {
+          "anyOf": [
+            {
+              "enum": [
+                "must",
+                "must_not"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strength"
+        },
+        "attr": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attr"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "observes": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The field of the object's type an observation is about: shown beside the value the system of record holds, never in its place.",
+          "title": "Observes"
+        },
+        "recorded": {
+          "default": null,
+          "description": "The value the system of record holds for `observes`.",
+          "title": "Recorded"
+        },
+        "diverges": {
+          "default": false,
+          "description": "The value said differs from the one recorded: a data issue was opened.",
+          "title": "Diverges",
+          "type": "boolean"
+        },
+        "claim_safe": {
+          "const": false,
+          "default": false,
+          "description": "Always false: what was said may be reported as said, never stated as the record.",
+          "title": "Claim Safe",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "text",
+        "said_at",
+        "audience"
+      ],
+      "title": "SaidAbout",
+      "type": "object"
+    },
+    "StateRef": {
+      "additionalProperties": false,
+      "description": "An object of the type registry: a subject's or a shared one, whose key may name a variant.",
+      "properties": {
+        "type": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Type",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "variant": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Variant"
+        }
+      },
+      "required": [
+        "type",
+        "namespace",
+        "id"
+      ],
+      "title": "StateRef",
+      "type": "object"
+    },
+    "TimerState": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "due_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Computed now from the rule and the values.",
+          "title": "Due At"
+        },
+        "state": {
+          "enum": [
+            "armed",
+            "fired",
+            "cancelled"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "fired_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fired At"
+        },
+        "supersedes_firing_id": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The firing this one replaces: a timer that already fired fires again once the value that armed it is revised.",
+          "title": "Supersedes Firing Id"
+        }
+      },
+      "required": [
+        "name",
+        "state"
+      ],
+      "title": "TimerState",
+      "type": "object"
+    },
+    "ValueState": {
+      "additionalProperties": false,
+      "description": "A value the company computed, kept as a versioned fact with the rule that produced it.",
+      "properties": {
+        "v": {
+          "default": null,
+          "title": "V"
+        },
+        "logic": {
+          "enum": [
+            "yes",
+            "no",
+            "unobserved",
+            "known_defect"
+          ],
+          "title": "Logic",
+          "type": "string"
+        },
+        "absent_as": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The name of the absence, when absent.",
+          "title": "Absent As"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "rule": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Rule",
+          "type": "string"
+        },
+        "computed_at": {
+          "format": "date-time",
+          "title": "Computed At",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "fresh",
+            "stale",
+            "expired"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "supersedes_version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Version"
+        },
+        "declared_gaps": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Declared Gaps",
+          "type": "array"
+        },
+        "gap_effect": {
+          "default": "unknown",
+          "enum": [
+            "errs_early",
+            "errs_late",
+            "unknown"
+          ],
+          "title": "Gap Effect",
+          "type": "string"
+        },
+        "claim_safe": {
+          "title": "Claim Safe",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "logic",
+        "version",
+        "rule",
+        "computed_at",
+        "status",
+        "claim_safe"
+      ],
+      "title": "ValueState",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "ref": {
+      "$ref": "#/$defs/StateRef"
+    },
+    "type_version": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Type Version"
+    },
+    "as_of": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "As Of"
+    },
+    "state": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "State"
+    },
+    "latches": {
+      "additionalProperties": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "title": "Latches",
+      "type": "object"
+    },
+    "outcome": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OutcomeState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "derived_status": {
+      "anyOf": [
+        {
+          "enum": [
+            "current",
+            "expired_by_input"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Derived Status"
+    },
+    "expired_by": {
+      "description": "The inputs whose change expired it.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Expired By",
+      "type": "array"
+    },
+    "axes": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Each time axis of the type whose value is known: a date as `YYYY-MM-DD`, an instant in UTC. The platform keeps `known_at` (when the producer first knew of the object) and the time its content last changed.",
+      "title": "Axes",
+      "type": "object"
+    },
+    "fields": {
+      "additionalProperties": {
+        "$ref": "#/$defs/FieldState"
+      },
+      "title": "Fields",
+      "type": "object"
+    },
+    "values": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ValueState"
+      },
+      "title": "Values",
+      "type": "object"
+    },
+    "derived": {
+      "additionalProperties": {
+        "$ref": "#/$defs/DerivedState"
+      },
+      "description": "The type's derived fields, from the related objects.",
+      "title": "Derived",
+      "type": "object"
+    },
+    "timers": {
+      "items": {
+        "$ref": "#/$defs/TimerState"
+      },
+      "title": "Timers",
+      "type": "array"
+    },
+    "readings": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ReadingResult"
+      },
+      "title": "Readings",
+      "type": "object"
+    },
+    "prohibitions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Prohibitions",
+      "type": "array"
+    },
+    "declared_gaps": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Declared Gaps",
+      "type": "array"
+    },
+    "withheld": {
+      "additionalProperties": {
+        "enum": [
+          "access",
+          "licence",
+          "scan"
+        ],
+        "type": "string"
+      },
+      "description": "Fields left out for this reader, and why.",
+      "title": "Withheld",
+      "type": "object"
+    },
+    "blocked": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "description": "What the fields whose value is not known block, as the type declares it (`unobserved_blocks`): each activity (`model_read`, `derive`, `claim`, or a task of the company such as `decide:close`) with the fields that block it. Nothing else is blocked.",
+      "propertyNames": {
+        "maxLength": 256,
+        "minLength": 1
+      },
+      "title": "Blocked",
+      "type": "object"
+    },
+    "refetch": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Refetch"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "refusal": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Refusal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "memory": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ObjectMemoryOut"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "What its owner and participants said about it, in a context read that serves a pack."
+    }
+  },
+  "required": [
+    "ref"
+  ],
+  "type": "object"
+}

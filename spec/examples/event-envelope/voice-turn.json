@@ -1,0 +1,14 @@
+{
+  "kind": "message",
+  "idempotency_key": "call-5521/turn-4",
+  "channel": "voice",
+  "conversation_id": "call-5521",
+  "conversation_aliases": ["trunk-a/88213"],
+  "handles": [{"type": "phone_e164", "value": "+5511987654321"}],
+  "speaker": {"role": "ai_agent", "id": "voice-agent"},
+  "direction": "outbound",
+  "content": {"type": "audio", "media_ref": "med_0192b8a5c4e37d1f9a2b6c8d0e4f1a3b_0192b8a6d1f07c3e8b5a9d2c4e6f8a1b", "media_sha256": "9f2c4d8e1a7b3c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d", "transcript": "I can see the credit of 40 reais on your August invoice.", "stt_confidence": 0.93},
+  "occurred_at": "2026-09-22T14:07:40-03:00",
+  "voice": {"ani": "+5511987654321", "network_attestation": "A", "answered_at": "2026-09-22T14:07:02-03:00", "turn_offset_ms": 38000},
+  "context_stamp": {"etag": "73763dac9e117f0209ae113a4679ba83", "injected_at": "2026-09-22T14:07:02.180-03:00"}
+}

@@ -1,0 +1,89 @@
+---
+title: "Derivar tipos do seu banco"
+description: "Proponha um tipo de objeto a partir de uma tabela do seu PostgreSQL, revise o que a ferramenta não conseguiu ler, envie a declaração e confira a deriva a cada mudança de esquema."
+---
+
+Uma empresa que guarda o estado dela em PostgreSQL já escreveu boa parte de um [tipo de objeto](/concepts/object-types): as colunas, os valores que um `CHECK` permite, as enumerações, as chaves estrangeiras. O comando `niadra types derive` dos SDKs lê o catálogo de uma tabela dentro da sua empresa, propõe o tipo e lista o que uma pessoa precisa olhar antes de enviar. O catálogo, a proposta e a revisão nunca saem da sua empresa pela ferramenta; só a impressão digital do esquema e as contagens do que mudou saem, e só quando você manda.
+
+Este guia é opcional. Sem declaração nenhuma, a Niadra já aprende o tipo pelo tráfego do seu sistema ([tipos inferidos do tráfego](/concepts/object-types#tipos-inferidos-do-tráfego)); declarar serve para ajustar o que a inferência não sabe, como frescor, regras de cálculo e quem pode ler cada campo.
+
+## Antes de começar
+
+- O SDK de Python (`pip install niadra`) ou o de TypeScript (`npm install @niadra/sdk`); o comando é o mesmo nos dois.
+- Uma conexão **só de leitura** ao banco, de preferência a uma réplica: a ferramenta lê o catálogo (`pg_catalog`), nunca uma linha, numa transação de leitura com `search_path` só em `pg_catalog`, então todo nome fora dele vem qualificado pelo esquema. Passe a conexão em `--dsn` ou na variável `NIADRA_DERIVE_DSN`.
+- Para enviar a declaração, o papel `integration` no Console (ou uma chave `admin`); uma declaração que toca sensibilidade, acesso, dado pessoal, licença ou finalidades pede também `security`.
+
+## 1. Proponha o tipo
+
+```sh
+niadra types derive --dsn "postgresql://reader@replica.internal/erp" --table public.orders \
+  --type order --system erp --ownership subject --out types/order.json
+```
+
+A ferramenta lê o catálogo da tabela: cada coluna com o tipo e a nulidade, a chave primária, cada `CHECK`, as enumerações, as chaves estrangeiras e os gatilhos. Ela o normaliza (ordena por nome, para o mesmo esquema dar sempre a mesma impressão digital) e propõe:
+
+| Membro | De onde vem |
+|---|---|
+| `type` | `--type`, ou o nome da tabela como nome de tipo (até 40 caracteres) |
+| `ownership` | `--ownership`, `subject` por padrão, ou `shared`. O estado de trabalho de um agente nunca é derivado |
+| `mirror_of` | `system` (`--system`, `postgresql` por padrão), `derived_by: introspection`, a `fingerprint` do catálogo e `drift: alert` |
+| `key.natural` | As colunas da chave primária, quando ela tem até 8 colunas e todas viraram campo |
+| `fields` | Um campo por coluna, tipado pelo tipo da coluna: `ref` numa chave estrangeira de uma coluna, `enum` numa enumeração ou num `CHECK` de lista, `list` num array, `string`, `number`, `money`, `bool`, `date`, `datetime`, `duration`. `json`, `bytea`, `time` e os tipos geométricos e de rede não viram campo |
+| `states` | Os valores da primeira coluna chamada `status` ou `state` que virou campo, quando vêm de uma enumeração ou de um `CHECK` de lista e são de 1 a 50 nomes válidos |
+| `relations` | Uma por chave estrangeira de uma coluna, até 20, com o papel tirado do nome da coluna sem `_id` |
+
+Os nomes do catálogo viram nomes do tipo (minúsculas ASCII, `_` no lugar de qualquer outro caractere, `c_` na frente de um que começa por dígito, `_` atrás de uma palavra que a linguagem reserva): `Delivery Window` vira `delivery_window`, `state` vira `state_`, `2fa` vira `c_2fa`. A proposta não declara afirmação, frescor, fontes, ciclo de vida nem finalidades: isso é o que as regras da sua empresa dizem, e uma pessoa acrescenta.
+
+## 2. Revise
+
+Com a proposta, a ferramenta lista o que uma pessoa precisa olhar, nesta ordem: as colunas que não viraram campo, com o tipo; os `CHECK`s que não são uma lista de constantes de uma coluna (uma comparação, duas condições), que vão à revisão; a coluna de estados cujos valores não podem ser estados; as chaves estrangeiras que não viraram relação; e cada **gatilho**, com o nome e se está ativo. Um gatilho é código: as transições que ele impõe são da sua empresa declarar em `lifecycle`, e a ferramenta nunca as adivinha. A revisão fica com a sua empresa.
+
+Depois complete o tipo com o que só a sua empresa sabe: a classe de frescor e a idade de afirmação de cada campo que um agente pode afirmar, as fontes e a precedência delas, os valores computados pelas suas regras, o ciclo de vida, os temporizadores e as finalidades. A proposta valida contra o esquema aberto `object-type.v0.json`, e a validação da Niadra além do esquema (toda expressão resolve contra o tipo, todo estado nomeado é declarado) roda quando você envia.
+
+## 3. Envie a declaração
+
+O tipo entra no documento `object-types` do espaço, por um diff aprovado no Console ou pela [API de controle](/api/control/config-diffs):
+
+```sh
+curl -X POST "https://control.api.niadra.com/v1/config/diffs" \
+  -H "Authorization: Bearer $NIADRA_TOKEN" -H "Content-Type: application/json" \
+  -d "$(jq -n --arg space "$SPACE_ID" --slurpfile type types/order.json \
+       '{space_id: $space, type: "object-types", reason: "order type derived from erp.public.orders", patch: [{op: "add", path: "/types/-", value: $type[0]}]}')"
+```
+
+A declaração vale para o que já foi gravado: a qual fonte declarada uma observação pertence é decidido na leitura. Com a funcionalidade `state` ligada, [`POST /v1/objects/push`](/api/objects-push) passa a receber o estado desse tipo, e as leituras passam a dizer o frescor e o que pode ser afirmado.
+
+## 4. Confira a deriva
+
+Um esquema muda. `--check` lê o catálogo de novo, calcula a impressão digital e compara a proposta atual com a declaração que você guardou:
+
+```sh
+niadra types derive --dsn "$NIADRA_DERIVE_DSN" --table public.orders --check --declaration types/order.json --no-send
+```
+
+O tipo **derivou** quando a impressão digital difere da de `mirror_of.fingerprint`. As mudanças contam `fields_added`, `fields_removed`, `fields_retyped`, `states_added`, `states_removed`, `relations_added`, `relations_removed` e `key_changed`, e listam em `fields` os campos removidos ou retipados (até 50); nunca um nome novo, um valor ou uma definição. Uma deriva com todas as contagens em zero mudou uma parte que o tipo não mostra: um `CHECK` de outra coluna, um gatilho, um tipo de coluna que dá o mesmo tipo de campo. O comando sai com 0 quando nada derivou, 1 quando derivou e 2 quando não conseguiu rodar, então ele cabe no CI que roda as suas migrações.
+
+Sem `--no-send`, o comando reporta a impressão digital e as contagens a [`POST /v1/types/fingerprint`](/api/types-fingerprint), com uma chave de escopo `state:push`, e a Niadra compara com `mirror_of.fingerprint` do tipo declarado. A mesma impressão digital responde `drift: false`. Outra, num tipo com `drift: alert`, responde `drift: true` e `issue_id`: abre um [problema de dados](/concepts/object-types#problemas-de-dados) do tipo `drift` para o dono do dado, ou conta mais uma ocorrência no que já está aberto, nomeia o campo quando `changes.fields` nomeia um só e envia o webhook `type.drift` uma vez por problema, quando ele abre. Num tipo com `drift: ignore`, a resposta é `drift: true` sem problema aberto. Um tipo que o espaço não declara responde 404, e um tipo declarado sem `mirror_of.fingerprint` responde 422 `no_fingerprint`. `--no-send` mantém a conferência local, para um CI que não tem a chave. A Niadra aponta deriva por outro caminho mesmo assim: uma transição vista nas fontes que o tipo não declara, ou um valor fora do vocabulário, abre o mesmo problema de dados, por observação.
+
+O passo de CI pronto, com `types derive --check` e `contract test`, está em [`examples/ci/niadra-checks.yml`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/ci/niadra-checks.yml) nos dois SDKs.
+
+## O que sai da sua empresa
+
+Pela ferramenta, nada além da impressão digital (um SHA-256 sobre o catálogo normalizado, em JSON canônico) e das contagens do que mudou, e só quando você não passa `--no-send`. O catálogo, a proposta, a revisão e a declaração completa ficam com você até você enviar a declaração pela configuração, que é o que a Niadra guarda. Uma linha da tabela nunca é lida.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Tipos de objeto e estado" href="/concepts/object-types">
+    o formato completo de um tipo e o que a leitura devolve.
+  </Card>
+  <Card title="O worker de resolução" href="/guides/resolver-worker">
+    o estado que o seu sistema envia e as releituras que a Niadra pede.
+  </Card>
+  <Card title="Agentes de varejo" href="/guides/retail-agents">
+    um tipo de item derivado da tabela de variantes.
+  </Card>
+  <Card title="Problemas de dados" href="/api/data-issues">
+    onde a deriva e os campos nulos chegam.
+  </Card>
+</CardGroup>

@@ -1,0 +1,115 @@
+---
+title: "LangChain"
+description: "Um runnable de contexto, um callback handler que registra os turnos e as ferramentas do histórico, em LangChain (Python) e LangChain.js com LangGraph.js."
+---
+
+Em Python, com `langchain-core` só: `context_runnable()` coloca o contexto nas mensagens do prompt, `NiadraCallbackHandler` registra os turnos e `history_tools()` entrega o kit como `StructuredTool`s. Em JavaScript, `@niadra/sdk/langchain` traz `niadraContext()`, `withNiadraContext()` para nós de LangGraph.js, `NiadraCallbackHandler` e `niadraTools()`.
+
+## Instalar
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[langchain]'   # langchain-core 1.6 ou mais novo, abaixo da 2
+```
+```sh TypeScript
+npm install @niadra/sdk @langchain/core   # @langchain/core 1.x, como peer dependency opcional
+```
+</CodeGroup>
+
+A integração em TypeScript está no `@niadra/sdk` no npm.
+
+## As cinco primitivas
+
+| Primitiva | Python | JavaScript |
+|---|---|---|
+| Contexto | `context_runnable()` recebe as mensagens do prompt (uma lista, ou um `PromptValue`) e devolve com o contexto como `SystemMessage` logo depois das mensagens de sistema iniciais e o `turn_block` como `SystemMessage` no fim; `with_context()` e `awith_context()` fazem o mesmo numa lista sua | `niadraContext(session)` é um runnable para cadeias LCEL (`niadraContext(convo).pipe(model)`); `withNiadraContext(session, messages)` faz o mesmo dentro de um nó do LangGraph.js, logo antes da chamada ao modelo, então nada entra no estado do grafo |
+| Turnos | `NiadraCallbackHandler` registra as mensagens do cliente quando um chat model começa, chaveadas pela posição (o histórico repetido na próxima chamada não é registrado duas vezes), e a resposta do modelo com o `usage_metadata` quando termina | `NiadraCallbackHandler` registra as respostas com o `usage_metadata` que o LangChain padroniza; respostas que só chamam ferramentas não registram nada |
+| Ferramentas | `history_tools()`: `StructuredTool`s com os nomes, descrições e esquemas do kit, amarradas ao cliente | `niadraTools(session)`: o kit como structured tools |
+| Verificação | `conversation.verify()` antes da chamada | Idem |
+| Transbordo | `conversation.handoff()` onde a cadeia transfere | Idem |
+
+## Exemplo mínimo
+
+<CodeGroup>
+```python Python
+"""An LCEL chain with the customer's context and the history tools."""
+
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+
+from niadra import Niadra, phone
+from niadra.integrations.langchain import NiadraCallbackHandler, context_runnable, history_tools
+
+niadra = Niadra(channel="chat")
+prompt = ChatPromptTemplate.from_messages([("system", "You are Acme's agent."), ("human", "{question}")])
+
+with niadra.conversation("thread-81", subject=phone("+5511912345678")) as conversation:
+    model = ChatOpenAI(model="gpt-4.1").bind_tools(history_tools(conversation))
+    chain = prompt | context_runnable(conversation) | model
+    reply = chain.invoke(
+        {"question": "Where is my replacement lid?"},
+        config={"callbacks": [NiadraCallbackHandler(conversation)]},
+    )
+    print(reply.content)
+```
+```typescript TypeScript
+// A LangGraph.js agent: the context goes into the model call inside the node (never into the
+// graph's state), the history tools run through ToolNode, and the callback records the answers.
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
+import { ToolNode, toolsCondition } from "@langchain/langgraph/prebuilt";
+import { ChatOpenAI } from "@langchain/openai";
+import { Niadra, handles } from "@niadra/sdk";
+import { NiadraCallbackHandler, niadraTools, withNiadraContext } from "@niadra/sdk/langchain";
+
+const niadra = new Niadra();
+
+/** One customer message in; `userId` comes from your session, never from the model. */
+export async function reply(userId: string, threadId: string, text: string): Promise<string> {
+  const convo = niadra.conversation({ subject: handles.appUserId(userId), channel: "web_chat", conversation_id: threadId });
+  const tools = niadraTools(convo);
+  const model = new ChatOpenAI({ model: "gpt-4.1" }).bindTools(tools);
+
+  const graph = new StateGraph(MessagesAnnotation)
+    .addNode("agent", async (state) => ({ messages: [await model.invoke(await withNiadraContext(convo, state.messages))] }))
+    .addNode("tools", new ToolNode(tools))
+    .addEdge(START, "agent")
+    .addConditionalEdges("agent", toolsCondition, ["tools", END])
+    .addEdge("tools", "agent")
+    .compile();
+
+  const result = await graph.invoke(
+    { messages: [new SystemMessage("You are Acme's support agent. Be brief."), new HumanMessage(text)] },
+    { callbacks: [new NiadraCallbackHandler(convo)] },
+  );
+  return result.messages.at(-1)?.text ?? "";
+}
+```
+</CodeGroup>
+
+O mesmo código está em `examples/langchain_chain.py` e `examples/langgraph.ts`. Para agentes LangGraph em Python, veja [LangGraph](/integrations/langgraph).
+
+## Memória do agente
+
+Em Python, `history_tools(conversation, agent_memory=...)` acrescenta as ferramentas da memória do agente, e `agent_memory=True` (ou `{"write": True, "max_tokens": 300, "tags": [...]}`) no runnable põe as notas do próprio agente logo antes do contexto do cliente, na mesma mensagem de sistema. Veja [Memória do agente](/concepts/agent-memory).
+
+## Registros de turno
+
+Com a funcionalidade `turns` ligada no espaço (ela vem ligada), `NiadraCallbackHandler(conversation, turns=True)` em Python e `new NiadraCallbackHandler(convo, { turns: true })` em JavaScript gravam cada execução de primeiro nível como um [registro de turno](/concepts/turn-records), com as chamadas de ferramenta pelos ids de chamada do provedor e as chamadas de modelo com os tokens delas. Uma ferramenta envolvida com `Niadra.tool()` dentro de uma ferramenta do LangChain toma a chamada que o handler já gravou, então cada chamada é gravada uma vez. Num [replay](/guides/replay-in-ci), uma ferramenta passada por `replayable()` (Python) ou `recordTools()` (JavaScript) responde do registro, e qualquer outra é recusada com `ReplayRefusedError` (`NiadraReplayRefusedError`) em vez de rodar ao vivo. Um turno nunca espera pela Niadra e nunca repete o texto da conversa.
+
+## Limites
+
+- Sem `BaseChatMessageHistory` nem `BaseStore` próprios: a Niadra não é o armazenamento de estado da cadeia nem do grafo, e o checkpointer nunca guarda um contexto.
+- Nada aqui derruba a cadeia: com a Niadra lenta ou fora, as mensagens vão ao modelo como vieram.
+- Testado contra `langchain-core` 1.6 e `@langchain/core` 1.2 com um chat model falso e a Niadra no emulador.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="LangGraph" href="/integrations/langgraph">
+    o middleware para `create_agent` em Python.
+  </Card>
+  <Card title="Navegação do histórico" href="/concepts/history">
+    as três ferramentas que o agente recebe.
+  </Card>
+</CardGroup>

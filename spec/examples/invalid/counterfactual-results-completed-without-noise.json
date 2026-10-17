@@ -1,0 +1,61 @@
+{
+  "tool": "search_items",
+  "element": "hard",
+  "label": "ci-2026-09-29-7f3c2a1",
+  "k": 10,
+  "cases": [
+    {
+      "turn_id": "t-20260929-0001",
+      "call_id": "c1",
+      "status": "completed",
+      "dry_run": false,
+      "k": 8,
+      "overlap": 0.412337,
+      "base_count": 24,
+      "variant_count": 40,
+      "engaged": [
+        {
+          "base": 2,
+          "variant": 11
+        },
+        {
+          "base": 5,
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "turn_id": "t-20260929-0002",
+      "call_id": "c2",
+      "status": "completed",
+      "dry_run": false,
+      "k": 10,
+      "overlap": 1.0,
+      "noise": 1.0,
+      "base_count": 10,
+      "variant_count": 10,
+      "engaged": []
+    },
+    {
+      "turn_id": "t-20260929-0003",
+      "call_id": "c1",
+      "status": "completed",
+      "dry_run": false,
+      "k": 10,
+      "overlap": 0.0,
+      "noise": 1.0,
+      "base_count": 0,
+      "variant_count": 12,
+      "engaged": [
+        {
+          "variant": 1
+        }
+      ]
+    },
+    {
+      "turn_id": "t-20260929-0004",
+      "call_id": "c3",
+      "status": "tool_error"
+    }
+  ]
+}

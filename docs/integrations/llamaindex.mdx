@@ -1,0 +1,101 @@
+---
+title: "LlamaIndex"
+description: "A memória do cliente como a memória do agente do LlamaIndex, mais as ferramentas do histórico."
+---
+
+`NiadraMemory` embrulha a memória de chat que o seu agente já usa (um `ChatMemoryBuffer`, por padrão) e coloca o contexto a cada leitura; `history_tools()` entrega o kit como ferramentas do LlamaIndex. Em TypeScript, `NiadraMemory` é uma `Memory` do LlamaIndex.TS e `niadraTools()` dá o kit como `FunctionTool`s.
+
+## Instalar
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[llamaindex]'   # llama-index-core 0.14.25 ou mais novo, abaixo da 0.15
+```
+```sh TypeScript
+npm install @niadra/sdk @llamaindex/core   # @llamaindex/core 0.6.23 ou mais novo, abaixo da 0.7, como peer dependency opcional
+```
+</CodeGroup>
+
+A integração em TypeScript está no `@niadra/sdk` no npm.
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | `get()` devolve o contexto como mensagem de sistema primeiro, que o agente coloca logo depois do prompt de sistema dele, depois o seu histórico de chat, depois o `turn_block`. Só o histórico é guardado; as mensagens da Niadra são feitas de novo a cada leitura |
+| Turnos | Toda mensagem que o agente põe na memória é registrada: a do usuário como turno do cliente e o texto do assistente como turno do agente |
+| Ferramentas | `history_tools()`: as ferramentas do histórico como ferramentas do LlamaIndex cujos parâmetros são os esquemas do kit, amarradas ao cliente |
+| Verificação | `conversation.verify()` antes do run |
+| Transbordo | `conversation.handoff()` onde o seu fluxo transfere |
+
+## Exemplo mínimo
+
+```python
+"""A LlamaIndex FunctionAgent with the customer's memory and the history tools."""
+
+import asyncio
+
+from llama_index.core.agent.workflow import FunctionAgent
+from llama_index.llms.openai import OpenAI
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.llamaindex import NiadraMemory, history_tools
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    conversation = niadra.conversation("thread-81", subject=phone("+5511912345678"))
+    agent = FunctionAgent(
+        llm=OpenAI(model="gpt-4.1"), system_prompt="You are Acme's agent.", tools=history_tools(conversation)
+    )
+    print(await agent.run("Where is my replacement lid?", memory=NiadraMemory(conversation)))
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+
+O mesmo código está em `examples/llamaindex_agent.py`.
+
+## Em TypeScript
+
+`NiadraMemory` é uma `Memory` do LlamaIndex.TS (recebe as mesmas mensagens e opções de `createMemory()`), então serve a agentes (`agent({ memory })`, `multiAgent`) e a chat engines. Em `getLLM()`, por onde toda chamada ao modelo passa, ela registra a mensagem mais nova do cliente uma vez e devolve uma cópia das mensagens com o contexto depois das mensagens de sistema iniciais e o `turn_block` no fim da última mensagem do usuário; o histórico guardado fica só com o que foi dito. `add()` registra a resposta final como turno do agente e um `handOff` entre agentes como transbordo. Para uma memória que você mesmo monta com outros blocos, `NiadraMemoryBlock` dá o mesmo contexto como bloco fixo (prioridade 0): um bloco só fica antes do histórico, então o `turn_block` segue o contexto na mesma mensagem, e as respostas não são registradas por esse caminho. `niadraTools(convo)` devolve `FunctionTool`s com os esquemas JSON do kit, amarradas ao cliente.
+
+```typescript
+import { agent } from "@llamaindex/workflow";
+import { openai } from "@llamaindex/openai";
+import { Niadra, handles } from "@niadra/sdk";
+import { NiadraMemory, niadraTools } from "@niadra/sdk/llamaindex";
+
+const niadra = new Niadra();
+const convo = niadra.conversation({ subject: handles.appUserId(user.id), channel: "web_chat", conversation_id: chatId });
+const support = agent({
+  llm: openai({ model: "gpt-4.1" }),
+  systemPrompt: "You are Acme's support agent.",
+  tools: niadraTools(convo),
+  memory: new NiadraMemory(convo),
+});
+const result = await support.run("Where is my replacement?");
+```
+
+## Memória do agente
+
+`NiadraMemory(conversation, agent_memory=True)` põe as notas do próprio agente antes do contexto do cliente, e `history_tools(conversation, agent_memory=...)` acrescenta as duas ferramentas. Veja [Memória do agente](/concepts/agent-memory).
+
+## Limites
+
+- A forma (uma memória primária embrulhada, uma mensagem de sistema colocada no `get()`, escritas repassadas no `put()`) segue a `Mem0Memory` da integração Mem0 do LlamaIndex (licença MIT); nenhum código foi copiado. A leitura é a da Niadra: um contexto fixado por conversa em vez de uma busca por mensagem.
+- Nada aqui derruba o run: sem contexto, `get()` devolve só o seu histórico.
+- Testado contra `llama-index-core` 0.14.25 com o modelo substituído por um fake e a Niadra no emulador; em TypeScript, contra `@llamaindex/core` 0.6.23 e `@llamaindex/workflow` 1.1.25, com agentes reais sobre um LLM roteirizado.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Navegação do histórico" href="/concepts/history">
+    as três ferramentas que o agente recebe.
+  </Card>
+  <Card title="O contexto e as views" href="/concepts/context">
+    o que entra no contexto e por quê.
+  </Card>
+</CardGroup>

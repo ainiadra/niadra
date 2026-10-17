@@ -1,0 +1,46 @@
+# Checks every push and pull request. It never deploys: the deployment lives in deploy/.
+name: web
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "!web/README.md"
+      - "!web/src/console/README.md"
+      - ".github/workflows/web.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/web.yml"
+permissions:
+  contents: read
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Known high or critical vulnerabilities in the runtime dependencies
+        run: npm run audit:prod
+      - name: Types
+        run: npx tsc -b
+      - name: Tests
+        run: npx vitest run
+      - name: Build and prerender (broken internal links stop it)
+        run: npm run build
+      - uses: astral-sh/setup-uv@v6
+      - name: Site Python runs with the published SDK (home snippet and blog posts)
+        run: uv run --no-project --python 3.12 --with niadra scripts/python-snippets.py

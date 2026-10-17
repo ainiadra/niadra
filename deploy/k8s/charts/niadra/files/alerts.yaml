@@ -1,0 +1,173 @@
+# The objectives: 99% of context reads under 100 ms, 99% of batches
+# acknowledged under 80 ms, 99.95% of requests without a 5xx, by the server's time. Each alert burns the
+# objective's error budget over two windows at once (the SRE workbook's multiwindow burn rate): 14.4 times
+# the budget for an hour and the last 5 minutes pages; 6 times for six hours and the last 30 minutes opens
+# a ticket. The ratios are recorded in files/slo-rules.yaml. An hour of fewer than 100 requests pages
+# nobody: with no customer traffic, a deploy's check and probe alone are not a burn.
+- alert: ContextLatencyBudgetBurnFast
+  expr: >-
+    niadra:context_slow_ratio:rate1h > 14.4 * 0.01 and niadra:context_slow_ratio:rate5m > 14.4 * 0.01
+    and sum(increase(niadra_http_request_duration_seconds_count{route="/v1/context"}[1h])) > 100
+  labels: {severity: page}
+  annotations: {summary: "context reads over 100 ms burn the 99% objective 14 times too fast (1 h and 5 min)"}
+- alert: ContextLatencyBudgetBurnSlow
+  expr: >-
+    niadra:context_slow_ratio:rate6h > 6 * 0.01 and niadra:context_slow_ratio:rate30m > 6 * 0.01
+    and sum(increase(niadra_http_request_duration_seconds_count{route="/v1/context"}[6h])) > 100
+  labels: {severity: ticket}
+  annotations: {summary: "context reads over 100 ms burn the 99% objective 6 times too fast (6 h and 30 min)"}
+- alert: BatchLatencyBudgetBurnFast
+  expr: >-
+    niadra:batch_slow_ratio:rate1h > 14.4 * 0.01 and niadra:batch_slow_ratio:rate5m > 14.4 * 0.01
+    and sum(increase(niadra_http_request_duration_seconds_count{route="/v1/batch"}[1h])) > 100
+  labels: {severity: page}
+  annotations: {summary: "batches acknowledged over 80 ms burn the 99% objective 14 times too fast (1 h and 5 min)"}
+- alert: BatchLatencyBudgetBurnSlow
+  expr: >-
+    niadra:batch_slow_ratio:rate6h > 6 * 0.01 and niadra:batch_slow_ratio:rate30m > 6 * 0.01
+    and sum(increase(niadra_http_request_duration_seconds_count{route="/v1/batch"}[6h])) > 100
+  labels: {severity: ticket}
+  annotations: {summary: "batches acknowledged over 80 ms burn the 99% objective 6 times too fast (6 h and 30 min)"}
+- alert: AvailabilityBudgetBurnFast
+  expr: >-
+    niadra:error_ratio:rate1h > 14.4 * 0.0005 and niadra:error_ratio:rate5m > 14.4 * 0.0005
+    and sum(increase(niadra_http_requests_total[1h])) > 100
+  labels: {severity: page}
+  annotations: {summary: "5xx answers burn the 99.95% availability objective 14 times too fast (1 h and 5 min)"}
+- alert: AvailabilityBudgetBurnSlow
+  expr: >-
+    niadra:error_ratio:rate6h > 6 * 0.0005 and niadra:error_ratio:rate30m > 6 * 0.0005
+    and sum(increase(niadra_http_requests_total[6h])) > 100
+  labels: {severity: ticket}
+  annotations: {summary: "5xx answers burn the 99.95% availability objective 6 times too fast (6 h and 30 min)"}
+# The p95s themselves: a ticket now; the burn-rate alerts above page.
+- alert: ContextLatencyP95Above100ms
+  expr: histogram_quantile(0.95, sum by (le) (rate(niadra_http_request_duration_seconds_bucket{route="/v1/context"}[5m]))) > 0.1
+  for: 10m
+  labels: {severity: ticket}
+  annotations: {summary: "context() p95 above 100 ms"}
+- alert: IngestAckP95Above80ms
+  expr: histogram_quantile(0.95, sum by (le) (rate(niadra_http_request_duration_seconds_bucket{route="/v1/batch"}[5m]))) > 0.08
+  for: 10m
+  labels: {severity: ticket}
+  annotations: {summary: "ingest acknowledgement p95 above 80 ms"}
+# A warm context read (resolved from the read state, served from the cache) runs no database statement:
+# the read process counts the statements each request ran before answering, by the kind of read
+# (niadra_read_db_statements_total). The first read of a conversation resolves its customer on the
+# database by design and counts as `cold`, so steady traffic keeps this at zero; statements on warm reads
+# every five minutes for 15 minutes mean the hot path regressed.
+- alert: HotReadTouchedDatabase
+  expr: sum(rate(niadra_read_db_statements_total{route="/v1/context", read="warm"}[5m])) > 0
+  for: 15m
+  labels: {severity: ticket}
+  annotations: {summary: "context reads keep running database statements; the hot path should run none"}
+- alert: MemoryReadyP95Above60s
+  expr: histogram_quantile(0.95, sum by (le) (rate(niadra_memory_ready_seconds_bucket[15m]))) > 60
+  for: 15m
+  labels: {severity: ticket}
+  annotations: {summary: "memory after the session end takes more than 60 s (p95)"}
+# A measurement starts once the session's memory is reconciled (60 s goal, above) and the receipt
+# writer has stored every read of the session; until then it waits 30 s and looks again
+# (server, app/measure.py, RESCHEDULE_AFTER). The docs promise it right after the memory.
+- alert: MeasurementReadyP95Above90s
+  expr: histogram_quantile(0.95, sum by (le) (rate(niadra_measurement_ready_seconds_bucket[15m]))) > 90
+  for: 15m
+  labels: {severity: ticket}
+  annotations: {summary: "context-use measurement after the session end takes more than 90 s (p95): 60 s of memory and one 30 s wait for the receipts"}
+- alert: ObjectEventP95Above10s
+  expr: histogram_quantile(0.95, sum by (le) (rate(niadra_object_event_applied_seconds_bucket[10m]))) > 10
+  for: 10m
+  labels: {severity: page}
+  annotations: {summary: "actions and system events take more than 10 s to reach memory (p95)"}
+- alert: ServerErrors
+  expr: sum by (route) (rate(niadra_http_requests_total{status=~"5.."}[5m])) > 0.1
+  for: 10m
+  labels: {severity: page}
+  annotations: {summary: "{{ $labels.route }} is answering 5xx"}
+- alert: OutboxStale
+  expr: max(niadra_outbox_oldest_seconds) > 10
+  for: 5m
+  labels: {severity: page}
+  annotations: {summary: "outbox rows older than 10 s: the relay is not publishing"}
+# A batch of conversation turns is answered once its intake row commits, and stored by a realtime worker
+# within milliseconds (server, app/ingest.py). Rows that wait mean the workers are down or behind:
+# reads still see the turns through the hot layer, but memory, sessions and receipts of them lag.
+- alert: IntakeBacklog
+  expr: max(niadra_intake_oldest_seconds) > 30 or sum(niadra_intake_pending) > 500
+  for: 5m
+  labels: {severity: page}
+  annotations: {summary: "acknowledged batches wait to be stored (oldest over 30 s or more than 500): check the realtime workers and the relay"}
+- alert: TasksDead
+  expr: sum(increase(niadra_dead_tasks_total[1h])) > 0
+  labels: {severity: ticket}
+  annotations: {summary: "tasks reached dead_tasks in the last hour"}
+# On an idle cell, niadra.receipts showing 1 or 2 unacked is a heartbeat mark inside its 0.5 s
+# batch window, sampled on the quorum queue's 5 s metrics tick; it is not a held receipt. Judge the
+# receipt writer by receipt_watermarks.last_heard_at (under about 6 s old) and messages_ready.
+- alert: ReceiptsLost
+  expr: sum(increase(niadra_receipts_lost_total[15m])) > 0
+  labels: {severity: page}
+  annotations: {summary: "a receipt sequence gap did not close"}
+- alert: LlmBudgetExhausted
+  expr: sum by (purpose) (increase(niadra_llm_budget_exhausted_total[1h])) > 0
+  labels: {severity: ticket}
+  annotations: {summary: "daily LLM budget for {{ $labels.purpose }} reached; calls wait for tomorrow"}
+- alert: QueueBacklog
+  expr: sum by (queue) (rabbitmq_detailed_queue_messages{queue=~"niadra.*", queue!~".*dead.*"}) > 5000
+  for: 15m
+  labels: {severity: ticket}
+  annotations: {summary: "{{ $labels.queue }} has more than 5000 waiting tasks"}
+# A queue that holds tasks with no consumer: its worker pool is down, or KEDA did not wake it. A pool at
+# zero starts within a minute of its first message, so five minutes is never a scale-up. The other rules
+# miss this: MemoryReadyP95Above60s needs completed items to measure, and QueueBacklog needs 5000 tasks.
+# Found by the incident drill of 30/09/2026.
+- alert: QueueWithoutConsumer
+  expr: >-
+    max by (queue) (rabbitmq_detailed_queue_messages{queue=~"niadra.*", queue!~".*dead.*"}) > 0
+    and on (queue) max by (queue) (rabbitmq_detailed_queue_consumers{queue=~"niadra.*", queue!~".*dead.*"}) == 0
+  for: 5m
+  labels: {severity: page}
+  annotations: {summary: "{{ $labels.queue }} holds tasks and has no consumer: its worker pool is down"}
+# Valkey (templates/data.yaml). The cache evicts under LRU, so failing commands mean the store is down
+# or refusing writes (on 27/09/2026 it filled under noeviction and reads went to the database). The
+# state store never evicts: a failure there is a live turn, a revocation or a limit not written.
+- alert: CacheFailing
+  expr: sum(rate(niadra_cache_failures_total{store="cache"}[5m])) > 0.05
+  for: 10m
+  labels: {severity: ticket}
+  annotations: {summary: "the cache (valkey) fails commands; reads fall back to the database. Check the pod, its memory and its policy (allkeys-lru)"}
+- alert: StateStoreFailing
+  expr: sum by (store) (rate(niadra_cache_failures_total{store=~"state|hot"}[5m])) > 0
+  for: 5m
+  labels: {severity: page}
+  annotations: {summary: "the {{ $labels.store }} store (valkey-state) fails commands: live turns may be missing from context. Check the pod and whether it is full"}
+# One database per space: the loops' reconciler compares the directory of space databases with the
+# control plane's snapshot and with the databases on the instance, and never deletes on a mismatch.
+- alert: SpaceDirectoryDrift
+  expr: max(niadra_space_directory_drift) > 0
+  for: 10m
+  labels: {severity: ticket}
+  annotations: {summary: "a space database is in the directory but not in the configuration snapshot; nothing is deleted until the snapshot removes it"}
+- alert: OrphanSpaceDatabase
+  expr: max(niadra_space_orphan_databases) > 0
+  for: 30m
+  labels: {severity: ticket}
+  annotations: {summary: "a space database exists on the instance without a directory row"}
+- alert: SpaceDatabaseFailing
+  expr: max by (space) (niadra_space_database_failures) >= 3
+  labels: {severity: page}
+  annotations: {summary: "the database of space {{ $labels.space }} failed to provision or migrate three times in a row"}
+- alert: DeletionReceiptPending
+  expr: max(niadra_deletion_receipts_pending) > 0
+  for: 1h
+  labels: {severity: ticket}
+  annotations: {summary: "a space deletion receipt has not reached the control plane for an hour"}
+- alert: BackupJobFailed
+  expr: max(kube_job_status_failed{namespace="niadra", job_name=~"niadra-backup.*"}) > 0
+  labels: {severity: ticket}
+  annotations: {summary: "a nightly database backup failed; see its logs, then delete the failed job"}
+- alert: BackupStale
+  expr: time() - max(kube_cronjob_status_last_successful_time{namespace="niadra", cronjob="niadra-backup"}) > 93600
+  for: 1h
+  labels: {severity: ticket}
+  annotations: {summary: "no nightly database backup succeeded in the last 26 hours"}

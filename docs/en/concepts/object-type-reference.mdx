@@ -1,0 +1,151 @@
+---
+title: "Object type reference"
+description: "How each field type travels, what a field declares, what the server refuses in a type, and the expression language niadra-expr."
+---
+
+This page is the reference for the format of an [object type](/en/concepts/object-types): what each field type looks like on the wire, the members a field declares, the checks a type must pass, and **niadra-expr**, the expression language of keys, values, timers, readings and derived fields. The conformance vectors that fix the language's behavior ship in both SDK repositories, in `spec/vectors/niadra-expr.v0.json`: the server and both SDKs run the same file.
+
+## Field types and how values travel
+
+An event's `fields` and an object push carry each value as JSON, in the form its declared type expects:
+
+| Type | On the wire | Example |
+|---|---|---|
+| `string`, `text` | A JSON string. `text` is long free text. | `"2a Vara Cível"` |
+| `enum` | A JSON string, one of the values the field declares. | `"protocolled"` |
+| `number` | A JSON number. | `15` |
+| `money` | A JSON number in the currency's major unit: never minor units, never an object. The currency is the object's own `currency` field. | `38000` or `38000.5` |
+| `percent` | A JSON number. | `12.5` |
+| `date` | A JSON string, `YYYY-MM-DD`. | `"2026-10-09"` |
+| `datetime` | A JSON string, ISO 8601 with its offset. | `"2026-10-09T14:00:00-03:00"` |
+| `duration` | A whole JSON number of milliseconds. | `5400000` |
+| `bool` | `true` or `false`. | `true` |
+| `list` | A JSON array. | `["a", "b"]` |
+| `ref` | A JSON string: the related object's id, as a relation's `via` reads it. | `"case-1"` |
+
+A value of another kind is kept as sent, but an expression over the field cannot read it as its type: a money amount sent as the string `"38000.00"` is not a number to a reading, a derived field or a timer. A field the type does not declare is kept as a plain field and opens a `drift` [data issue](/en/concepts/object-types#data-issues), never a refusal. What an event says about itself (`operation`, `version`, `last_event_type`, `source_version`, `record_ref`, `input_refs`) is bookkeeping: never drift, and served only when the type declares it as a field. Every key of an event's `fields` applies to every object in its `object_refs`, so send one object per event.
+
+## What a field declares
+
+| Member | Meaning |
+|---|---|
+| `type` | One of the types above. Required. |
+| `logic` | `plain` (the default) or `tri`: the field carries the four logical values below and its observers. |
+| `observers` | For a `tri` field: who may observe it (`machine`, `human` or `source:<name>`), under which rule, for how long an observation stays valid (a duration or `never`), and which other observers it overrides. |
+| `unobserved_blocks` | For a `tri` field: what a value nobody observed blocks: `model_read`, `derive`, `claim`, or a task of the company, such as `decide:close`. |
+| `label` | The field's name in the space's language, as a text for a model says it; at most 60 characters. |
+| `role` | The role of the number the field holds, such as `price_full`, for claims. |
+| `claim` | Whether the field may be claimed (`allowed`), its `class` (`money`, `percent`, `date`, `quantity`, `count`, `duration`, `dosage`, `text`), required when allowed, and the `nature` of the number (`computed`, `quoted`, `observed`). |
+| `attribute` | The `family` and `vocabulary` the values belong to, so a preference or a refusal can name them. |
+| `freshness` | `class` (`volatile`, `price`, `semi`, `stable`, `none`), `max_age` and `claim_max_age`. Without `max_age`, `volatile` is stale after 30 s, `price` after 60 s, `semi` after 1 h and `stable` after 7 d; `none` never goes stale. `claim_max_age` defaults to `max_age` and never exceeds it. |
+| `completeness` | `levels` (at least two, least to most complete) or `total_field`, the field that holds the expected total. |
+| `sensitivity` | `none`, or one of the sensitive categories the product fixes (`health`, `religion`, `philosophical_belief`, `political_opinion`, `union_membership`, `sexual_life`, `sexual_orientation`, `racial_or_ethnic_origin`, `genetic`, `biometric`, `criminal_record`). |
+| `access` | Rules of `readers` (sources, agents or `public`), `purposes` and `effect` (`allow`, `mask`, `deny`), read in order; see [field access](/en/concepts/object-types#field-access). |
+| `pii` | Whether the field holds personal data. |
+| `track_changes` | Whether the previous value is kept, for `was()` and for what changed since a subject last saw the object. |
+
+A `plain` field declares no `observers` and no `unobserved_blocks`. A change of a field's `sensitivity`, `access` or `pii`, of a source's licence or of the type's purposes is a privacy decision: it also needs the role that answers for security.
+
+## What the server refuses in a type
+
+Beyond the shape of the document, a type is refused, with the path of each entry that breaks a rule (for example `timers.launch_at.on_fire: transition(scheduled->actve) is not a transition of the lifecycle`), when:
+
+1. A field, a value, a time axis or a derived field takes a name another one already has, or a name the language reserves (below).
+2. A state the lifecycle, a timer or a vocabulary names is not declared; a `timers_on` names an undeclared axis; a content field, `completeness.total_field`, a known defect, a `union` key or a `refresh` action names an undeclared field or value; `prefer_source`, `use_source`, `quote()` or a vocabulary names an undeclared source; a derived field names an undeclared relation, or one whose type the registry does not declare, or a `min` or `max` over a field that type does not have.
+3. A derived axis does not name its rule, or a rule is on an axis that is not derived; a type derived by introspection lost its fingerprint.
+4. A member breaks its own rule: a `plain` field that declares observers, a `claim_max_age` over `max_age`, and the rules of sources, the lifecycle, timers, refetch and purposes that [Object types and state](/en/concepts/object-types) describes.
+5. An expression does not parse or does not resolve against the type: conditions (`when`, `active_when`, `where`) must give true or false, and a timer's `due` a date or a datetime.
+
+## niadra-expr
+
+The language is small, deterministic and total: no loops, no recursion, no I/O and no clock but the one it is given, bounded text and nesting, and a result or one of three errors for every input. The same text gives the same result on the server, in each SDK and in your resolver worker.
+
+### Tokens
+
+- Spaces, tabs and line breaks separate tokens.
+- A **name** is `[a-z_][a-z0-9_]*`, at most 64 characters, lowercase ASCII.
+- A **number** is digits with an optional `.` and at least one digit after it; there is no sign, a negative number comes from subtraction.
+- A **duration** is a whole number of at most six digits followed by `ms`, `s`, `min`, `h` or `d` (`m` is not a unit, and `1.5h` is written `90min`).
+- A **string** is in single quotes, on one line, with `\'` and `\\` as its only escapes, at most 256 characters.
+- The operators are `==`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `(`, `)`, `[`, `]`, `,` and `.`; the keywords are `and`, `or`, `not`, `in`, `true`, `false`, `none`, `yes`, `no`, `unobserved` and `known_defect`.
+
+### Grammar
+
+```
+expression  = or ;
+or          = and { "or" and } ;
+and         = not { "and" not } ;
+not         = "not" not | comparison ;
+comparison  = sum [ ( "==" | "!=" | "<" | "<=" | ">" | ">=" | "in" ) sum ] ;
+sum         = postfix { ( "+" | "-" ) postfix } ;
+postfix     = primary { "." name } ;
+primary     = number | duration | string | "true" | "false" | "none" | logical
+            | name | call | "(" or ")" | "[" [ or { "," or } ] "]" ;
+logical     = "yes" | "no" | "unobserved" | "known_defect" ;
+call        = function "(" arguments ")" ;
+```
+
+`or` binds loosest, then `and`, `not`, a comparison, `+` and `-` (left to right), and `.`. Comparisons do not chain: `a < b < c` is an error. A dotted name such as `lead.city` is one name with parts; after a group or a call, `.` reads a field of a quote. The logical words appear only on one side of `==` or `!=`.
+
+### Values and the four logical values
+
+| Logical value | Meaning |
+|---|---|
+| `yes` | Present: a source or an observer affirmed it (for a boolean, true). |
+| `no` | Known and negative: false for a boolean; for anything else, absent (the source affirmed there is none), possibly with the name of the absence. |
+| `unobserved` | Nobody observed it, or the valid observation ended. |
+| `known_defect` | The source answered, and the type declares that field of that source wrong. |
+
+`unobserved` and `known_defect` are **unknown**. A present value is a boolean, a number, a string, a duration (whole milliseconds), a date, a datetime (to the millisecond) or a list. Not observed is never false: a comparison with an unknown value is unknown, and so is its negation.
+
+### Names
+
+A one-part name is, in order: a context name (`state`, the lifecycle state; `derived_status`; `watch_count`, 0 by default; `purpose`, the read's purpose, `display` by default); a field, a computed value or a time axis of the object; a declared absence name; otherwise a field nobody observed, `unobserved`. A dotted name is a declared input of that path (`lead.city`), `config.<key>` (the company's configuration value, absent when not set) or `<field>.completeness`. The keywords and `state`, `derived_status`, `watch_count`, `purpose` and `config` are reserved. A state is a string: `state == 'open'`, never `state == open`.
+
+### Operators
+
+- `x == yes` is true exactly when `x` carries `yes`, and likewise for the other logical words; the result is always true or false: `available == unobserved` asks whether a value was observed.
+- Otherwise, when either side of a comparison, `+` or `-` is unknown, the result is unknown (`known_defect` when either carries it).
+- Equality: two absences are equal when either has no name or both have the same one (`none` is any absence); an absence never equals a present value; numbers by value, strings by their characters, durations by length, dates and datetimes as instants (a date is the start of its day), lists item by item; any other pair is `expr_type`.
+- Order (`<`, `<=`, `>`, `>=`) is false when either side is absent; numbers, strings (by code point), durations, dates and datetimes compare; any other kind is `expr_type`.
+- `in` takes a list on its right: true when the left equals an item, unknown when an unknown item could decide, false otherwise.
+- `and`, `or` and `not` take true, false or unknown, with three-valued logic, left to right, and the first operand that decides stops the evaluation: `false and x` never evaluates `x`.
+- `+` and `-`: number with number; duration with duration; a date or datetime plus or minus a duration gives a datetime; a date plus or minus business days gives a date; two dates or datetimes subtracted give a duration. An absent operand gives an absence.
+
+### Functions
+
+| Function | Result |
+|---|---|
+| `now()` | The datetime of the evaluation. |
+| `age(n)` | The time since slot or input `n` was observed at its source, never negative; `unobserved` when not known. |
+| `observer(n)` | Who observed the slot's value (`machine`, `human`, `source:<name>`), or absent. |
+| `changed(n)` | True when the slot has a previous value and it differs from the current one. |
+| `was(e)` | `e` over the previous values of the slots and inputs. |
+| `count(e)` | The number of items of a list; 0 for an absence. |
+| `business_days(e, c)` | `e` business days on calendar `c`, to add to or subtract from a date: a whole count from 0 to 1,000. A calendar is a list of holidays and the weekdays that are never business days (Saturday and Sunday unless it says otherwise). |
+| `quote(s)` | The reader's quote from source `s`; `.<field>` reads its fields. |
+| `presented_in_top(n)` | True when the object was presented at a position at most `n` in the current conversation. |
+| `sha256(e, ...)` | `sha256:` and the lowercase hex SHA-256 of one to eight arguments' text, joined by U+001F. |
+
+The deadlines of a court, a contract or a product are your company's rules, as declared values: the language only counts simple business days.
+
+### Errors and bounds
+
+| Code | When |
+|---|---|
+| `expr_invalid` | The text is not an expression of this grammar, breaks a rule above, or (against a type) names what the type does not have. |
+| `expr_type` | A value of the wrong kind, or out of its domain, met while evaluating. |
+| `expr_limit` | A bound was exceeded. |
+
+An expression has at most 1,024 characters, 256 tokens and 16 nested groups; a list literal at most 64 items, a string at most 256 characters, a name at most 64 and a duration at most six digits. A list read from a slot has at most 1,000 items, and a business-day count is at most 1,000.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Object types and state" href="/en/concepts/object-types">
+    What a type is for, freshness, the read purpose and shared objects.
+  </Card>
+  <Card title="Typed reads" href="/en/api/state-read">
+    `POST /v1/state/read`: fields, values, readings and timers.
+  </Card>
+</CardGroup>

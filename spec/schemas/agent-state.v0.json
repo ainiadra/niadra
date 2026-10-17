@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/agent-state.v0.json",
+  "title": "Niadra Agent State v0",
+  "description": "A write of an agent's working state: compare-and-swap or merge by key, under a declared schema and a size cap. See spec/agent-state.md.",
+  "$defs": {
+    "AgentStateScope": {
+      "additionalProperties": false,
+      "description": "What one working state belongs to. The id travels in the body, never in a URL: a conversation id may look like a phone number.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "conversation",
+            "task",
+            "object",
+            "subject"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "AgentStateScope",
+      "type": "object"
+    },
+    "Handle": {
+      "additionalProperties": false,
+      "description": "An identifier of a subject in some channel or system: a phone, an e-mail, a CRM id.",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/HandleType"
+        },
+        "value": {
+          "maxLength": 320,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Namespace for scoped identifiers: the WhatsApp Business account for `wa_bsuid`, the system for `system_id`, the country for `gov_id_hmac`.",
+          "title": "Scope"
+        },
+        "subject_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubjectKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Defaults to `person`, except for organization-only handle types."
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "title": "Handle",
+      "type": "object"
+    },
+    "HandleType": {
+      "enum": [
+        "phone_e164",
+        "wa_id",
+        "wa_jid",
+        "wa_lid",
+        "wa_bsuid",
+        "email",
+        "gov_id_hmac",
+        "app_user_id",
+        "system_id",
+        "org_registry_hmac",
+        "email_domain",
+        "anon_id"
+      ],
+      "title": "HandleType",
+      "type": "string"
+    },
+    "SubjectKind": {
+      "enum": [
+        "person",
+        "account",
+        "partner",
+        "staff"
+      ],
+      "title": "SubjectKind",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "scope": {
+      "$ref": "#/$defs/AgentStateScope"
+    },
+    "agent": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Agent",
+      "type": "string"
+    },
+    "mode": {
+      "enum": [
+        "cas",
+        "merge_by_key"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "if_version": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "If Version"
+    },
+    "body": {
+      "additionalProperties": true,
+      "title": "Body",
+      "type": "object"
+    },
+    "subject": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Handle"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The customer the state is about, when its scope does not name them: erasing the customer and their data package find the state by it."
+    }
+  },
+  "required": [
+    "scope",
+    "agent",
+    "mode",
+    "body"
+  ],
+  "type": "object",
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "const": "cas"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "if_version"
+        ],
+        "properties": {
+          "if_version": {
+            "type": "integer"
+          },
+          "body": {
+            "additionalProperties": {
+              "not": {
+                "type": "object",
+                "required": [
+                  "$delete"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "const": "merge_by_key"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "additionalProperties": {
+              "if": {
+                "type": "object",
+                "required": [
+                  "$delete"
+                ]
+              },
+              "then": {
+                "const": {
+                  "$delete": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

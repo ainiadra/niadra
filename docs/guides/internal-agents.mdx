@@ -1,0 +1,168 @@
+---
+title: "Agentes internos"
+description: "O agente de cobrança lê o contexto da fatura, lança o crédito no ERP e registra a ação."
+---
+
+Agentes internos trabalham dentro dos seus sistemas sem falar com o cliente: a cobrança analisa contestações e lança créditos, o de pedidos reagenda entregas no ERP, o de tickets classifica o help desk. Eles agem sobre os mesmos clientes com quem os agentes de atendimento conversam, e sem memória comum cada lado erra de um jeito. O agente interno age sem saber o que foi dito no atendimento; o agente de atendimento promete o que outro agente já fez.
+
+Este guia liga um agente de cobrança à Niadra com as mesmas chamadas de um agente de atendimento: ele lê o contexto da fatura em que trabalha, lança o crédito no ERP com as próprias credenciais e registra a ação. Um minuto depois, o agente de voz atende sabendo.
+
+## O fluxo das 14h05, 14h06 e 14h07
+
+1. **14h05, app.** A Marina contesta a fatura de agosto no seu app. A mensagem fica ligada a `invoice:erp:0823` pelo `object_refs` e entra na camada ao vivo em menos de um segundo depois de chegar à API.
+2. **14h06, agente de cobrança.** Ele lê `context(object="invoice:erp:0823", view="task:billing", verification="no_customer")`, recebe a contestação pelo `live`, a visita técnica que falhou às 14h02 e o crédito de março no histórico. Lança o crédito de US$ 40 no ERP e registra `action("credit", closes=...)`.
+3. **14h06, ERP.** O ERP emite `invoice.credited`. A ação e o evento viram um registro só, e a ação passa de `declared` para `confirmed`.
+4. **14h07, ligação.** O contexto de voz já diz: "Outro agente: crédito de US$ 40 na fatura de agosto, Cobrança, 14h06, confirmado pelo sistema".
+
+Nenhum modelo de linguagem fica entre a ação registrada e o contexto de voz. Depois de chegar à API, ações e eventos de sistema entram na camada ao vivo em menos de um segundo e no contexto recompilado em menos de dez.
+
+<Note>
+A Niadra nunca executa ação em sistema de registro. Quem age é o seu agente, com as credenciais dele. A Niadra guarda o que ele precisa lembrar e o que ele fez.
+</Note>
+
+## Antes de começar: a fonte
+
+Agente interno é uma fonte como qualquer outra, com chave própria, classe de audiência `internal_agent` e uma finalidade como `billing`. Acesso ao ERP não é acesso à memória: o agente de cobrança lê faturas e contestações, não pendência técnica nem dado de saúde. Três configurações importam aqui:
+
+- **Escopo `act`** na chave (uma chave de agente já vem com ele) e, se você quiser fechar a lista, `trusted_action_ops` na fonte (aqui `["credit"]`): as únicas operações que ela pode registrar e cujas ações declaradas fecham pendência antes de o sistema confirmar. Sem a lista, a fonte registra qualquer operação, e as travas do fechamento decidem. O escopo `track` sozinho nunca registra ação.
+- **Verificação `no_customer`**, o nível das tarefas sem cliente presente. Fica fora da escala V0 a V4 e só é aceito de fontes `internal_agent`. Um contexto montado em `no_customer` nunca vai para o cliente.
+- **Categorias liberadas para `no_customer`** na política do espaço (`no_customer_allowed` na categoria): uma tarefa sem cliente lê só o que a política libera para ela. Aqui, a categoria `invoice`, com a finalidade `billing`. Vale para a fatura no contexto e para as falas recentes sobre ela em `live`: a contestação das 14h05 cita `invoice:erp:0823` e fica na categoria `invoice`.
+
+O escopo `act` vem na chave e o teto `no_customer` na fonte, os dois escolhidos no Console ou pela API de controle; a lista `trusted_action_ops` entra na criação da fonte, no campo "Operações confiáveis" do Console ou pela [API de controle](/api/control/sources-create). A fonte de cobrança criada no cadastro do espaço confia só em `credit`: qualquer outra operação que ela registre volta com `operation_not_allowed` (403) e não é gravada. Ao criar a fonte de um agente, declare toda operação que ele executa.
+
+## Passo a passo
+
+### 1. Abra uma tarefa centrada na fatura
+
+A tarefa faz, para o agente interno, o papel que a conversa faz para o de atendimento: fixa o contexto, delimita o cache do SDK, agrupa os eventos para a cobrança e fecha com `task.ended`. Sem ela, o servidor fecha a tarefa depois de 3 minutos sem eventos, e um evento da mesma tarefa em até 10 minutos a reabre; a cada reabertura a espera dobra, até os 10 minutos.
+
+A view `task:billing` é definida pelo seu espaço como template mais política. Ela prioriza os objetos do tipo da tarefa, as pendências ligadas a eles e o que foi dito sobre eles nas conversas, e deixa de fora o que a finalidade de cobrança não permite.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, system_id
+
+niadra = Niadra(channel="erp")
+
+with niadra.task(
+    "billing-7741",
+    subject=system_id("crm", "48213"),
+    object="invoice:erp:0823",
+    view="task:billing",
+    verification="no_customer",
+    agent_id="billing-agent",
+) as task:
+    ctx = task.context()
+    decision = billing_llm.review(instructions=BILLING_RULES, context=ctx.system_block, recent=ctx.turn_block)
+```
+```typescript TypeScript
+import { Niadra } from "@niadra/sdk";
+
+const niadra = new Niadra();
+
+const task = niadra.task({
+  task_id: "billing-7741",
+  channel: "erp",
+  object: "invoice:erp:0823",
+  view: "task:billing",
+  verification: "no_customer",
+});
+const ctx = await task.context();
+const decision = await billingLlm.review({ instructions: BILLING_RULES, context: ctx.text, recent: ctx.suffix });
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/context" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "object": { "type": "invoice", "namespace": "erp", "id": "0823" },
+    "view": "task:billing",
+    "verification": "no_customer",
+    "task_id": "billing-7741"
+  }'
+```
+</CodeGroup>
+
+O `context(object=...)` chega da fatura ao dono dela e devolve o contexto centrado nela: a linha do tempo do objeto mais o contexto do cliente que a tarefa pede. Valem as mesmas regras da conversa: fixado por tarefa, com ETag e comprovante da leitura. A leitura centrada num objeto é compilada na hora, sem modelo de linguagem no caminho. Uma leitura por objeto ou por id de perfil, como toda leitura de agente interno, vê só os itens que chegaram por handles confirmados: o que veio por um [vínculo não confirmado](/concepts/identity#proteções-contra-união-errada) fica fora até uma pessoa ou um sistema de registro confirmar.
+
+### 2. Aja no ERP e depois registre a ação
+
+Lance o crédito pela sua integração com o ERP. Depois registre a ação com `closes`, a pendência que ela cumpre. Informe pelo id, ou pelo objeto e pela operação canônica que a pendência espera, que é o que você costuma saber: o crédito na fatura 0823.
+
+<CodeGroup>
+```python Python
+    erp.post_credit(invoice="0823", amount=40.00, currency="USD")  # sua integração, suas credenciais
+
+    task.action(
+        "credit",
+        result="$40 credit on the August bill",
+        purpose="billing",
+        closes={"object": {"type": "invoice", "namespace": "erp", "id": "0823"}, "operation": "credit"},
+    )
+```
+```typescript TypeScript
+await erp.postCredit({ invoice: "0823", amount: 40.0, currency: "USD" }); // sua integração, suas credenciais
+
+task.action({
+  object_refs: ["invoice:erp:0823"],
+  operation: "credit",
+  result: "$40 credit on the August bill",
+  purpose: "billing",
+  closes: { object: { type: "invoice", namespace: "erp", id: "0823" }, operation: "credit" },
+});
+await task.end();
+```
+</CodeGroup>
+
+Uma correção vai como uma ação nova, com `corrects_action_id` apontando para a anterior. Ela só conta quando as duas ações vieram da mesma fonte: a de outra fonte (outro fornecedor) fica no registro e no contexto.
+
+### 3. Deixe o sistema de registro confirmar
+
+A ação fica `declared` até um evento do sistema de registro confirmar. Mande os eventos do ERP pelo [webhook genérico](/guides/system-webhooks) ou como eventos de sistema. Quando `invoice.credited` chega para o mesmo objeto e a mesma operação dentro da janela, os dois viram um registro só e a ação fica `confirmed`; assim o crédito nunca é contado duas vezes.
+
+| Estado | O que quer dizer | O que o contexto diz |
+|---|---|---|
+| `declared` | Registrada pelo agente, ainda sem confirmação do sistema | "Declarado pela Cobrança às 14h06; o sistema ainda não confirmou" |
+| `confirmed` | O sistema de registro emitiu o evento correspondente | "Confirmado pelo sistema" |
+| `divergent` | A janela passou sem o evento de confirmação | Marcada, e a condição de gatilho `fact.contradicted_by_system_event` pode avisar você |
+| `quarantined` | Registrada numa sessão que a triagem contra injeção (a IA da Niadra) marcou | Deixa de aparecer como feita, e o que ela fechou volta a abrir |
+
+Ação `declared` fecha pendência quando a fonte confia na operação dela (sem lista, confia em todas; com lista, só nas da lista); ação `confirmed` sempre fecha. As regras de fechamento estão em [Sistemas](/concepts/systems).
+
+### 4. Entenda o fechamento retroativo
+
+A ação pode chegar antes de a pendência existir. A contestação escrita no app às 14h05 só vira pendência quando a sessão do app fecha e é extraída, digamos às 14h35, e o agente de cobrança agiu às 14h06. Ao criar a pendência, a Niadra procura ações de agentes já aplicadas ao mesmo objeto e à mesma operação dentro da janela. Se houver, a pendência já nasce `resolved`, apontando para a ação que a fechou.
+
+### 5. Deixe os outros agentes saberem
+
+Todo agente que ler esta cliente em seguida vê a ação em "Outro agente", com a fonte e a hora. Se o seu CRM precisa mostrar o desfecho, assine os webhooks `action.recorded` e `open_item.closed` e grave lá pela sua integração. Veja [Gatilhos e webhooks](/concepts/triggers-and-webhooks).
+
+## Um assistente que conversa com a equipe
+
+Uma fonte interna também serve um assistente que conversa com alguém da sua empresa, como o advogado que pede uma peça. Nomeie essa pessoa pelo id que o seu sistema dá a ela, com `staff("rh", "U-17")` em Python ou `handles.staff("U-17", "rh")` em TypeScript: a conversa fica interna, o agente lê o que a equipe pode ler, e o que a pessoa diz vale como a palavra da empresa, marcada "(equipe)" nas linhas. Uma conversa com qualquer outra pessoa, ou com alguém nomeado por telefone ou e-mail, é lida como voltada ao cliente, seja qual for a chave: na dúvida, a Niadra aperta. Uma tarefa sem conversa continua interna.
+
+## Quando a equipe desfaz uma correção
+
+Agentes retiram e corrigem fatos por `feedback()`; agentes nunca desfazem o que a empresa retirou. Se uma retratação ou uma correção foi um erro, uma pessoa com o papel `security` a desfaz com [`POST /v1/facts/{fact_id}/restore`](/api/facts-restore): o fato volta como era, com o valor, a validade, a evidência e a confiança que tinha, confirmado pela última vez na hora da restauração; a correção que o substituiu é retratada e recebe a aresta `supersedes` inversa; o slot é fixado de novo só sobre as linhas confirmadas; o histórico do fato guarda cada passo. A rota responde 202 e vira um evento `feedback.restore_fact` da fonte de governança, que a memória aplica em segundos, com um comprovante `admin` (`memory.restore_fact`); o webhook `fact.restored` avisa os endpoints assinados, ao lado de `fact.added` e `fact.retracted`. Um fato que um apagamento levou não existe mais: a rota responde 404, porque só os eventos do cliente sustentam um fato e as menções de feedback da empresa nunca o seguram. Recusa com 409, na hora e de novo quando a memória a aplica: um fato que não está retratado, um que veio por um [vínculo não confirmado](/concepts/identity#proteções-contra-união-errada), um que a consolidação fundiu em outro e uma correção que a restauração do fato original desfez (`undone`: corrija o fato de novo). O próximo contexto de qualquer agente volta a trazer o item.
+
+
+## Delta para trabalho recorrente
+
+Agentes internos voltam muito aos mesmos clientes. Peça com `delta=True` (`delta: true`) e a resposta traz só o que mudou desde a última leitura desta fonte na mesma tarefa; as leituras sem `task_id` dividem uma base só. "O que mudou desde a última vez que VOCÊ olhou" custa dezenas de tokens.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Sistemas, objetos e ações" href="/concepts/systems">
+    objetos, estado derivado e ações em detalhe.
+  </Card>
+  <Card title="Webhooks dos seus sistemas" href="/guides/system-webhooks">
+    como o `invoice.credited` entra.
+  </Card>
+  <Card title="Agentes de voz" href="/guides/voice-agents">
+    a ligação que já sabe do crédito.
+  </Card>
+  <Card title="Aproveitamento do contexto" href="/concepts/context-use">
+    como a ação conta como uso do contexto.
+  </Card>
+</CardGroup>

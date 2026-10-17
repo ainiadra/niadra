@@ -1,0 +1,26 @@
+{
+  "run_id": "01923f6e-3c1a-7b2e-9d4f-5a6b7c8d9e0f",
+  "tool": "search_items",
+  "element": "hard",
+  "label": "ci-2026-09-29-7f3c2a1",
+  "created_at": "2026-09-29T14:02:11Z",
+  "cases": 4,
+  "completed": 3,
+  "skipped": {
+    "tool_error": 1
+  },
+  "overlap": 0.470779,
+  "noise_floor": 0.995671,
+  "effect": 0.524892,
+  "below_noise": 2,
+  "above_noise": 0,
+  "ties": 1,
+  "p_value": 0.5,
+  "limits": [
+    "not_quality",
+    "model_reaction_not_measured",
+    "trivial_for_hard",
+    "few_cases",
+    "cases_skipped"
+  ]
+}

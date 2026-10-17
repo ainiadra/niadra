@@ -1,0 +1,46 @@
+{{- if eq .Values.part "base" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: niadra-cell
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+data:
+  NIADRA_REGION: {{ .Values.region | quote }}
+  NIADRA_CELL_ID: {{ .Values.cellId | quote }}
+  NIADRA_LOG_LEVEL: {{ .Values.logLevel | quote }}
+  NIADRA_LLM_ZERO_RETENTION: {{ .Values.llm.zeroRetention | quote }}
+  NIADRA_LLM_INCLUDE_USAGE: {{ .Values.llm.includeUsage | quote }}
+  NIADRA_ALLOWED_ORIGINS: {{ include "niadra.origins" . | quote }}
+  # Where identity providers send people back after single sign-on (the control plane behind the
+  # ingress, always https): not guessed from each request.
+  NIADRA_CONTROL_PUBLIC_URL: {{ printf "https://%s" .Values.hosts.control | quote }}
+  # Serving processes reach every database through PgBouncer (templates/data.yaml). That hop stays on
+  # the pod network, which only the cell's pods may use to reach it (templates/network.yaml), and
+  # PgBouncer holds no certificate, so it is plain; SCRAM keeps the passwords off the wire, and
+  # PgBouncer itself talks to the database over TLS.
+  NIADRA_DB_HOST: pgbouncer
+  NIADRA_DB_PORT: {{ .Values.pgbouncer.port | quote }}
+  NIADRA_DB_SSLMODE: disable
+  # Migrations, provisioning (CREATE and DROP DATABASE) and the backups go to the database itself.
+  NIADRA_DB_DIRECT_HOST: {{ required "database.host is set at deploy" .Values.database.host | quote }}
+  NIADRA_DB_DIRECT_PORT: "5432"
+  NIADRA_DB_DIRECT_SSLMODE: {{ .Values.database.sslmode | quote }}
+  NIADRA_PGBOUNCER_ADMIN: {{ printf "pgbouncer:%v" .Values.pgbouncer.port | quote }}
+  NIADRA_LOOPS_CONCURRENCY: {{ .Values.loops.concurrency | quote }}
+  NIADRA_SETUP_CONCURRENCY: {{ .Values.setup.concurrency | quote }}
+  NIADRA_BACKUP_MAX_DB_GIB: {{ .Values.backup.maxDbGiB | quote }}
+  NIADRA_BACKUP_RETENTION_DAYS: {{ .Values.backup.retentionDays | quote }}
+  NIADRA_INSTANCE_BACKUP_RETENTION_DAYS: {{ .Values.backup.instanceRetentionDays | quote }}
+  NIADRA_S3_BUCKET: {{ required "objectStorage.bucket is set at deploy" .Values.objectStorage.bucket | quote }}
+  NIADRA_S3_REGION: {{ .Values.region | quote }}
+  NIADRA_REDIS_URL: redis://valkey:6379/0
+  NIADRA_STATE_REDIS_URL: redis://valkey-state:6379/0
+  NIADRA_MODELS_URL: http://models:8080
+  NIADRA_PROMETHEUS_URL: {{ .Values.monitoring.prometheusUrl | quote }}
+  NIADRA_CONTROL_URL: {{ .Values.controlPlane.url | default "http://control:8000" }}
+  NIADRA_KMS_KEY_ID: {{ required "keys.kmsKeyId is set at deploy" .Values.keys.kmsKeyId | quote }}
+  NIADRA_AUDIT_BUCKET: {{ required "audit.bucket is set at deploy" .Values.audit.bucket | quote }}
+  NIADRA_WORKER_PREFETCH: {{ .Values.workers.prefetch | quote }}
+  NIADRA_LARGE_BODIES: {{ .Values.largeBodies.slots | quote }}
+  NIADRA_LARGE_BODY_BYTES: {{ .Values.largeBodies.bytes | int | quote }}
+{{- end }}

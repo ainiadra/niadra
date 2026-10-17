@@ -1,0 +1,156 @@
+---
+title: "Replay in your CI"
+description: "Run real conversations again with the memory of the time, inside your company, on every change of prompt, model or data, and get a statistical verdict instead of a test that fails sometimes."
+---
+
+A team that changes a prompt, a model or the data an agent consults wants to know, before the change reaches customers, whether the agent still does what it did in the conversations that mattered. Running one real turn once says little: models are not deterministic, and a test that fails one time in five is noise unless it failed less before. **Replay** turns [turn records](/en/concepts/turn-records) into **scenarios**, runs each turn N times inside your company and turns the N executions into a statistical **verdict**. Niadra orchestrates: it keeps the scenarios, serves each turn as a case with the build it ran on and decides the verdict. Your CI executes: the SDK's runner fetches the recorded values from wherever they live, runs the agent with its tools intercepted and evaluates structural assertions on the new record. No value leaves your company, and nothing the agent says in a replay goes to a customer.
+
+## Before you start
+
+- The `turns` feature on in the space, and turns recorded in `stored` or `pointer` mode, with `gold` fidelity (the SDK, not OpenTelemetry) and the pins the `recording` document requires (`prompts` and `model` by default). A `hash_only`, `bronze`, `partial` turn or one missing a required pin is kept, but not replayable: the viewer and [`GET /v1/turns/{turn_id}`](/en/api/turn) say why in `replay_blockers`.
+- A key with the `replay` scope, on a source of the CI's own; the routes also take a person with the `integration` or `security` role.
+- Tools recorded with `@Niadra.tool` (Python) or `Niadra.tool` (TypeScript): that is how the runner intercepts them.
+
+## 1. Pick the turns
+
+A scenario keeps up to 50 turns and up to 50 assertions. The turns are copied out of their tier when the scenario is created and stay until an erasure, or `scenario_days` after its last run if you set that window (at least 7 days, no maximum); a turn that left storage answers `replay_expired`.
+
+Three ways to create one:
+
+<CodeGroup>
+```python Python
+from niadra.models.turns import ScenarioCreate, ScenarioFromReport
+
+# From turns you picked in the viewer
+scenario = niadra.api.create_scenario(ScenarioCreate(name="quote-flow", turn_ids=["01J9...", "01J9..."]))
+
+# From a bug report: the conversation's turns, with assertions suggested from the description's words
+scenario = niadra.api.scenario_from_report(ScenarioFromReport(
+    conversation_id="wa-8812", name="wrong-deadline", description="The agent stated a deadline three days off.",
+))
+```
+```typescript TypeScript
+// From turns you picked in the viewer
+const scenario = await niadra.api.createScenario({ name: "quote-flow", turn_ids: ["01J9...", "01J9..."] });
+
+// From a bug report: the conversation's turns, with assertions suggested from the description's words
+const fromReport = await niadra.api.scenarioFromReport({
+  conversation_id: "wa-8812", name: "wrong-deadline", description: "The agent stated a deadline three days off.",
+});
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/scenarios/from-report" \
+  -H "Authorization: Bearer $NIADRA_REPLAY_KEY" -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"conversation_id": "wa-8812", "name": "wrong-deadline", "description": "The agent stated a deadline three days off."}'
+```
+</CodeGroup>
+
+Without assertions, Niadra **suggests** them by rule, from each turn's frame and never from its values: `tool_called` for each tool that answered `ok`, `hard_respected` when the turn reported applied constraints, `no_denial_with_results` when a result showed items, `claims_traced` and `claims_match_state` when there were claims, `effect_once` when there were effects, `handoff_when` when the turn created a handoff and `budget` with twice the recorded calls. From a report, the description's words (a denial, a price or a deadline, a promise, something done twice, a human) suggest the matching assertion, and the description is read and never stored. A suggested assertion comes with `suggested: true`; adjust, drop or add through [`PATCH /v1/scenarios/{scenario_id}`](/en/api/scenario-update), which adds one to the version.
+
+## 2. The assertions
+
+Each assertion is `{id, kind, args, turn_id?}`: with `turn_id`, it applies to that turn; without, to every turn. The runner evaluates each one on the replayed turn's record and the text it emitted, and the outcome is `pass`, `fail` or `not_checked`, which is never a failure:
+
+| Kind | `args` | It passes when |
+|---|---|---|
+| `tool_called` | `tool`, `min` (1) | At least `min` calls of `tool` answered `ok` |
+| `tool_not_called` | `tool` | No call of `tool` |
+| `hard_respected` | | Every call that reported `applied` has `violations: 0` |
+| `no_denial_with_results` | `lang` | No result showed items, or the text has no denial phrase of the language ("we don't have", "out of stock", "não temos") |
+| `claims_traced` | | Every claim has evidence |
+| `claims_match_state` | | Every claim is `matched`, `quoted_found` or `anchored` |
+| `no_promise_without_action` | `lang` | The text has no promise phrase ("I will send", "we will get back"), or the turn recorded an effect or a handoff |
+| `expected_in_topk` | `ref`, `k`, `list_id` | A presented list shows `ref` at a position of at most `k` |
+| `handoff_when` | `expected` (true) | The turn created a handoff exactly when `expected` says so |
+| `effect_once` | `key` | No effect key reaches `done` twice; with `key`, that key reaches it once |
+| `budget` | `max_tool_calls`, `max_model_calls`, `max_tokens`, `max_cost_usd`, `max_latency_ms` | Every count given is within its limit |
+| `lexicon` | `must_include`, `must_not_include`, `lang` | The text holds every phrase of one list and none of the other |
+| `tools_offered_match` | `tools` | The tools offered to the model are exactly `tools` |
+
+## 3. Run it in CI
+
+The SDK's runner asks for each case, checks the pins, fetches the blobs by digest, runs the agent with the tools answering from the record and reports the run; Niadra returns the verdict. `--agent` names a function that makes a fresh agent per execution, which takes the case's input and returns the text it emitted; `--build` names the running build, the same pins the production turns pin.
+
+<CodeGroup>
+```sh Python
+pip install niadra
+niadra replay --agent app.agent:build_agent --build app.agent:BUILD \
+  --scenario sc_01J9... --scenario sc_01JA... --runs 5
+# 0 when the verdict is pass or flaky, 1 on regression, 2 on pin_mismatch or infrastructure_error
+```
+```sh TypeScript
+npm install @niadra/sdk
+npx niadra replay --agent ./dist/agent.js:buildAgent --build ./dist/agent.js:BUILD \
+  --scenario sc_01J9... --runs 5
+```
+```python Python (in code)
+from niadra.replay import Replayer, ReplayInput
+
+def build_agent():
+    def agent(given: ReplayInput | None = None) -> str:
+        return run_my_agent(given.text if given else "")  # tools decorated with @Niadra.tool answer from the record
+    return agent
+
+run = Replayer(niadra, build_agent, build=BUILD).run(["sc_01J9..."], runs=5)
+print(run.verdict, run.scenarios)
+```
+```typescript TypeScript (in code)
+import { Replayer } from "@niadra/sdk";
+
+const run = await new Replayer(niadra, () => (input) => runMyAgent(input.text ?? ""), { build: BUILD }).run(["sc_01J9..."], { runs: 5 });
+console.log(run.verdict, run.scenarios);
+```
+</CodeGroup>
+
+A GitHub Actions workflow example, with the replay key in a secret:
+
+```yaml
+- run: pip install niadra -e .
+- run: niadra replay --agent app.agent:build_agent --build app.agent:BUILD --scenario ${{ vars.NIADRA_SCENARIOS }} --runs 5
+  env:
+    NIADRA_API_KEY: ${{ secrets.NIADRA_REPLAY_KEY }}
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+### What happens in a run
+
+- **The pin check.** For every pin outside `vary`, the running build and the recorded one must be equal when the recording requires the pin, and when both sides carry it. A difference answers 422 `pin_mismatch`, with `pins: [{name, recorded, running}]`, and no case is served. To test a new prompt on purpose, name the pin: `--vary prompts`.
+- **The values.** In `stored` mode each blob comes with its kept, masked content; in `pointer` mode the runner reads each `pointer` with your credentials, through the SDK's content resolver, and checks the digest. A blob that cannot be read or does not match is an infrastructure error, counted apart and never an assertion failure.
+- **The tools.** A call whose normalized arguments match a recorded call's `args_hash` answers with the recorded result, the calls of one tool taken in order. One that matches none runs live only when the tool was marked `dry_run=True` (`dryRun: true`); otherwise it answers empty and counts as divergent. A framework tool not wrapped with `tool()` never runs live in a replay.
+- **What the agent reads and writes.** The pack of the time is the blob of the record's `pack` read; working memory starts empty and its writes stay with the runner; a coordination check answers from the record. The replayed turn's record stays with the runner, marked `synthetic`, and is never sent as a turn.
+- **The modes.** `hermetic_turn` (the default) runs the turn alone, with the recorded pack and every tool answering from the record; `hermetic_conversation` runs the scenario's turns in order, until the first strong divergence; `era_memory` runs with the pack of the time and the current state of the objects the tools read.
+- **The input.** Each case carries the customer's message that opened the turn, masked, and the conversation's history up to it (at most the last 50 public messages of the previous 7 days). `--runs` runs each turn N times, numbered from 1; a `paraphrase` function rewrites the input of some executions, so an intermittent result is confirmed with other words.
+
+## 4. Read the verdict
+
+Per assertion, over the executions that completed and in which it applied (`not_checked` left out): `passed` and `failed`, the **baseline** (the same assertion in the scenario's latest earlier run whose verdict was `pass` or `flaky`; without one, the recording, which passed as many times as the run checked), `drop` (the baseline's pass rate minus the run's) and `p_value` (the one-sided Fisher exact test that the run fails more than the baseline). `regression` is `failed >= 2`, `drop >= 0.2` and `p_value < 0.05`; `flaky` is a failure short of a regression.
+
+Per scenario: `pin_mismatch` when any execution stopped at the pins; `infrastructure_error` when none completed; `regression` when any assertion regressed; `flaky` when any wavered; `pass` otherwise. `needs_paraphrase` says an assertion both passed and failed across the same executions: run again with paraphrases before trusting it. The run's verdict is the worst of its scenarios', in the order `pass`, `flaky`, `infrastructure_error`, `pin_mismatch`, `regression`, and the command exits with 1 only on a regression: flaky results are listed and never block.
+
+When an execution fails an assertion that reads what the tools showed, Niadra checks the recorded turn's observations against the declared types and opens a [data issue](/en/api/data-issues) for the data's owner (`null_field`, `out_of_vocabulary`, `stale_source`), with up to 50 references and no value: a regression that belongs to the data, not to the agent, reaches whoever can fix it.
+
+## 5. Bisect with the change log
+
+[`GET /v1/changes`](/en/api/changes) lists what changed between consecutive builds of each agent, newest first: `prompt` (one prompt's version, by name), `model`, `code` (the assembler or a tool's schema), `data` (the corpus digest), `config` (a section of the space's configuration the turn read, by its digest: the claim contract, the types, the bindings) and `compiler` (the context compiler's version), with `before` and `after` and when the new build appeared. A regression between two runs points at the changes between their builds.
+
+## Privacy
+
+The case carries the conversation's history masked and, in `pointer` mode, no recorded value: the runner reads them inside your company. A scenario's turns are personal data with the purpose `quality`, stay `scenario_days` after the last run and are erased with the rest of the person's turns. A run's results hold verdicts and counts; `error` and `detail` never carry personal data.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Turn records" href="/en/concepts/turn-records">
+    what a turn records and why it is replayable or not.
+  </Card>
+  <Card title="Metadata only" href="/en/guides/metadata-only">
+    replay with the values in your bucket.
+  </Card>
+  <Card title="Ask for a replay case" href="/en/api/replay-cases">
+    the reference of `POST /v1/replay/cases`.
+  </Card>
+  <Card title="Outcomes and attribution" href="/en/concepts/outcomes">
+    the tool counterfactual, which runs through the same runner.
+  </Card>
+</CardGroup>

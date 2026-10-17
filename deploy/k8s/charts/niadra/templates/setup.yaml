@@ -1,0 +1,106 @@
+{{- if eq .Values.part "app" }}
+# Before every install and upgrade, in order: roles and databases (as the master user,
+# files/db-init.sql), then `serve setup` as the schema owner: the control migrations, the cell
+# migrations, every space database in waves (sandboxes, then production, then dedicated instances),
+# the broker topology and the bucket rules. A failed hook fails the deploy before any deployment
+# changes, and the running version keeps serving.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: niadra-db-init
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-20"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  db-init.sql: |
+    {{- .Files.Get "files/db-init.sql" | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: niadra-db-init
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: postgres:17-alpine
+          command:
+            - psql
+            - --no-psqlrc
+            - --set=owner_password=$(OWNER_PASSWORD)
+            - --set=app_password=$(APP_PASSWORD)
+            - --set=system_password=$(SYSTEM_PASSWORD)
+            - --set=site_password=$(SITE_PASSWORD)
+            - --file=/sql/db-init.sql
+          env:
+            - {name: PGHOST, value: {{ .Values.database.host | quote }}}
+            - {name: PGDATABASE, value: postgres}
+            - {name: PGSSLMODE, value: {{ .Values.database.sslmode | quote }}}
+          envFrom: [{secretRef: {name: niadra-db-init}}]
+          volumeMounts: [{name: sql, mountPath: /sql}]
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 128Mi}
+      volumes: [{name: sql, configMap: {name: niadra-db-init}}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: niadra-setup
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  # Fails closed: `serve setup` exits non-zero when any space database failed to migrate, the hook
+  # fails and Helm stops the upgrade before the pods roll. Two retries cover a broker or database that
+  # is briefly away; a migration error fails the same way every time, so more retries would only delay
+  # the failure. Failed pods stay until the next deploy: `kubectl -n niadra logs job/niadra-setup`.
+  backoffLimit: 2
+  activeDeadlineSeconds: 1500
+  template:
+    metadata:
+      labels: {niadra.com/db-client: "true"}
+    spec:
+      restartPolicy: Never
+      # On a first install the broker may still be starting; wait for it instead of spending retries.
+      initContainers:
+        - name: wait-for-broker
+          image: {{ include "niadra.image" (list . "server") }}
+          command:
+            - python
+            - -c
+            - |
+              import socket, time
+              for _ in range(120):
+                  try:
+                      socket.create_connection(("niadra-rabbitmq.{{ .Release.Namespace }}.svc", 5672), timeout=3).close()
+                      break
+                  except OSError:
+                      time.sleep(5)
+              else:
+                  raise SystemExit("broker not reachable after 10 minutes")
+          {{- include "niadra.securityContext" . | nindent 10 }}
+      containers:
+        - name: setup
+          image: {{ include "niadra.image" (list . "server") }}
+          args: [setup]
+          envFrom:
+            - configMapRef: {name: niadra-cell}
+            - secretRef: {name: niadra-cell}
+            - secretRef: {name: niadra-owner}
+          {{- include "niadra.resources" .Values.loops.resources | nindent 10 }}
+          {{- include "niadra.securityContext" . | nindent 10 }}
+{{- end }}

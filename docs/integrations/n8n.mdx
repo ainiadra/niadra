@@ -1,0 +1,45 @@
+---
+title: "n8n"
+description: "Um nó de comunidade do n8n: contexto do cliente, turnos, busca no histórico, verificação, transbordo e fim da conversa, antes e depois do seu AI Agent."
+---
+
+`n8n-nodes-niadra` é um nó de comunidade do n8n. Ponha-o antes e depois do seu nó AI Agent (ou entregue-o ao agente como ferramenta) para o agente começar cada conversa sabendo o que o cliente já contou aos outros agentes, e para o que ele diz chegar aos outros também.
+
+## Instalar
+
+No n8n, **Settings > Community Nodes > Install** e digite `n8n-nodes-niadra`. O pacote mora em `packages/n8n-nodes-niadra` do repositório do SDK de TypeScript e é publicado no npm junto do `@niadra/sdk`; para rodar a partir do repositório, `pnpm check` na pasta do pacote. Construído e testado contra `n8n-workflow` 2.16.
+
+## As operações
+
+| Operação | O que faz |
+|---|---|
+| Get Context | O contexto do cliente para o prompt do agente: `text` (depois da sua mensagem de sistema) e `suffix` (as falas de outros canais, para o fim do prompt) |
+| Track Turn | Registra o que o cliente ou o agente disse, chaveado pelo id da mensagem no provedor, então um passo repetido é registrado uma vez |
+| Search History | Busca em conversas passadas, promessas, ações e objetos de negócio; **When** recebe o período nas palavras do cliente ("last week", "semana passada") |
+| Verify | Registra que o cliente provou quem é (um OTP, um login, o atestado da operadora) |
+| Handoff | Registra a transferência para uma pessoa ou para outro agente |
+| End | Registra que a conversa terminou |
+
+As cinco primitivas estão aí: Get Context (contexto), Track Turn (turnos), Search History (a ferramenta), Verify (verificação) e Handoff (transbordo).
+
+## A credencial
+
+**Niadra API**: uma chave de fonte do seu espaço (`nia_sk_...`). A chave nomeia a região e o espaço, então o endereço vem dela; **Base URL** só para o emulador local.
+
+## Limites
+
+- Toda operação falha aberta por padrão: com a Niadra lenta ou fora, o nó devolve um resultado vazio com um campo `error` e o workflow segue. Desligue **Fail Open** para parar o workflow.
+- Amarre **Customer Handle** aos dados do seu gatilho (o `wa_id` do WhatsApp, o número de quem liga, o seu id de usuário), nunca a um valor que o modelo escreva: o cliente nunca é algo que o modelo escolhe.
+- O nó não traz a memória do agente nem a linha do tempo; para isso, use o SDK ou o servidor MCP.
+- O desenho do nó e da credencial segue o nó do n8n da Mem0 (MIT), com atribuição em `NOTICE`.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Flowise" href="/integrations/flowise">
+    os nós de memória e de ferramentas do Flowise.
+  </Card>
+  <Card title="Início rápido" href="/quickstart">
+    a chave, o espaço de sandbox e o primeiro contexto.
+  </Card>
+</CardGroup>

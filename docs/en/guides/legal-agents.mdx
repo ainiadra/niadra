@@ -1,0 +1,191 @@
+---
+title: "Legal agents"
+description: "A law firm with an agent that reads court notices and prepares drafts: deadlines computed by the firm's rule with their gaps declared, anchored citations, immutable documents, one lock per task and the courts' content outside Niadra."
+---
+
+This guide builds, with synthetic examples, what a law firm turns on in Niadra for an agent that triages court notices, counts deadlines and prepares drafts for a lawyer to review. In law, the most expensive mistake is a number: a deadline three days off, a cited article that says something else. Each part below is a feature of the space, turned on by itself.
+
+## What the sector asks for
+
+- A deadline is computed by a rule of the firm, over different time axes (the date of the act, the date it was made available, the date of publication), and the rule does not know everything: a municipal holiday, a court ordinance, a doubled deadline. The agent must state the gap when it states the deadline.
+- "Not checked" never becomes "no": if nobody checked that the addressee is the client, the deadline does not count and the draft does not go out.
+- A court's text is third-party content, never an instruction, and in many firms it may not leave the firm's own infrastructure.
+- A filed draft is immutable: nothing rewrites it in silence.
+- Two agents, or an agent and a lawyer, never do the same task on the same case at the same time.
+
+## 1. The type: a court notice with a deadline
+
+The court notice is a **customer** type (the case belongs to the client), mirrored by introspection of the firm's case system database. The points that matter:
+
+```json
+{
+  "type": "court_notice",
+  "ownership": "subject",
+  "mirror_of": { "system": "case_system", "derived_by": "introspection", "fingerprint": "sha256:...", "drift": "alert" },
+  "time": {
+    "occurred_on": { "origin": "source" },
+    "made_available_on": { "origin": "source" },
+    "published_on": { "origin": "derived", "rule": "first_business_day_publication@v3" },
+    "known_at": { "origin": "platform", "immutable": true },
+    "timers_on": "published_on"
+  },
+  "content": { "mode": "pointer", "scan": "rules", "fields": ["content"] },
+  "fields": {
+    "addressee_is_client": {
+      "type": "bool", "logic": "tri",
+      "observers": [{ "who": "machine", "rule": "name_or_registry_match@v7", "validity": "24h" }, { "who": "human", "validity": "never", "overrides": ["machine"] }],
+      "unobserved_blocks": ["count_deadline", "draft", "notify"]
+    },
+    "content": { "type": "text", "completeness": { "levels": ["dispositive", "full"] } },
+    "under_seal": { "type": "bool", "logic": "tri", "observers": [{ "who": "machine", "validity": "24h" }, { "who": "human", "validity": "never", "overrides": ["machine"] }], "unobserved_blocks": ["model_read", "derive"] }
+  },
+  "values": {
+    "due_date": {
+      "rule": "procedural_deadline@v9",
+      "inputs": ["published_on", "days_in_text", "counting", "calendar@2026"],
+      "validity": "until_input_or_rule_change",
+      "declared_gaps": ["state_and_municipal_holiday", "court_ordinance", "double_deadline"],
+      "gap_effect": "errs_early",
+      "absent_as": "no_deadline"
+    }
+  },
+  "lifecycle": {
+    "transitions": [
+      { "from": "observed", "to": "open", "by": ["source"], "when": "addressee_is_client == yes and due_date != no_deadline" },
+      { "from": "open", "to": "fulfilled", "by": ["source", "human"], "evidence": "required" },
+      { "from": "open", "to": "expired_without_act", "by": ["clock"] },
+      { "from": "*", "to": "sealed", "by": ["source", "human"], "erase_derived": ["parties", "subjects"] }
+    ],
+    "forbidden": [{ "from": "fulfilled", "to": "open" }],
+    "latches": ["fulfilled"],
+    "outcome": { "final": ["fulfilled"], "expired_without_outcome": { "after": "due_date" } }
+  },
+  "timers": { "notice_48h": { "due": "due_date - 48h", "once_per": "publication", "on_fire": ["notify"] } },
+  "purposes": {
+    "display": { "on_stale": "serve_with_age" },
+    "claim": { "on_stale": "serve_with_prohibitions", "prohibitions": ["affirm_no_new_activity", "affirm_deadline_as_final"] },
+    "decide": { "on_stale": "serve_with_age" }
+  }
+}
+```
+
+The firm computes `due_date` with its own rule (`procedural_deadline@v9`; Niadra keeps the name, never the logic) and pushes the value through [`POST /v1/objects/push`](/en/api/objects-push); the value enters as a versioned fact, with its gaps and which way they err, and a revision of the rule or of an input creates a new version and re-arms the 48-hour timer, which fires again naming the firing it supersedes. `addressee_is_client` is a three-valued field: a machine observes it for 24 hours through the name or registry matching rule, a person observes it forever and overrides the machine, and while nobody observed it, it **blocks** counting the deadline, drafting and notifying. A notice under seal (`under_seal`) blocks the model read and derivation, and the transition to `sealed` seals the object, removing the parties. The content stays by pointer in the firm's storage ([Metadata only](/en/guides/metadata-only)).
+
+## 2. The agent's turn
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, system_id
+from niadra.turns import tool
+
+niadra = Niadra(channel="case_system")
+BUILD = Niadra.build(prompts={"triage": "v12", "draft": "v4"}, model="claude-sonnet-4-5", corpus_digest=CORPUS_DIGEST)
+
+
+@tool("read_notice", provenance=lambda r: [{"ref": f"court_notice:case_system:{r['id']}", "fields": {"due_date": r["due_date"]},
+                                            "provenance": {"source": "live", "source_observed_at": r["observed_at"], "scope": "customer"}}])
+def read_notice(notice_id: str) -> dict:
+    return case_system.notice(notice_id)
+
+
+with niadra.task("triage-88213", object="court_notice:case_system:88213", view="task:triage", verification="no_customer", channel="case_system") as task:
+    locked = task.claim(object="court_notice:case_system:88213", task="draft", lease_s=900)
+    if not locked.held:
+        raise SystemExit(f"someone else is drafting: {locked.error}")
+    with task.turn(kind="event", build=BUILD):
+        context = task.context(include=["state"])
+        notice = read_notice("88213")
+        state = context.state.objects[0] if context.state and context.state.objects else None
+        if state and "count_deadline" in (state.blocked or {}):
+            task.action("triage.hold", result="addressee not verified by a person")
+        else:
+            draft = task.claims.guard_text(model(prompt_with(context, notice)), context="contestation", immutable=True)
+            task.action("draft.prepared", object="court_notice:case_system:88213", result="draft ready for review")
+```
+```typescript TypeScript
+import { Niadra } from "@niadra/sdk";
+
+const niadra = new Niadra();
+const BUILD = Niadra.build({ prompts: { triage: "v12", draft: "v4" }, model: "claude-sonnet-4-5", corpus_digest: CORPUS_DIGEST });
+const readNotice = Niadra.tool("read_notice", (id: string) => caseSystem.notice(id), {
+  provenance: (r) => [{ ref: `court_notice:case_system:${r.id}`, fields: { due_date: r.due_date }, provenance: { source: "live", source_observed_at: r.observed_at, scope: "customer" } }],
+});
+
+const task = niadra.task({ task_id: "triage-88213", channel: "case_system", object: "court_notice:case_system:88213", view: "task:triage", verification: "no_customer" });
+const locked = await task.claim({ object: "court_notice:case_system:88213", task: "draft", leaseS: 900 });
+if (!locked.held) throw new Error(`someone else is drafting: ${locked.error}`);
+await task.turn({ kind: "event", build: BUILD }, async () => {
+  const ctx = await task.context({ include: ["state"] });
+  const notice = await readNotice("88213");
+  const state = ctx.state?.objects[0];
+  if (state && "count_deadline" in (state.blocked ?? {})) {
+    task.action({ operation: "triage.hold", result: "addressee not verified by a person" });
+  } else {
+    const draft = await task.claims.guardText(await model(promptWith(ctx, notice)), { context: "contestation", immutable: true });
+    task.action({ operation: "draft.prepared", object_refs: ["court_notice:case_system:88213"], result: "draft ready for review" });
+  }
+});
+await task.end();
+```
+</CodeGroup>
+
+The task lock (`draft` on the notice) makes the second agent, or the lawyer who opened the same case in the panel, see `task_locked` instead of duplicating the work. `blocked` on the read says, by the type's declaration, what a value nobody observed blocks; Niadra applies `claim` and `decide` itself, and `count_deadline` and `draft` are for the agent's code to honor. A filed draft is an **immutable** context of the contract: a block sends the whole draft to a person, untouched, and never rewrites it.
+
+## 3. The claim contract
+
+```json
+{
+  "version": "2026-09-29.1",
+  "languages": ["pt"],
+  "categories": [
+    {
+      "id": "deadline",
+      "detect": { "classes": ["date", "duration"], "terms": ["prazo", "vence", "até o dia", "dias úteis", "dias corridos"] },
+      "evidence": { "value": { "type": "court_notice", "value": "due_date", "must_state_gaps": true, "gap_terms": { "state_and_municipal_holiday": ["feriado estadual", "feriado municipal", "feriado local"], "court_ordinance": ["portaria", "suspensão de prazo"], "double_deadline": ["prazo em dobro"] } } },
+      "natures": { "computed": "check", "quoted": "verbatim", "model": "block" },
+      "actions": { "default": "warn", "contexts": { "contestation": "block" } }
+    },
+    {
+      "id": "legal_citation",
+      "detect": { "patterns": ["article_citation", "precedent_citation"] },
+      "evidence": { "anchor": { "min_match": 0.9, "coverage": "law" } },
+      "actions": { "default": "discard_anchor_and_count", "contexts": { "contestation": "block" } }
+    },
+    {
+      "id": "fact_in_document",
+      "detect": { "document_sections": ["dos_fatos"] },
+      "evidence": { "anchor": { "min_match": 0.9, "coverage": "fact" } },
+      "actions": { "default": "warn" }
+    }
+  ],
+  "negative_corpus": { "version": "2026-09-29", "phrases": ["Não temos certeza do prazo até a conferência.", "O prazo para contestação é de 15 dias úteis, em regra.", "Processo nº 0001234-56.2026.8.26.0100."] },
+  "outputs": { "immutable": ["contestation", "petition"], "mutable": ["chat", "internal_note"] }
+}
+```
+
+"The deadline falls on October 5" is checked against the notice's `due_date` in the turn; the date matches, but the value declares gaps, so the draft must state them with the words of `gap_terms` ("subject to a local holiday or a court ordinance"), or the verdict is `gap_not_stated` and, in a contestation, the whole draft goes to the lawyer. A deadline the model said with no value in the turn (`unsupported`) is blocked in any context. A citation of an article or a precedent is an **anchor**: the quoted text is compared with the document the turn has in hand (put back by pointer, inside the firm), and it holds at 0.90 or above; below that it is discarded and counted, never repaired. "The deadline to contest is 15 business days, as a rule" is a phrase of the trade and sits in the negative corpus. A number inside quotation marks, in the other party's allegation, is quoted: reproduced as it is, even when false, and checked only for being in a document of the turn. See [Claims](/en/concepts/claims).
+
+## 4. Record, replay and retention
+
+Each turn of the agent is recorded with its build (the triage and draft prompts, the model, the digest of the corpus of templates), and a turn that blocked a draft is flagged `guard_acted` and kept. When the firm changes the draft prompt, [replay](/en/guides/replay-in-ci) runs the turns of the notices that mattered with the memory of the time, inside the firm (the values are in its storage, by pointer), and the assertions `claims_match_state`, `claims_traced` and `tool_called: read_notice` say whether the agent still counts the deadline from the computed value. A case in dispute gets a [legal hold](/en/concepts/privacy#legal-holds), which keeps its turns and state out of purging until the release. The daily index of the kept turns enters the firm's audit chain through the `audit.root` event.
+
+## What stays off
+
+Everything above ships on: `state` brings the type and the reads with `blocked` and the gaps; `claims` and `turns`, the contract and the record; `coordination`, the task lock; `legal_holds`, the hold. The contract starts by counting, not blocking: a firm sees how often the agent states a deadline with no value in the turn before deciding to block anything.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Object types and state" href="/en/concepts/object-types">
+    computed values, declared gaps, observers and what an unobserved value blocks.
+  </Card>
+  <Card title="Claims" href="/en/concepts/claims">
+    anchors, natures and the immutable output.
+  </Card>
+  <Card title="Metadata only" href="/en/guides/metadata-only">
+    the courts' text outside Niadra.
+  </Card>
+  <Card title="Internal agents" href="/en/guides/internal-agents">
+    tasks, task views and the `no_customer` level.
+  </Card>
+</CardGroup>

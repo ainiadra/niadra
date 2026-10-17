@@ -1,0 +1,96 @@
+---
+title: "Anthropic"
+description: "O wrap() do cliente da Anthropic: o contexto em system, o turn_block na última mensagem do usuário e o uso com as leituras e escritas de cache."
+---
+
+`wrap()` (Python) e `wrapAnthropic()` (TypeScript) embrulham o cliente da Anthropic, inclusive os clientes do Bedrock e do Vertex do mesmo SDK em Python, para `messages.create` e `messages.stream` receberem o contexto e registrarem a resposta.
+
+## Instalar
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[anthropic]'   # anthropic 1.8 ou mais novo, abaixo da 2
+```
+```sh TypeScript
+npm install @niadra/sdk @anthropic-ai/sdk   # @niadra/sdk/anthropic
+```
+</CodeGroup>
+
+A integração em TypeScript está no `@niadra/sdk` no npm.
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | O contexto (depois das notas do agente, com `agent_memory=`) vai em `system`, como bloco de texto depois do seu texto de sistema; leva `cache_control` só quando os seus blocos de sistema já têm, então entra num prefixo que você escolheu guardar em cache. O `turn_block` vai como bloco de texto no fim da última mensagem do usuário, marcado como dado, ou como mensagem do usuário própria quando a última não é do cliente |
+| Turnos | A resposta (os blocos de texto) é registrada como turno do agente com o uso da Anthropic: `input_tokens`, `cache_read_input_tokens` e `cache_creation_input_tokens`. Em TypeScript, a mensagem mais nova do usuário também é registrada como turno do cliente |
+| Ferramentas | `kit.anthropic_definitions()` (Python) entrega o kit no formato `name`, `description`, `input_schema`; o embrulho não mexe nas ferramentas |
+| Verificação | `conversation.verify()` antes da chamada |
+| Transbordo | `conversation.handoff()` onde o seu fluxo transfere |
+
+## Exemplo mínimo
+
+<CodeGroup>
+```python Python
+"""Anthropic's Messages API with the customer's context in the system prompt."""
+
+from anthropic import Anthropic
+
+from niadra import Niadra, phone
+from niadra.integrations.anthropic import wrap
+
+niadra = Niadra(channel="chat")
+claude = wrap(Anthropic())
+
+with niadra.conversation("thread-81", subject=phone("+5511912345678")) as conversation:
+    conversation.customer("Where is my replacement lid?")
+    message = claude.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=512,
+        system=[{"type": "text", "text": "You are Acme's agent.", "cache_control": {"type": "ephemeral"}}],
+        messages=[{"role": "user", "content": "Where is my replacement lid?"}],
+    )
+    print(message.content[0].text)
+```
+```typescript TypeScript
+import Anthropic from "@anthropic-ai/sdk";
+import { Niadra, handles } from "@niadra/sdk";
+import { wrapAnthropic } from "@niadra/sdk/anthropic";
+
+const niadra = new Niadra();
+const anthropic = new Anthropic();
+
+/** One customer message in; `userId` comes from your session, never from the model. */
+export async function reply(userId: string, chatId: string, text: string): Promise<string> {
+  const convo = niadra.conversation({ subject: handles.appUserId(userId), channel: "web_chat", conversation_id: chatId });
+  const claude = wrapAnthropic(anthropic, convo, { verify: { method: "login", level: "V2" } });
+  const message = await claude.messages.create({
+    model: "claude-sonnet-4-5",
+    max_tokens: 1024,
+    system: "You are Acme's support agent. Be brief.",
+    messages: [{ role: "user", content: text }],
+  });
+  return message.content.map((block) => (block.type === "text" ? block.text : "")).join("");
+}
+```
+</CodeGroup>
+
+O mesmo código está em `examples/anthropic_messages.py` e `examples/anthropic.ts`.
+
+## Limites
+
+- Fora de um bloco de conversa ou tarefa, as chamadas passam intactas, e nada do que o embrulho faz derruba a chamada.
+- Em TypeScript, para `messages.stream()` prepare o corpo com `anthropicParams()` e registre a mensagem final com `recordAnthropic()`.
+- O embrulho não acrescenta `cache_control` onde você não usa cache de prompt: ele nunca muda a sua estratégia de cache.
+- Testado contra `anthropic` 1.8 e `@anthropic-ai/sdk` 0.128 com o transporte substituído e a Niadra no emulador.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Amazon Bedrock" href="/integrations/bedrock">
+    o mesmo para a API Converse.
+  </Card>
+  <Card title="O contexto e as views" href="/concepts/context">
+    o modelo de destino e os pisos de cache.
+  </Card>
+</CardGroup>

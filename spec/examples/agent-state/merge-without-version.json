@@ -1,0 +1,14 @@
+{
+  "scope": {
+    "kind": "task",
+    "id": "renewal-2026-10"
+  },
+  "agent": "renewal",
+  "mode": "merge_by_key",
+  "body": {
+    "documents_checked": [
+      "rg",
+      "comprovante"
+    ]
+  }
+}

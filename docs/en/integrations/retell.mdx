@@ -1,0 +1,145 @@
+---
+title: "Retell AI"
+description: "The server side of a Retell voice agent: the context as dynamic variables on the inbound webhook, the tools as custom functions, the call_ended event and, in TypeScript, the custom LLM websocket."
+---
+
+Retell reaches your server three ways, and the adapter answers each: the inbound call webhook (`call_inbound`, set on the phone number), the Retell LLM's custom functions and the agent webhook (`call_started`, `transfer_started`, `call_ended`, `call_analyzed`). Every request carries `x-retell-signature` (`v=<unix ms>,d=<hex HMAC-SHA256 of body + ms>`, keyed by the Retell API key that signs webhooks); without a valid one, within five minutes, the answer is 401. No Retell package is needed.
+
+## Install
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[retell]'   # no framework dependency
+```
+```sh TypeScript
+npm install @niadra/sdk   # @niadra/sdk/retell needs web APIs only
+```
+</CodeGroup>
+
+The TypeScript integration is in `@niadra/sdk` on npm.
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | The inbound webhook starts the caller's first read (`begin()`, after the attestation when you pass one), reads the agent's notes meanwhile, waits for it within `context_voice_start` (1.5 s; the phone rings meanwhile) and answers the dynamic variable `niadra_context`: put `{{niadra_context}}` in the agent's prompt, after your instructions. TypeScript also answers `niadra_turn` (the live turns from other channels and the delta), for `{{niadra_turn}}` wherever you want it. On an outbound call, `outbound()` (Python) gives the same variables and a `metadata` for `create_phone_call`; in TypeScript, `call_started` keeps the customer of outbound and web calls | In TypeScript, the custom LLM sends the caller's last utterance as `query` and, on each `update_only` that ends with the caller speaking, the utterance so far with `prefetch()`. The prefetch is reused only for the identical `query`; a longer utterance finds the memory already open, and a turn with time words or a count is recomputed at the read |
+| Turns | On `call_ended`, each utterance of `transcript_object` becomes a turn at its moment in the call, and the conversation ends. Idempotency keys come from the call, so a redelivered event records nothing twice. The other events answer 200 |
+| Tools | `tool_configs(url)` (Python) and `handlers.toolConfigs({ url })` (TypeScript) produce the history tools as Retell custom tools (the Retell LLM's `general_tools`), with the kit's names, descriptions and schemas word for word; the custom function runs each one for the customer of the call the request carries, never for an argument of the model |
+| Verification | `attestation=` (Python) or `verify` (TypeScript), a function of the inbound payload (reading `custom_sip_headers`, for instance), returns the carrier's STIR/SHAKEN level; it goes to `verify()` before the first context |
+| Handoff | A transferred call (`transfer_started`, or `call_transfer` on `call_ended`) becomes a handoff to a person, once |
+
+The Niadra conversation id is Retell's `call_id` (in Python, `metadata.niadra_conversation_id` when the call carries one, which `outbound()` sets). The subject is the customer's number: the caller on an inbound call, the called number on an outbound one; pass `subject=` (a function of the call) for customers identified otherwise.
+
+## Minimal example
+
+<CodeGroup>
+```python Python
+"""The server side of a Retell voice agent: inbound webhook, custom functions and call events.
+
+Run: uvicorn retell_server:app. On the Retell phone number, set the inbound webhook to
+/retell/inbound; add the tools from tool_configs() to the Retell LLM's general_tools; set the
+agent's webhook to /retell/events. Put {{niadra_agent_memory}} and {{niadra_context}} in the
+prompt, after your instructions.
+"""
+
+import os
+
+from fastapi import FastAPI, Request, Response
+
+from niadra import AsyncNiadra
+from niadra.integrations.retell import RetellWebhooks, tool_configs
+
+niadra = AsyncNiadra(channel="voice")
+retell = RetellWebhooks(niadra, api_key=os.environ["RETELL_API_KEY"], agent_memory=True)
+app = FastAPI()
+TOOLS = tool_configs("https://agent.example.com/retell/tools", agent_memory=True)
+
+
+def answer(result) -> Response:
+    return Response(result.text(), result.status, media_type=result.content_type)
+
+
+@app.post("/retell/inbound")
+async def inbound(request: Request) -> Response:
+    return answer(await retell.inbound(await request.body(), request.headers))
+
+
+@app.post("/retell/tools")
+async def tools(request: Request) -> Response:
+    return answer(await retell.custom_function(await request.body(), request.headers))
+
+
+@app.post("/retell/events")
+async def events(request: Request) -> Response:
+    return answer(await retell.webhook(await request.body(), request.headers))
+
+
+async def call_out(to_number: str) -> dict:
+    """What to pass to Retell's create_phone_call for an outbound call to a customer."""
+    return await retell.outbound(to_number)
+```
+```typescript TypeScript
+// The three Retell endpoints on Hono. Every handler takes the raw body: the signature covers the exact bytes.
+import { Hono } from "hono";
+import { Niadra } from "@niadra/sdk";
+import { retell } from "@niadra/sdk/retell";
+
+const niadra = new Niadra();
+const handlers = retell({ niadra, apiKey: process.env.RETELL_API_KEY ?? "" });
+const respond = (c, { status, body }) => c.json(body, status);
+
+const app = new Hono();
+app.post("/retell/inbound", async (c) => respond(c, await handlers.inbound(await c.req.text(), c.req.raw.headers)));
+app.post("/retell/webhook", async (c) => respond(c, await handlers.webhook(await c.req.text(), c.req.raw.headers)));
+app.post("/retell/tools", async (c) => respond(c, await handlers.tool(await c.req.text(), c.req.raw.headers)));
+
+// For the Retell LLM's general_tools.
+export const TOOLS = handlers.toolConfigs({ url: "https://agent.example.com/retell/tools" });
+export default app;
+```
+</CodeGroup>
+
+The Python code is in `examples/retell_server.py` in the SDK repository.
+
+## Custom LLM (websocket)
+
+With a custom LLM (Retell's LLM WebSocket), your server makes the model call. In TypeScript, `handlers.llm(callId, { send, instructions })` is one session per websocket (`/llm-websocket/:call_id`): `open()` asks for the call details (and speaks your greeting), `receive(event)` answers the pings, records the utterances once a response is required and resolves to a turn whose `messages` carry your instructions, the agent's notes, the pack and the call so far, with the `turn_block` at the end of the customer's last utterance; `turn.respond(text)` sends the response (in chunks with `{ complete: false }`, with `endCall` or `transferNumber`, which records the handoff). Utterances carry the same idempotency key on the websocket and in `call_ended`, so recording both ways stores each one once. Retell does not sign the websocket, so the session never takes the customer from the socket's own `call_details`: it reads and records only for a call a signed webhook registered (`inbound` or `call_started`, in the `store`); until then the model gets its messages without context and nothing is recorded. `trustCallDetails: true` turns the old behavior back on, only for a socket that accepts Retell and no one else (an IP allowlist, a secret in its URL).
+
+```typescript
+wss.on("connection", (ws, request) => {
+  const session = handlers.llm(callIdFrom(request.url), {
+    send: (event) => ws.send(JSON.stringify(event)),
+    instructions: "You are Acme's receptionist.",
+  });
+  session.open("Acme Energy, how can I help?");
+  ws.on("message", async (data) => {
+    const turn = await session.receive(JSON.parse(String(data)));
+    if (turn) turn.respond(await yourModel(turn.messages));
+  });
+  ws.on("close", () => void session.close());
+});
+```
+
+Python has no websocket session: open the conversation with the `call_id` and use the model SDK's `wrap()` or the adapter of the framework you call; the webhooks above keep handling the context, the tools and the events.
+
+## Agent memory
+
+`RetellWebhooks(..., agent_memory=True)` and `tool_configs(url, agent_memory=True)` (Python), or `retell({ ..., agentMemory: true })` (TypeScript), bring the agent's own notes in the variable `niadra_agent_memory` (put `{{niadra_agent_memory}}` right before `{{niadra_context}}`), before the pack in the custom LLM's messages, and add `search_agent_memory` to the custom functions. See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- In Python, `niadra` is a `Niadra` or an `AsyncNiadra`: with the sync client, call the `*_sync` twins. `override_agent_id=` (Python) or `inboundFields(call)` (TypeScript) add fields to the inbound webhook's answer, such as the agent that takes the call.
+- In TypeScript, each call's customer and verification level sit in a `store` between the webhooks (in memory by default; pass your own for more than one instance), and `otherTool(name, args, call)` serves the custom functions that are not Niadra's, so one URL can serve them all.
+- Niadra slow or down never fails a call: the inbound webhook answers empty variables, a tool answers that the history is unavailable, and the webhook still answers 200.
+- Tested with payloads in Retell's public format and signatures computed in the test itself, against the emulator; in TypeScript the handlers also run on Deno, Bun and workerd.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Vapi" href="/en/integrations/vapi">
+    the same design, with one server URL.
+  </Card>
+  <Card title="ElevenLabs" href="/en/integrations/elevenlabs">
+    the initiation, tool and post-call webhooks.
+  </Card>
+</CardGroup>

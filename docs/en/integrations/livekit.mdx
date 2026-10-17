@@ -1,0 +1,130 @@
+---
+title: "LiveKit Agents"
+description: "The LiveKit voice agent starts every call knowing who is on the line, in Python and in Node."
+---
+
+The LiveKit Agents adapter reads the context before each model call, records every final utterance as a turn, hands over the history tools bound to the caller, records the carrier's attestation and the handoff. In Python, `NiadraAgent` (or the `NiadraMemory` mixin on your own `Agent` class); in Node, `NiadraAgent` and `NiadraMemory` from `@niadra/sdk/livekit`.
+
+## Install
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[livekit]'   # livekit-agents 1.8.3 or newer, below 2
+```
+```sh TypeScript
+npm install @niadra/sdk @livekit/agents   # @livekit/agents 1.9, as an optional peer dependency
+```
+</CodeGroup>
+
+The TypeScript integration is in `@niadra/sdk` on npm, with the integration subpaths.
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | The first read starts when the caller joins the room (`begin()`), and the first model call, the greeting or the first turn, waits for it within `context_voice_start` (1.5 s; `ready()`). Before each model call after that, `context()` (the `voice` view): the pinned body comes from the SDK's memory at once, and the turn's slots come from the read the prefetch made of its words, waited for 200 ms at most. In Python, a pipeline agent does it in `llm_node`, on a copy of the chat context, so nothing piles up in the agent's history and LiveKit's preemptive generation still matches; a realtime model does it in `on_user_turn_completed`. In Node, in `onUserTurnCompleted`, the same hook as LiveKit's RAG recipe. The pack goes right after the instructions; the `turn_block` (other channels' turns and the delta) at the end | The read sends the user's last turn as `query`, and each `user_input_transcribed` (interim or final) sends the turn so far with `prefetch()`, in the background. The prefetch is reused only for the identical `query`; a longer transcript finds the memory already open, and a turn with time words or a count is recomputed at the read |
+| Turns | The session's `conversation_item_added` event records each final customer transcript (with the STT confidence) and each agent answer (with the usage the model reported). The session's `close` ends the conversation |
+| Tools | The three history tools, as function tools with the kit's schemas, bound to the caller. `history_tools=False` leaves them out |
+| Verification | `attestation=` (Python) or `verify: attestationProof(...)` (Node) with the carrier's STIR/SHAKEN level (`A`, `B` or `C`). LiveKit does not read that header itself: map the SIP header to a participant attribute and pass it. It is recorded once, before the first context |
+| Handoff | When the session moves to another agent, `handoff("agent")`; give the next `NiadraAgent` the same conversation. Call `transferred_to_human()` on a SIP or warm transfer to a person |
+
+`conversation_for(niadra, participant, room=...)` opens the conversation with the SIP number as subject and the call id (or the room name) as `conversation_id`; in Node, `sipSubject()` and `sipConversationId()` do the same.
+
+## Minimal example
+
+<CodeGroup>
+```python Python
+"""A LiveKit voice agent that starts every call knowing the caller. Run: python livekit_agent.py dev"""
+
+from livekit.agents import AgentServer, AgentSession, JobContext, cli, inference
+
+from niadra import AsyncNiadra
+from niadra.integrations.livekit import NiadraAgent, conversation_for
+
+niadra = AsyncNiadra(channel="voice")
+server = AgentServer()
+
+
+@server.rtc_session()
+async def entrypoint(ctx: JobContext) -> None:
+    await ctx.connect()
+    caller = await ctx.wait_for_participant()
+    conversation = conversation_for(niadra, caller, room=ctx.room)  # the SIP number and call id
+    session = AgentSession(
+        stt=inference.STT("deepgram/nova-3"),
+        llm=inference.LLM("openai/gpt-4.1-mini"),
+        tts=inference.TTS("cartesia/sonic-2"),
+    )
+    agent = NiadraAgent(
+        conversation, instructions="You are Acme's support agent. Be brief.", agent_memory=True
+    )
+    await session.start(agent, room=ctx.room)
+
+
+if __name__ == "__main__":
+    cli.run_app(server)
+```
+```typescript TypeScript
+import { type JobContext, ServerOptions, cli, defineAgent, voice } from "@livekit/agents";
+import { fileURLToPath } from "node:url";
+import { Niadra } from "@niadra/sdk";
+import { NiadraAgent, NiadraMemory, attestationProof, sipConversationId, sipSubject } from "@niadra/sdk/livekit";
+
+const niadra = new Niadra();
+
+export default defineAgent({
+  entry: async (ctx: JobContext) => {
+    await ctx.connect();
+    const caller = await ctx.waitForParticipant();
+    const conversation = niadra.conversation({
+      subject: sipSubject(caller),
+      channel: "voice",
+      conversation_id: sipConversationId(caller, ctx.room.name ?? "room"),
+    });
+    const memory = new NiadraMemory({
+      conversation,
+      // Map the carrier's STIR/SHAKEN header to this attribute in your SIP trunk's header settings.
+      verify: attestationProof(caller.attributes["sip.h.x-stir-verstat"]),
+    });
+    const session = new voice.AgentSession({
+      stt: "deepgram/nova-3",
+      llm: "openai/gpt-4.1-mini",
+      tts: "cartesia/sonic-3",
+    });
+    memory.attach(session);
+    await session.start({
+      agent: new NiadraAgent({ instructions: "You answer the phone for Acme Energy. Be brief.", memory }),
+      room: ctx.room,
+    });
+  },
+});
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  cli.runApp(new ServerOptions({ agent: fileURLToPath(import.meta.url) }));
+}
+```
+</CodeGroup>
+
+The same code is in `examples/livekit_agent.py` and `examples/livekit.ts` in the SDK repositories. Run it with `NIADRA_API_KEY` and your LiveKit credentials; to try it without Niadra's cloud, start `niadra-mock` and set `NIADRA_BASE_URL=http://127.0.0.1:8765`.
+
+## Agent memory
+
+With `agent_memory=True` (or `{"write": True, "max_tokens": 300, "tags": [...]}`), the agent's own notes go right before the customer's context, in the same system message, and `search_agent_memory` (and `remember`, with `write`) join the tools. See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- Nothing here fails a turn: slots that do not arrive within 200 ms are left out and the turn goes out with the pinned body, and a failure to record is logged without content.
+- The STIR/SHAKEN attestation is not among LiveKit's `sip.*` attributes; without the header mapping, the read is at V0 and carries only what the policy releases at that level.
+- In Python, the `livekit` and `openai-agents` extras pin incompatible versions of a shared dependency; install one per environment.
+- Tested against `livekit-agents` 1.8.3 and `@livekit/agents` 1.9.0, with the LLM, STT and TTS replaced by fakes and Niadra on the emulator, in each SDK's CI.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Voice agents" href="/en/guides/voice-agents">
+    context before hello, network attestation and handoff.
+  </Card>
+  <Card title="Pipecat" href="/en/integrations/pipecat">
+    the same design, as one frame processor.
+  </Card>
+</CardGroup>

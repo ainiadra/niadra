@@ -1,0 +1,166 @@
+---
+title: "Threat model"
+description: "The assets, the trust boundaries, the threats per component and the control for each one, with the file that implements it. The residual risks, by name."
+---
+
+This is the threat model of the platform as it runs on 30/09/2026: one cell in `us-east-2`, with one k3s machine and one managed PostgreSQL. Every control points to the file or configuration that implements it in Niadra's open-source repository ([github.com/ainiadra/niadra](https://github.com/ainiadra/niadra): `server/`, the server; `deploy/`, the cloud and the cluster; `web/`, the site and the Console), which your security team can read. The last section says what is left without a control, or with a partial one.
+
+<Note>
+Nothing here is a certification or the result of a penetration test. Niadra has no certification of its own and has not yet been through a penetration test by an independent firm; the [security questionnaire](/en/security/questionnaire) says what exists in place of each.
+</Note>
+
+## Assets
+
+What the platform protects, from the most sensitive down:
+
+| Asset | Where it lives | Form |
+|---|---|---|
+| Content of conversations, events, facts, open items and compiled context | The space's database (`s_<space>`), the cold archive and the cache | Encrypted with AES-256-GCM under the space's data key, with space, table, column and row as authenticated data |
+| Customer identifiers (phone, e-mail, document, system ids) | The space's database | Keyed HMAC for lookup, encrypted value beside it |
+| Each space's data keys | The cell database (`niadra_cell`, table `data_keys`) | Wrapped by the master key in AWS KMS; in plaintext only in process memory |
+| Source keys (the credentials of agents and systems) and Console passwords | The control database | Hashes only: a peppered HMAC for lookup and a slow scrypt for verification |
+| Receipts of reads, erasures and administration | The space's database; the daily root in the audit bucket | Chained by SHA-256; each day's root sits in write-once storage |
+| The space's configuration (policies, schemas, rules, endpoints) | Control plane and cell | A document signed with Ed25519 by the control plane; the cell refuses an invalid signature |
+| Customer secrets (webhook secret, export credential) | The cell's secret store | Encrypted under a cell key wrapped by KMS |
+| Availability of the data API and the Console | The machine and the database | One machine and one zone (see residual risks) |
+
+## Trust boundaries
+
+Each row is a boundary that traffic crosses, who sits on each side and what crosses it.
+
+| Boundary | What crosses it | Control | Where |
+|---|---|---|---|
+| Internet, edge of the cell | Requests from the SDKs, MCP, the Console and the site | TLS 1.3 at least on every host, Let's Encrypt certificates; only ports 80 and 443 open on the machine | `deploy/k8s/charts/niadra/templates/ingress.yaml` (`TLSOption`, `minVersion: VersionTLS13` in `values.yaml`); `deploy/aws/cluster.yaml` (`NodeSecurityGroup`) |
+| Edge, services of the cell | The caller's identity | Source key with scopes and an audience class for agents and systems; short-lived EdDSA JWT issued by the control plane for people | `server/src/niadra/domain/edge/keys.py`, `tokens.py` |
+| Services, database | SQL queries | One database per space; PostgreSQL roles with each process's minimum; row-level security on every space table; TLS 1.3 required up to RDS, which is not public and only accepts the machine's network | `deploy/README.md` ("Databases"); `deploy/k8s/charts/niadra/files/db-init.sql`; `server/migrations/space/versions/20260929_9a050517b420_space_baseline.py` (`ENABLE ROW LEVEL SECURITY`, policy `space_isolation`); `deploy/aws/cluster.yaml` (`DatabaseParameters`, `ssl_min_protocol_version: TLSv1.3`; `DatabaseSecurityGroup`) |
+| Cell, AWS KMS | Wrapping and unwrapping data keys | Master key `alias/niadra-cell` that never leaves KMS; the machine's role may only use the key, the account may only administer it; yearly rotation of the material | `deploy/aws/cluster.yaml` (`CellKey`, `CellKeyAlias`); `server/src/niadra/adapters/outbound/keys/kms.py` |
+| Cell, Niadra's AI | Already masked conversation text, for extraction and decisions | Masking by rules and by the cell's personal-data model before the call; zero retention and no training required on every request; the answer validated against a JSON schema | `server/src/niadra/domain/extract/redaction.py`; `server/src/niadra/adapters/outbound/llm/`; `server/models/` (the personal-data detector, inside the cell) |
+| Cell, customer endpoints | Webhooks, the SIEM stream, continuous export | HTTPS only; the host resolves to a public address, the connection goes to the checked address and no redirect is followed; every webhook carries an HMAC-SHA256 signature | `server/src/niadra/adapters/outbound/egress.py`; `server/src/niadra/domain/notify/webhooks.py` |
+| Cell, object storage | Cold archive, nightly backups, export packages, audit roots | Buckets with no public access, encrypted; the audit bucket has Object Lock in compliance mode for five years, refuses a write that would replace a copy and refuses a request without TLS; the machine's role cannot delete there | `deploy/aws/cluster.yaml` (`CellBucket`, `AuditBucket`, `AuditBucketPolicy`); `server/src/niadra/adapters/outbound/objects/anchors.py` |
+| Niadra's operation, machine | Releases, runbooks | No SSH port; the machine is reached through Systems Manager; the machine pulls the `release` branch with read-only keys and nothing on GitHub holds an AWS credential; secrets in Secrets Manager, never in a repository or an image; IMDSv2 required | `deploy/aws/cluster.yaml` (`MetadataOptions`, `NodeRole`); `deploy/scripts/cd.sh`, `bootstrap-secrets.sh` |
+| Control plane, Console | People signing in | Password with scrypt; TOTP second factor required by default on every tenant; SSO through OIDC or SAML, with a one-time code in the URL fragment that the Console exchanges for the session; combinable roles | `server/src/niadra/domain/control/credentials.py`; `server/src/niadra/app/control.py` (`mfa_required`); `server/src/niadra/app/sso.py`; `server/src/niadra/domain/control/records.py` (`Role`) |
+| Inside the node, pod to pod | Traffic between the processes, the pooler, the cache and the queue | A network policy that denies all ingress by default and allows only the known callers; the pooler only accepts pods labelled as database clients; processes without root, without privilege escalation and with seccomp | `deploy/k8s/charts/niadra/templates/network.yaml`; `_helpers.tpl` (`securityContext`) |
+
+## Threats per component
+
+For each component, the threat, the control that exists today and where it is. "Test" names the test that proves the control in the server's CI, which runs on every pull request against a real PostgreSQL, PgBouncer, RabbitMQ and Redis (`.github/workflows/server.yml`).
+
+### Public edge
+
+| Threat | Control | Where |
+|---|---|---|
+| Old TLS version or cipher downgrade | TLS 1.3 is the minimum on every host, the API wildcard included | `ingress.yaml`, `values.yaml` (`tls.minVersion`) |
+| Source key scanning | The `key_id` is public and never authenticates; the secret is checked by a keyed HMAC with the cell's pepper (indexable) and, when the cache does not hold the key, by scrypt; a non-existent key is cached too, briefly, to stop scanning | `server/src/niadra/domain/edge/keys.py` |
+| Volume abuse | Rate window per key and per route; size caps per event and per batch; idempotency for 24 hours on writes | `server/src/niadra/domain/edge/limits.py`; [rate limits](/en/conventions#rate-limits) and [sizes](/en/conventions#sizes) |
+| Personal data in a URL, in a load balancer log or in an application log | Phone, e-mail, document and free text travel only in the body; every read by conversation id has a `POST` form; a canary value goes through ingestion, extraction, reads and search and never appears in a log line, at any level | [Conventions](/en/conventions#personal-data-stays-out-of-urls); test `tests/unit/flow/test_log_canary.py` |
+| Site and Console headers | HSTS, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and a Content Security Policy with no third-party script | `web/deploy/Caddyfile` |
+
+### Authentication and authorization
+
+| Threat | Control | Where |
+|---|---|---|
+| Stolen source key | A key does only what its scopes allow (`track`, `act`, `context`, `search`, `identify`, `admin`, `analytics` and the agent features' scopes); a route without the scope answers 403 `scope_missing` and leaves a `denied` receipt; revocation cuts access within seconds, and an optional grace period swaps the key without stopping the agent | `server/src/niadra/domain/vocabulary.py` (`Scope`); `server/src/niadra/adapters/inbound/http/denials.py`; `server/src/niadra/app/control.py` (`expire_key`) |
+| Leaked key table | Only hashes are stored; without the pepper the HMAC is useless, and with the pepper scrypt remains | `server/src/niadra/domain/edge/keys.py` |
+| Leaked or weak person password | scrypt hash (about 50 ms and 16 MiB per check); TOTP second factor required by default; SSO through the customer's identity provider, with roles from its groups | `server/src/niadra/domain/control/credentials.py`; `server/src/niadra/app/sso.py` |
+| Stolen person session | Short-lived EdDSA JWT, verified without a call to the control plane; the SSO sign-in code works once, for ten minutes, and only with a value the browser tab kept | `server/src/niadra/domain/edge/tokens.py`; `app/sso.py` |
+| An agent reads what it should not | Policy denied by default: an undeclared category reaches no one; a sensitive category reaches an agent only through a release that names a purpose; the policy is evaluated at compile time and rechecked at read time | [Privacy](/en/concepts/privacy#access-denied-by-default-released-by-purpose) |
+| A Console person does more than the role allows | Roles `admin`, `security`, `integration`, `review`, `analysis` and `vendor`; erasure, export and legal holds require `security`; an action in the Console leaves an `admin` receipt | `server/src/niadra/domain/control/records.py`; [Console access](/en/concepts/console-access) |
+
+### Database and isolation between customers
+
+| Threat | Control | Where |
+|---|---|---|
+| A code defect reads another space's rows | Each space has its own database (`s_<space>`), so a query on B's database cannot reach A's rows; inside each database, row-level security with the `space_isolation` policy; and encrypted data carries the space as authenticated data, so a row of A does not decrypt under B's key | `deploy/README.md` ("Databases"); migration `space_baseline`; test `tests/unit/test_keys.py::test_one_companys_key_never_opens_anothers_data` |
+| Database credential stolen from a pod | The database only accepts the machine's network, is not public and requires TLS; each process signs in with a least-privilege PostgreSQL role; the role that serves requests only appends events and never updates or deletes a row of the events table | `deploy/aws/cluster.yaml` (`DatabaseSecurityGroup`, `PubliclyAccessible: false`); [Privacy](/en/concepts/privacy#what-stays-protected-by-design) |
+| Stolen disk or backup | RDS disk encrypted; nightly backups encrypted in the bucket; the content is already encrypted by the application, and the data keys live in the cell database, wrapped by KMS, outside each space's database: a copy of a space database holds only ciphertext | `deploy/aws/cluster.yaml` (`StorageEncrypted: true`); `server/src/niadra/adapters/outbound/keys/kms.py` |
+| An erasure requested by a data subject undone by a restore | Every completed erasure leaves a sealed record outside the database; a restore re-runs the erasures the copy does not know | `server/src/niadra/app/privacy.py` (`seal_ledger`); [Privacy](/en/concepts/privacy#forget) |
+
+### Keys and encryption
+
+| Threat | Control | Where |
+|---|---|---|
+| Master key copied | It never leaves KMS, whose HSMs are validated to FIPS 140-3; the machine's role may only `Encrypt`, `Decrypt`, `GenerateDataKey` and `DescribeKey`; the account only administers; any other use takes a change to the key policy, which CloudTrail records | `deploy/aws/cluster.yaml` (`CellKey`, policy with two `Sid`) |
+| A space's data key in plaintext | Only in process memory; stored wrapped with the space in the KMS encryption context; rotation adds a version and old rows keep opening with theirs | `kms.py`; test `tests/unit/test_keys.py` |
+| Cache mixed between spaces | What goes to the cache with content is the same encrypted envelope as the database's, with the same authenticated data; it decrypts only in the serving process | `server/src/niadra/adapters/outbound/keys/local.py` (the envelope format, shared by both adapters) |
+| Customer key unavailable (when the customer brings its own key in its KMS, under contract) | The space stops writing instead of falling back to Niadra's key | [Privacy](/en/concepts/privacy#what-stays-protected-by-design) |
+
+### Niadra's AI
+
+| Threat | Control | Where |
+|---|---|---|
+| Personal data reaches the provider | Before any call, deterministic rules and the cell's personal-data detector replace e-mail, phone, card, IBAN, address, postal codes, documents of several countries and bank accounts with placeholders; the value of a stored sensitive fact never goes along; document, card and account come back as a withheld marker, never as the value | `server/src/niadra/domain/extract/redaction.py` (`WITHHELD_KINDS`); `server/models/README.md` |
+| Whoever processes the call retains or trains on the text | Every request requires zero retention and forbids keeping the text for training or product improvement; no model is called on the context read | `server/src/niadra/adapters/outbound/llm/` |
+| Instruction injection in a customer message | Niadra's AI classifies whether a turn tries to instruct the agent; on doubt, timeout or an outage the conservative label applies; the decision is on the record | `server/src/niadra/app/decide.py` |
+| Model answer outside the format | Every call requires `response_format` with a strict JSON schema; the answer is validated before anything is stored and goes through the same masking rules as ingestion | `server/src/niadra/adapters/outbound/llm/`; [What extraction never keeps](/en/concepts/privacy#what-extraction-never-keeps) |
+| A file or image sent to the provider | PDF, image and office-document reading runs on the cell's models server; no third-party model sees a file | `server/src/niadra/adapters/outbound/media_text.py` |
+
+### Outbound to customer endpoints
+
+| Threat | Control | Where |
+|---|---|---|
+| A webhook or export endpoint points at the internal network (SSRF) | The host is resolved before connecting, every address must be public (no loopback, private, link-local, CGNAT or NAT64), the connection goes to the checked address and redirects are not followed; the response is read up to 64 KiB | `server/src/niadra/adapters/outbound/egress.py` |
+| Forged webhook at the destination | HMAC-SHA256 signature over id, timestamp and body, with the old and the new secret during rotation | `server/src/niadra/domain/notify/webhooks.py` |
+| Export credential with more power than writing | A key that can list the bucket is refused at registration; so is a SAS with more than create, write and add | [Continuous export](/en/concepts/privacy#continuous-export-to-your-bucket) |
+
+### Audit
+
+| Threat | Control | Where |
+|---|---|---|
+| Receipt altered or deleted in the database | A chain per space, slice and day: `hash = sha256(previous || receipt)`, with a genesis value bound to the chain's coordinates; a space's daily root is a Merkle root over the heads of its slices | `server/src/niadra/domain/audit/chain.py` |
+| A full rewrite that passes every check inside the database | The daily root is copied to the bucket with Object Lock in compliance mode for five years, written only if absent; `GET /v1/receipts/verify` checks the copy outside the database and answers `anchor_copy_matches` and `anchor_locked` | `anchors.py`; `deploy/aws/cluster.yaml` (`AuditBucket`); `server/src/niadra/app/audit.py`; [verify](/en/api/receipts-verify) |
+| A read without a trace | Every agent read leaves a receipt, the refused one included; every person action leaves an `admin` receipt | [Receipts](/en/concepts/receipts) |
+
+### Logs and observability
+
+| Threat | Control | Where |
+|---|---|---|
+| Customer content in a log, metric or error | No log line carries content: an error keeps file, line, function and the exception's class, never its message; metric labels never carry a space or customer id; logs stay 30 days in CloudWatch Logs | test `tests/unit/flow/test_log_canary.py`; `deploy/aws/cluster.yaml` (`LogGroup`, `RetentionInDays: 30`) |
+| Metrics exposed on the internet | `/metrics` answers 404 to a request that arrives through the edge; the cluster's Prometheus reads the pod directly | `server/tests/unit/infra/test_metrics_route.py` |
+
+### Delivery chain
+
+| Threat | Control | Where |
+|---|---|---|
+| Unreviewed code reaches production | Every change enters `main` by pull request with a green CI (lint, types, module boundaries, unit and integration tests); a person moves the `release` branch to a commit of `main`; the machine deploys only commits of `release` | `.github/workflows/server.yml`; `deploy/scripts/cd.sh` |
+| Cloud credential in CI | None: GitHub holds no AWS credential and nothing outside the machine starts a deploy; the machine reads the repositories with read-only keys | `deploy/README.md` ("Continuous integration and deploy") |
+| Swapped dependency | Versions pinned in `uv.lock` and `package-lock.json`; images are built on the machine from the `release` commit, and each image's tag comes from the content that built it | `deploy/scripts/image_tags.py` |
+| A deploy breaks production | End-to-end check after every deploy, with a synthetic tenant; automatic rollback to the previous release when it fails and the new release changed no schema | `deploy/scripts/on-ops.sh` |
+| Known vulnerability in a dependency | Audit of the pinned versions before every merge and in CI; an exception only with a reason and a 30-day expiry. See residual risks for what is left out | `scripts/audit.py` (server, specifications, Python SDK); `audit:prod` (TypeScript SDK, site) |
+
+### Availability
+
+| Threat | Control | Where |
+|---|---|---|
+| Corrupted or deleted database | Deletion protection on RDS; automated instance backup; `pg_dump` of every database each night to the bucket, kept 35 days, and a test restore every Sunday; runbooks to restore one space alone | `deploy/aws/cluster.yaml` (`DeletionProtection: true`); `deploy/k8s/charts/niadra/templates/ops.yaml`; `server/README.md` (runbooks) |
+| Silent failure | 21 alert rules (context latency, ingestion acknowledgement, server errors, stale queue and outbox, lost receipts, failing cache and state store, failed or stale backup, among others), with severity `page` or `ticket`, sent to an SNS topic with a confirmed subscription | `deploy/k8s/charts/niadra/files/alerts.yaml`; [Incident response](/en/security/incident-response) |
+| Niadra's AI down | Ingestion acknowledges before any model; the context read calls no model; extraction waits and retries, and the conservative label applies to decisions | `server/src/niadra/app/decide.py` |
+
+## Residual risks
+
+What this design does not cover today, said as it is.
+
+1. **One machine and one zone.** The cell runs on one k3s machine and one RDS without Multi-AZ. Losing the machine or the zone takes the API and the Console down until the template rebuilds them (`scripts/stack.sh` and a deploy); losing the database comes back from the instance's automated backup or from the previous night's `pg_dump`. The rebuild time has not been measured. The path to two more machines and a Multi-AZ database is described in `deploy/README.md` and is not deployed.
+2. **Plain traffic inside the node.** Between the pods, the connection pooler, the cache and the queue the traffic is not encrypted; it does not leave the machine, and the network policy limits who reaches each process. TLS 1.3 starts at the edge and on the hop from the pooler to the database. Whoever has administrator access to the node sees that traffic.
+3. **Masked text leaves the region.** Extraction and decisions go to Niadra's AI, outside `us-east-2` and with no fixed region, with zero retention requested on every call; not every destination publishes its own region or its own retention period. Masking is by rules and by a detector; a value both miss travels as text.
+4. **The instance backup holds everything together.** RDS's automated backup contains the cell database (with the wrapped keys) and the space databases; restoring the whole instance would bring a deleted space back, until the backup expires. That is why a space's deletion receipt states when the last copy expires. Today the instance backup lasts one day (the account's plan); the nightly per-database backups last 35 days.
+5. **Scanning covers code dependencies only.** A known vulnerability in the dependencies blocks the merge (the [questionnaire](/en/security/questionnaire) says how), but the system packages of the container images are not scanned, and the development dependencies of the TypeScript repositories do not block. An advisory published after the merge only shows up on the next audit run.
+6. **No penetration test and no certification of its own.** The ISO 27001, SOC 2 and PCI DSS seals belong to the cloud Niadra runs on, not to Niadra. A penetration test by an independent firm is part of the Regulated plan's contract.
+7. **One person on call.** Alerts reach the founder; there is no on-call rota. The [incident response plan](/en/security/incident-response) says what that means for response times.
+8. **Operational access exists.** Niadra's operation reaches the machine through Systems Manager and the databases through the runbooks, to restore and delete spaces. That access is in the account's CloudTrail and, when it touches a space, leaves an `admin` receipt; there is no second approver for it.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Security questionnaire" href="/en/security/questionnaire">
+    the common review questions, answered with evidence.
+  </Card>
+  <Card title="Data use" href="/en/security/data-use">
+    what leaves the cell, where to, and what Niadra never does with the data.
+  </Card>
+  <Card title="Incident response" href="/en/security/incident-response">
+    roles, severities, detection and notification.
+  </Card>
+  <Card title="Privacy, erasure and export" href="/en/concepts/privacy">
+    retention per store and what stays protected by design.
+  </Card>
+</CardGroup>

@@ -1,0 +1,44 @@
+{
+  "name": "niadra-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr && node scripts/prerender.mjs && vite build --config vite.admin.config.ts",
+    "build:api": "node scripts/geo-country.mjs && esbuild server/api.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist-server/api.mjs --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",
+    "api": "node --env-file=.env.api dist-server/api.mjs",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "audit:prod": "npm audit --omit=dev --audit-level=high"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "pg": "^8.23.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.18.4",
+    "tailwindcss": "^4.3.3",
+    "uqr": "^0.1.3"
+  },
+  "devDependencies": {
+    "@ip-location-db/geo-whois-asn-country": "^2.3.2026061719",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/node": "^22.20.4",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@types/turndown": "^5.0.6",
+    "@vitejs/plugin-react": "^5.0.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.1.1",
+    "marked": "^18.0.13",
+    "turndown": "^7.2.4",
+    "typescript": "^5.7.0",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.7"
+  }
+}

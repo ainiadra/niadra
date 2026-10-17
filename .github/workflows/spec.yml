@@ -1,0 +1,36 @@
+# Checks every push and pull request: lint and the conformance tests of the Context Pack examples.
+name: spec
+on:
+  push:
+    branches: [main]
+    paths:
+      - "spec/**"
+      - ".github/workflows/spec.yml"
+  pull_request:
+    paths:
+      - "spec/**"
+      - ".github/workflows/spec.yml"
+permissions:
+  contents: read
+concurrency:
+  group: spec-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    working-directory: spec
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: spec/uv.lock
+      - run: uv sync --frozen
+      - name: Known vulnerabilities in the locked dependencies (pip-audit)
+        run: uv run scripts/audit.py
+      - run: uv run ruff check .
+      - run: uv run pytest -q

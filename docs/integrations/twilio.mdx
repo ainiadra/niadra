@@ -1,0 +1,124 @@
+---
+title: "Twilio"
+description: "Ligações, SMS e WhatsApp pelos webhooks da Twilio, com o StirVerstat da operadora como prova de quem liga."
+---
+
+O adaptador da Twilio lê os webhooks de Programmable Voice, Messaging (SMS e WhatsApp) e, em TypeScript, Conversations: confere `X-Twilio-Signature`, encontra o handle do cliente, o id da ligação ou da conversa e o que a operadora atestou, e registra o turno de entrada. Ele nunca responde TwiML: a resposta é do seu agente.
+
+## Instalar
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[twilio]'   # no framework dependency
+```
+```sh TypeScript
+npm install @niadra/sdk   # @niadra/sdk/twilio
+```
+</CodeGroup>
+
+A integração em TypeScript está no `@niadra/sdk` no npm.
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | `call.conversation()` abre a conversa da ligação (`CallSid` como id, o número de quem liga como sujeito) e, no webhook do toque (`ringing`), começa a primeira leitura em segundo plano; `call.verify()` a recomeça no nível que o atestado provou; `conversation.ready()` a espera dentro de `context_voice_start` (1,5 s), enquanto o telefone toca, e o seu código entrega o contexto ao agente que atende |
+| Turnos | `parse_message()` lê um webhook de Messaging: `MessageSid` é a chave de idempotência, `From` (`whatsapp:+55...` ou um telefone) e `WaId` são os ids do remetente, `Body` é o texto; `message.record()` registra o turno do cliente. Em voz, `call.ended()` encerra a conversa quando o status callback diz `completed` (ou `busy`, `failed`, `no-answer`, `canceled`); em TypeScript, `recordTwilioInbound()` registra cada frase reconhecida |
+| Ferramentas | As do kit, pela conversa |
+| Verificação | `call.verify()` (Python) e `verifyTwilio()` (TypeScript) registram o `StirVerstat` da Twilio: `TN-Validation-Passed-A` prova V2, `B` e `C` provam V1; uma validação ausente ou falha não prova nada. Uma mensagem registrada leva `verification_hint: "V1"` |
+| Transbordo | O `handoff()` da conversa, onde o seu fluxo transfere |
+
+Os dois SDKs conferem a assinatura como a Twilio a calcula: o HMAC-SHA1 em Base64, com o auth token, da URL completa que a Twilio chamou seguida de cada parâmetro do POST, em ordem de nome.
+
+## Exemplo mínimo
+
+<CodeGroup>
+```python Python
+"""A Twilio voice webhook that verifies the carrier's attestation before the first context."""
+
+import os
+
+from flask import Flask, request
+
+from niadra import Niadra
+from niadra.integrations.twilio import parse_call
+
+niadra = Niadra(channel="voice")
+app = Flask(__name__)
+
+
+@app.post("/twilio/voice")
+def incoming_call() -> tuple[str, int]:
+    call = parse_call(request.get_data(), request.headers, request.url, os.environ["TWILIO_AUTH_TOKEN"])
+    if call is None:
+        return "", 403
+    conversation = call.conversation(niadra)
+    call.verify(conversation)  # StirVerstat: A proves V2, B and C prove V1
+    context = conversation.ready()  # the first read, started above; the phone rings meanwhile
+    return connect_your_voice_agent(call.call_sid, context.system_block), 200
+
+
+@app.post("/twilio/status")
+def status() -> tuple[str, int]:
+    call = parse_call(request.get_data(), request.headers, request.url, os.environ["TWILIO_AUTH_TOKEN"])
+    if call is not None:
+        call.ended(call.conversation(niadra))
+    return "", 204
+```
+```typescript TypeScript
+// A Twilio Programmable Voice webhook on Hono: the carrier's attestation proves the caller, the
+// context is read before the first answer, and each recognized sentence is recorded.
+import { Hono } from "hono";
+import { Niadra } from "@niadra/sdk";
+import { readTwilio, recordTwilioInbound, verifyTwilio } from "@niadra/sdk/twilio";
+
+const niadra = new Niadra();
+const authToken = process.env.TWILIO_AUTH_TOKEN ?? "";
+const publicUrl = process.env.PUBLIC_URL ?? "";
+
+export const app = new Hono();
+
+app.post("/twilio/voice", async (c) => {
+  const { status, request } = await readTwilio(`${publicUrl}/twilio/voice`, await c.req.text(), c.req.raw.headers, { authToken });
+  if (!request) return c.body(null, status as 403);
+  // The attestation is recorded once, on the call's first webhook; later ones open at the proven level.
+  const first = request.params.CallStatus === "ringing";
+  const convo = niadra.conversation({
+    subject: request.subject,
+    channel: "voice",
+    conversation_id: request.conversationId ?? "",
+    verification: first ? "V0" : (request.proof?.level ?? "V0"),
+  });
+  if (first) await verifyTwilio(convo, request);
+  recordTwilioInbound(convo, request);
+  const ctx = await convo.ready(); // the first read, started on the ringing webhook
+  convo.markInjected(ctx);
+  const reply = await answer(ctx.text, request.text);
+  convo.agent(reply);
+  const twiml = `<Response><Gather input="speech" action="/twilio/voice"><Say>${escape(reply)}</Say></Gather></Response>`;
+  return c.body(twiml, 200, { "content-type": "text/xml" });
+});
+
+export default app;
+```
+</CodeGroup>
+
+O mesmo código está em `examples/twilio_voice.py` e `examples/twilio-voice.ts`.
+
+## Limites
+
+- Uma requisição sem a assinatura certa devolve `None` (Python) ou sem `request` (TypeScript): responda 403 e não registre nada.
+- O adaptador não gera TwiML nem conecta a ligação: `connect_your_voice_agent()` no exemplo é o seu código.
+- A assinatura cobre a URL completa que a Twilio chamou; atrás de um proxy que muda o host ou o esquema, passe a URL pública.
+- Testado com cargas gravadas e assinaturas calculadas no teste; nenhuma conta da Twilio é necessária.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Agentes de voz" href="/guides/voice-agents">
+    o atestado da operadora e o que cada nível libera.
+  </Card>
+  <Card title="Pipecat" href="/integrations/pipecat">
+    um pipeline de voz sobre Twilio Media Streams.
+  </Card>
+</CardGroup>

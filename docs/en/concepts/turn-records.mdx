@@ -1,0 +1,135 @@
+---
+title: "Turn records"
+description: "What the agent read, called, showed, claimed and decided in each turn, with the build pinned: content modes, tiers, pins and replay."
+---
+
+A team that runs an AI agent needs to see why the agent did what it did, turn by turn: what it read, which tools it called with which arguments, what they returned, what it showed the person, what it claimed and what it decided. The same team needs to run a real turn again after changing a prompt, a model or the data. The **turn record** is that account of one turn, in one format for any agent framework. It is captured inside the agent's process and sent later, so it never slows the answer; it pins the build the turn ran on, so a replay reproduces the conversation that happened; and the recorded values can stay in your own storage, with only pointers and digests leaving your company.
+
+## Turning it on and off
+
+Turn records are the space's `turns` feature, on by default; a space turns it off in the `features` document, by an approved diff of the `security` role. With it off, [`POST /v1/turns`](/en/api/turns) and the replay routes answer 404, and the SDKs record nothing, even with capture turned on in the code. The `recording` document, of the `integration` role, sets the content mode of the space and of each source, the required pins, how long the kept tier keeps a turn (`kept_days`, 30 by default, from 7 to 90), how long a replay scenario keeps its turns (`scenario_days`, 180 by default), whether the personal data model passes over stored records (`pii_model`) and the share of conversations kept whole by sample (`sample_rate`, 5% by default). Changing the content mode to one that keeps more also needs the `security` role.
+
+## What a turn is
+
+A turn runs from its input to the last thing it emitted to the person or to a document. The input may be a message (`kind: message`), an interface action such as a button or a "show more" (`action`), a system event (`event`) or a timer that fired (`timer`). An interface action is a turn of its own, even with no model call. A sub-agent, or an agent called as a tool, opens a **sub-turn**, with its own `turn_id` and the turn that opened it in `agent.parent_turn_id`.
+
+## Capturing
+
+The SDK captures in the agent's process, at the moment each thing happens, by copying: a tool's arguments and result are copied as JSON when the call returns, which costs a 25 KB result 0.05 ms at the 95th percentile; the digest is computed later, on the sender. When a result exists in two forms, both are recorded: the one the model saw (`result_model`) and the one the interface got (`result_ui`). A generator is recorded once it is fully consumed. Capture never delays the answer: sending happens later and apart from the turn, and a failure in recording marks the record `completeness: incomplete` without touching the agent.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+
+niadra = Niadra(channel="whatsapp")
+
+
+@Niadra.tool("search_products", provenance=lambda r: [{"ref": f"product:store:{r['sku']}", "fields": r["prices"]}])
+def search_products(sku: str) -> dict:
+    return catalog.find(sku)
+
+
+with niadra.conversation("wa-8812", subject=phone("+5511900005678"), agent_id="store") as conversation:
+    conversation.customer(text)
+    with conversation.turn(build=Niadra.build(prompts={"store": "v3"}, model="gpt-4.1-mini")):
+        context = conversation.context()
+        product = search_products("PX-4471")  # recorded: arguments, result, latency, the objects it showed
+        reply = model(prompt_with(context, product))
+        conversation.agent(reply)  # the record points at this event; the text is never repeated
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+const searchProducts = Niadra.tool("search_products", async (sku: string) => catalog.find(sku), {
+  provenance: (r) => [{ ref: `product:store:${r.sku}`, fields: r.prices }],
+});
+
+const convo = niadra.conversation({ subject: handles.phone("+5511900005678"), channel: "whatsapp", conversation_id: "wa-8812" });
+convo.customer(text, { idempotency_key: inbound.id });
+await convo.turn({ build: Niadra.build({ prompts: { store: "v3" }, model: "gpt-4.1-mini" }) }, async () => {
+  const ctx = await convo.context();
+  const product = await searchProducts("PX-4471"); // recorded: arguments, result, latency, the objects it showed
+  convo.agent(await model(promptWith(ctx, product))); // the record points at this event; the text is never repeated
+});
+```
+</CodeGroup>
+
+The `turn_id` is minted when the turn starts and follows the turn across asynchronous tasks and child sessions, so every call made on its behalf lands in the same record; in Python, a framework that runs tools on a thread pool uses `niadra.turns.bind(fn)`, and in TypeScript the turn in progress follows the `AsyncLocalStorage`. The framework adapters open and close the turn for you with `turns=True` (`turns: true`): Google ADK, OpenAI Agents, LangGraph and LangChain in Python; LangChain and LangGraph, Mastra, the Vercel AI SDK, OpenAI Agents JS, Google ADK and VoltAgent in TypeScript. A function wrapped with `tool()` inside a framework's tool takes over the call the adapter already recorded, so each call is recorded once; in a replay, LangGraph, Google ADK and Mastra tools answer from the record, and OpenAI Agents and VoltAgent tools must be wrapped with `tool()`, because their hooks cannot stop a tool. A model call is recorded by the adapter that sees its tokens. `provenance` turns a tool's result into the objects it showed, each with the reference, the fields and the provenance; without provenance, an observation is display only and never updates [typed state](/en/concepts/object-types).
+
+The record also keeps what the turn **read** from the memory, by version (the context by its ETag, a block by its version), the [coordination](/en/concepts/coordination) decisions it relied on and the effects with the state of each, what the person was shown or did (the [interactions](/en/concepts/signals)) and the [claim contract](/en/concepts/claims) verdicts. What the turn said is not repeated: `output.event_keys` points at the events `track()` already sent.
+
+## The build and its pins
+
+`build.pins` holds what must be the same for a replay to reproduce the turn: `prompts` (each prompt's name and version), `corpus_digest` (a digest of the files the agent consults, computed by you, never the files), `model` (the exact model), `assembler` (the version of your context assembler) and `tool_schemas` (the digest of each tool's schema). The SDK fills Niadra's own pins itself: the context compiler's version and the hash of the pack the turn read. The `recording` document says which pins are required (`prompts` and `model` by default); a turn without one of them is kept, marked not replayable, and the SDK warns once.
+
+## Content modes
+
+The mode is space configuration, per source, and the SDK follows it. A blob is a large value of the record: a tool's arguments, a result, the text of a read, a document the turn wrote.
+
+| Mode | What a blob carries | Replay |
+|---|---|---|
+| `stored` | `sha256` and `content`, the value itself. Niadra keeps it encrypted and masks the text leaves with the same rules as events; with `pii_model`, the personal data model makes a second pass over the tools' arguments | Yes |
+| `pointer` | `sha256` and `pointer`, a URI in your storage (`s3://...`). The SDK writes the value to your bucket, with your credentials, and sends only the pointer and the digest; no recorded value leaves your company | Yes, inside your company |
+| `hash_only` | `sha256` only | No; it serves statistics and structural assertions |
+
+A source may always send a mode that keeps less, never more: a turn refused with `content_mode_refused` goes again with digests only. The digest is `sha256:` and the SHA-256 of the value's canonical JSON (RFC 8785), so the same value has the same digest in any producer, and a replay matches calls by the `args_hash` of the normalized arguments. A turn too large on its own is sent with its blobs reduced to hashes, so a 413 `turn_too_large` never loops. A `pointer` or `hash_only` record is taken even with Niadra's storage unavailable, because the frame is all of it. See [Metadata only](/en/guides/metadata-only).
+
+## Fidelity and completeness
+
+| Fidelity | Produced by | What it supports |
+|---|---|---|
+| `bronze` | Niadra, from `gen_ai` [OpenTelemetry](/en/guides/opentelemetry) spans | Metrics and regression by indicator. Never replay or attribution |
+| `silver` | Niadra, from spans that also carry the exposure attributes | Also what the person was shown |
+| `gold` | The SDK, intercepting the tools and the model calls in the agent's process | Everything, including replay |
+
+`completeness` says how much of the turn is in the record: `complete`, `partial` (the SDK dropped blobs to protect its queue; the frame stays), `incomplete` (the recording failed during the turn) or `unknown` (a bronze record).
+
+## The queue and the sending
+
+Turns have their own queue, apart from the event queue, bounded by bytes (64 MB by default) and by count (2,000 turns). When it fills up, the SDK drops the blobs of unflagged turns first, oldest first, marking those records `partial`, and only then the oldest whole frames; both are counted. A flagged turn keeps its blobs longest, because it is the one someone will replay. Sending goes in batches of up to 50 records and 4 MB compressed, through [`POST /v1/turns`](/en/api/turns), with the `track` scope; the answer is 200 when every record was taken, 207 with one error per rejected record. A turn Niadra already holds, by `turn_id`, is a duplicate: the same turn sent twice is one turn. A write process holds few large bodies (over 1 MB, as sent or decoded) at once; past that limit, the batch comes back with 429 and `Retry-After`, and the SDK sends it again.
+
+The same code is in [`examples/turn_records.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/turn_records.py) and, in TypeScript, in [`examples/claim-guard.ts`](https://github.com/ainiadra/niadra-sdk-ts/blob/main/examples/claim-guard.ts), which opens the turn and passes the answer through the claim contract.
+
+## Tiers and promotion
+
+Every turn stays in the **short** tier. A turn is also copied to the **kept** tier, the one search and replay read, for one of three reasons: a **flag** set at capture (`error`, `guard_acted`, `handoff`, `assertion_failed`, `synthetic`, `incomplete` or `negative_feedback`), a **later request**, through [`POST /v1/turns/promote`](/en/api/turns-promote), naming a conversation or turn ids with the reason (`complaint`, `bug_report`, `review` or `other`), because the complaint arrives days after the turn, or the deterministic **sample** of whole conversations. No tier expires on its own: a record is kept until an erasure or until the retention you set in `recording.kept_days` (at least 7 days, no maximum), which applies to both tiers; past it, nothing of a turn remains except the day's totals, which name no one. A replay scenario's turns follow `scenario_days`, also kept when it is unset. A [legal hold](/en/concepts/privacy#legal-holds) keeps a conversation's turns out of purging until it is released.
+
+The `turn.flagged` webhook goes out for every turn kept by a flag, to the endpoints that subscribe: ids and flags only, never what the turn said or read.
+
+## The viewer
+
+In the Console, the agents' turns screen lists the kept turns, newest first, and opens each one: what it read, called, claimed and said, with the flags, the pins and `replay_blockers`, why the turn cannot be replayed when it cannot (`content_mode` `hash_only`, fidelity `bronze` or `silver`, completeness `partial`, `incomplete` or `unknown`, or a required pin that is missing). Through the API, [`GET /v1/turns/{turn_id}`](/en/api/turn) and [`POST /v1/turns/search`](/en/api/turns-search), with the conversation id in the body, need a key with the `replay` scope or a person with the `integration` or `security` role.
+
+## Replay
+
+A scenario keeps up to 50 turns with the assertions they must keep passing; your CI runs each turn N times with the pinned build, inside your company, and Niadra decides the statistical verdict. Tools answer from the record, values never leave, and the result is never sent as a turn. See [Replay in your CI](/en/guides/replay-in-ci).
+
+## Cost and budget
+
+Each record carries the turn's cost in US dollars and the tokens of each model call. The `budget` block of a context read (`include: ["budget"]`) shows what the pack costs in estimated tokens, per section, and what this agent's recorded turns already added up to in the conversation or the case (turns, model and tool calls, input, cached and output tokens, cost); `counted: false` says the counters could not be read, and a missing number is never zero. The block is shown, never enforced. [Context use](/en/concepts/context-use) brings in `cost` the calls, tokens and money per turn, per source and agent, against the cost with memory off your company measured and declared in the `measurement` document.
+
+## Privacy
+
+- The record repeats no conversation text: `output.event_keys` points at the events.
+- In `pointer` mode, no recorded value reaches Niadra; in `hash_only`, no value is recorded.
+- Niadra never puts a conversation id in a URL or in a storage key in clear: turns live under a keyed hash of the conversation, and erasing a person erases their turns by that prefix.
+- Records serve the purpose `quality`, with the tier's retention. A legal hold keeps them; once the subject is erased, `retained` in the receipt counts the turns a hold still keeps.
+- The kept tier's index enters your audit chain: each kept row has an entry (id, source, agent, kind, time, mode, build hash) with a SHA-256 digest, the rows of one UTC day form a Merkle root, and the daily `audit.root` event carries it as `turns.root`, next to the receipts' root. [`GET /v1/turns/index/{day}`](/en/api/turns-index) lists the rows with their digests so your company recomputes the root; a row that expires or is erased later leaves the anchored root as it was.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Replay in your CI" href="/en/guides/replay-in-ci">
+    scenarios, assertions and the statistical verdict.
+  </Card>
+  <Card title="Metadata only" href="/en/guides/metadata-only">
+    the `pointer` mode: the values in your bucket.
+  </Card>
+  <Card title="Claims" href="/en/concepts/claims">
+    the verdicts each turn carries.
+  </Card>
+  <Card title="Record turns" href="/en/api/turns">
+    the reference of `POST /v1/turns`.
+  </Card>
+</CardGroup>

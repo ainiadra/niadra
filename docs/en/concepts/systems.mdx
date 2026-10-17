@@ -1,0 +1,219 @@
+---
+title: "Systems, objects and actions"
+description: "CRM, ERP and help desk events, business objects, and the actions that close open items."
+---
+
+Niadra's memory is built from every channel, platform and system in the company, and it serves both the agents that talk to customers and the ones that work inside, in the CRM, the ERP, the help desk, billing and orders. From the systems, the memory takes in three things: the **system events** they already emit, the **business objects** they refer to and the **actions** agents take in them. That is how the voice agent knows at 2:07 pm what the billing agent did at 2:06 pm.
+
+## System events
+
+A system event is a state change in a system of record: order created, invoice disputed, ticket reopened, payment declined. It comes in as `kind: "system_event"`, with `speaker` set to `system` and a `canonical_type` such as `invoice.credited`, plus structured fields in `fields`.
+
+There are three ways in:
+
+| Way in | When to use it |
+|---|---|
+| [Generic webhook](/en/guides/system-webhooks) | The system already sends webhooks. Point it at `POST /v1/ingest/webhook/{source_id}`, and a versioned mapping turns the payload into events |
+| File import | The system has no webhook and exports files: send a JSONL of batch items to [`POST /v1/ingest/files`](/en/api/ingest-files), up to 512 MB, and follow it with [`GET /v1/ingest/files/{import_id}`](/en/api/ingest-file) |
+| API | Your code already knows about the event and sends it through the SDK or `POST /v1/batch` |
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, system_id
+
+niadra = Niadra()
+
+niadra.track({
+    "kind": "system_event",
+    "channel": "erp",
+    "canonical_type": "invoice.credited",
+    "idempotency_key": "erp-inv-0823-credit-1",
+    "handles": [system_id("crm", "48213")],
+    "object_refs": [{"type": "invoice", "namespace": "erp", "id": "0823"}],
+    "speaker": {"role": "system"},
+    "fields": {"amount": 40.0, "currency": "USD"},
+})
+```
+```typescript TypeScript
+niadra.track({
+  kind: "system_event",
+  channel: "erp",
+  canonical_type: "invoice.credited",
+  idempotency_key: "erp-inv-0823-credit-1",
+  handles: [handles.systemId("48213", "crm")],
+  object_refs: ["invoice:erp:0823"],
+  speaker: "system",
+  fields: { amount: 40.0, currency: "USD" },
+});
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/batch" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"items": [{"type": "event", "kind": "system_event", "channel": "erp",
+       "canonical_type": "invoice.credited", "idempotency_key": "erp-inv-0823-credit-1",
+       "handles": [{"type": "system_id", "value": "48213", "scope": "crm"}],
+       "object_refs": [{"type": "invoice", "namespace": "erp", "id": "0823"}],
+       "speaker": {"role": "system"}, "fields": {"amount": 40.0, "currency": "USD"},
+       "occurred_at": "2026-09-22T17:06:21Z"}]}'
+```
+</CodeGroup>
+
+A system event is structured data and enters **without an AI model**: the mapping pulls out the type, the object, the customer ids, the fields and the time. Only mapped types enter the memory, which shields it from the volume of an ERP. The raw payload of an unmapped type is kept as it arrived, until an erasure or the window you set in `raw_content`, and does not enter the memory. Free text from inside a system, such as a ticket description, comes in as a `message` on its own channel, with the ticket id in `conversation_id`, and goes through normal extraction. In a webhook rule with `"kind": "message"` and no `conversation_id` expression, the text is filed under the object the rule names (`obj:<type>:<namespace>:<id>`), so the texts about one ticket form one conversation. See [System webhooks](/en/guides/system-webhooks).
+
+System events are not billed. The unit is still the conversation or task.
+
+## Business objects
+
+Orders, tickets, invoices, contracts, deliveries and subscriptions are **objects**. Each is identified by the triple `type`, `namespace` and `id`, unique within the space, such as `invoice:erp:0823`. The SDKs accept that shorthand.
+
+An object is tied to the customer through their id in that system, the `system_id` handle, and keeps a **derived state**, always with `as_of`, the source and a reference to the source record, the agents' actions and the timeline of the events, both those in the space's hot window (90 days by default) and those that already left it for the cold archive, which the timeline reads only in the month each one arrived. **The official value stays in your system.** The memory keeps enough for the agent to remember and act, and points back to the source. Splitting two profiles takes orders and invoices to the right owner on its own, because the object is tied to its handle of origin.
+
+Read an object with [`GET /v1/objects/{object_type}/{namespace}/{external_id}`](/en/api/object) and its events and actions with [`/timeline`](/en/api/object-timeline), both with the `context` scope and a receipt. The ids may contain slashes and colons. The read answers the object as a `display` state read serves it ([what a read returns](/en/concepts/object-types#what-a-read-returns)): each field with its logical value, stamps and freshness; a type the registry does not declare reads as one with no rules. In the SDKs, `object_state()` and `object_timeline()` in Python, `objectState()` and `objectTimeline()` in TypeScript:
+
+<CodeGroup>
+```python Python
+invoice = niadra.object_state("invoice:erp:0823")
+if invoice:
+    print({name: f.v for name, f in invoice.fields.items()}, invoice.as_of)
+```
+```typescript TypeScript
+const { data: invoice } = await niadra.objectState("invoice:erp:0823");
+if (invoice) console.log(invoice.fields, invoice.as_of);
+```
+```bash cURL
+curl "https://acme-prod.us-east-2.api.niadra.com/v1/objects/invoice/erp/0823" \
+  -H "Authorization: Bearer $NIADRA_API_KEY"
+```
+</CodeGroup>
+
+Your governance team sees every object of one customer, with the actions on them, through [`GET /v1/profiles/{profile_id}/objects`](/en/api/profile-objects).
+
+### Objects with a declared type
+
+With the `state` feature on in the space, an object may have a **declared type** in the `object-types` document: fields with freshness and a claim policy, the four logical values (present, absent, unobserved, known defect), the sources and their precedence, the values your company computes, the lifecycle and the timers. The system of record pushes state through [`POST /v1/objects/push`](/en/api/objects-push), with its version, and a read through [`POST /v1/state/read`](/en/api/state-read) says, field by field, how old the value is, which source it came from and what the agent may not claim with it. A type can be derived from the schema of your own database. Objects without a declared type keep working exactly as above. See [Object types and state](/en/concepts/object-types).
+
+## Agent actions
+
+An action is the record of what an agent, internal or customer-facing, or a human attendant did in a system: the canonical operation (`credit`, `reschedule`), the object, the result, the purpose and, optionally, `closes`, the open item the action fulfils.
+
+<CodeGroup>
+```python Python
+niadra.action(
+    "credit",
+    subject=system_id("crm", "48213"),
+    object="invoice:erp:0823",
+    result="$40 credit on the August bill",
+    closes={"object": {"type": "invoice", "namespace": "erp", "id": "0823"}, "operation": "credit"},
+    channel="erp",
+    task_id="billing-7741",
+)
+```
+```typescript TypeScript
+niadra.action({
+  channel: "erp",
+  task_id: "billing-7741",
+  handles: [handles.systemId("48213", "crm")],
+  object_refs: ["invoice:erp:0823"],
+  operation: "credit",
+  result: "$40 credit on the August bill",
+  closes: { object: { type: "invoice", namespace: "erp", id: "0823" }, operation: "credit" },
+});
+```
+</CodeGroup>
+
+`closes` points to the open item by `item_id` or by the object and the operation it waits for, never both. Without `closes`, the action closes the open item that waits for the same operation on the same object. When only the object and the operation link them, the action counts if it was made up to 72 hours before or after the promise, or, for an item with a due date, up to 72 hours after that date: "file the reply by the 9th", said on the 3rd, closes with the filing on the 8th. When the action says the item's words, or the decision model confirms it fulfils the item, it closes it any time after the promise, even late: a promise kept late closes. An action or an event on a part of the object closes it as well, by the part's type's to-one relations: a filing that names its case by `case_id` closes an item about the case. A promise that states the amount also closes by the amount: an event of the system of record (or the action it confirms) that carries in its fields the same amount the promise states (`amount`, `value`, `total`, `valor`, `monto` or `importe`), with an operation of the same family (`refund_fee` is a `refund`; `cancel_subscription`, a `cancel`) and on the same object when the promise names one, closes the promise if it arrives up to 30 days after it (or in the 72 hours before): "refund the R$ 41,78 shipping fee", which names no order, closes when the ERP records `order.refunded` for 41.78 on one of the customer's orders days later. Without an amount on both sides, or without the operation the promise waits for, nothing closes by amount, and an action declared by a source that is not trusted for the operation still closes nothing. Recording an action needs the key's `act` scope and, when the source declares `trusted_action_ops`, an operation from that list; `track` alone is not enough. A correction goes as a new action, with `corrects_action_id`.
+
+Operations are compared in their canonical form: `invoice.credited`, `credited` and `credit` are the same operation. The open item extracted from the conversation stores the operation in that form, so the promise "I will request the credit on invoice 0823" waits for `credit` and closes with the billing agent's `credit` action, and the ERP's `invoice.credited` event confirms that action. A catalog event that arrives with no action at all, such as `invoice.credited`, also closes on its own the open item waiting for `credit` on that invoice, since the system of record's event is its own confirmation. An operation the catalog does not know keeps matching by the name you gave it, regardless of case. A system event of yours names the operation it confirms in `fields.operation` (`filing.protocolled` with `{"operation": "file"}`); a lifecycle state is never read as an operation.
+
+The extraction gives an open item an operation it knows, with no configuration: the catalog's, the ones the space's agents record and the ones its systems confirm (`fields.operation` of a system event), and also the ones the space declares, when it does: the `trusted_action_ops` of the sources, the mappings' operations and the `operations` of the extraction schema (the `schemas` configuration document). When three actions with the same name carry text, Niadra's AI writes what the operation means from those texts, masked, and the extraction reads that meaning next to the name; a declared meaning wins. An item said before any operation showed up waits for none, and still closes, by what the action or event says on the same object (see below). Declaring `operations` is optional and gets the first item ahead. Each operation is a name, or a name with what it means, in the company's words and in the language of the conversations: `{"name": "file", "description": "protocolar uma peça ou petição no processo"}` (up to 200 characters). The extraction reads the description next to the name to tell which operation an item waits for; without it, an item said in Portuguese rarely gets an operation named in English. An item that only mentions what an operation is about does not wait for it: "send the refund receipt" does not wait for `refund`. For the items that already exist to get their operation, change the schema's `version` too: Niadra extracts the conversations of the last 30 days again and updates the item each one already had, without adding another. Search and the timeline show each open item's `object` and `expected_operation`.
+
+### Declared, confirmed, divergent
+
+| State | When |
+|---|---|
+| `declared` | The agent recorded it and the system of record has not confirmed yet. The context says so: "declared by Billing at 2:06 pm; not yet confirmed by the system" |
+| `confirmed` | The confirming system event arrived, such as `invoice.credited`. The action and the event become one record, and the credit is never counted twice |
+| `divergent` | The window expired with no confirmation. A [trigger](/en/concepts/triggers-and-webhooks) can notify you |
+
+The window only runs for what a system of record should confirm. A commitment (`commitment:coordination:<id>`) and a handoff's outcome (`handoff:coordination:<id>`) record what an agent promised and what the receiving side decided, not an effect on a system: no event confirms them, so they stay `declared` and never turn `divergent`, and the next agent reads them as done by someone else. The `coordination` namespace belongs to [coordination](/en/concepts/coordination) alone: an item that names an object in it comes back with `invalid_input`.
+
+A declared action closes an open item when its source trusts its operation: a source with no `trusted_action_ops` trusts them all, since it records any, and the closing's gates decide; a source with the list trusts only the ones on it. A confirmed action always closes. The same operation on the same object closes by the operation. An item that waits for no operation, or for one of the action's family (`pay` and `pay_court_fees`), closes on the same object when what the action or event says carries its words, or when the decision model judges that it does it. What an agent that speaks with the customer (a source with `audience: customer_agent`) says it did is not a system's record: its declared action closes the item it names in `closes.item_id` (bare or as `open_item:<id>`, the form history and the context give), or one whose words its `result` says, or one the decision model judges done when the words are not enough ("informar que a sentença foi julgada improcedente" does "comunicar a sentença ao cliente"; "avisar o cliente sobre a verificação da sentença" does not). In a conversation it also needs the agent's reply to the customer, in the same conversation, to have given what the item promised, or asked what it asked: "já estou enviando" does not close "enviar a cópia da decisão". An internal agent's trusted action and every confirmation keep closing by object and operation. Before an action counts, every text turn of its conversation or task so far goes through the prompt injection guard, whoever said it; a flagged session has the action quarantined from the start, so it closes nothing and is never shown as done, without waiting for the conversation to end and be extracted. The verdicts are kept per event, and extraction guards the agent's and the tools' turns too. A session flagged later quarantines the actions it already had: what they had closed opens again, with the `open_item.reopened` webhook. An action that names another in `corrects_action_id` takes its place: the corrected one leaves the context and the search and stays on record.
+
+### Retroactive close
+
+An action may arrive before the open item exists. At 2:05 pm Marina disputes the invoice in the app, and the open item is only born when the app session closes and is extracted, at 2:35 pm. The billing agent acts at 2:06 pm. When it creates the open item, Niadra looks for actions already applied to the same object and operation within the window, and for system events that already confirmed that operation on the object or on a part of it (of the customer, of the organization the person acts for, or of the object's owner and participants, as when the system records the payment under the customer's account and the open item comes from an employee's conversation), and the open item is born `resolved`, closed by the 2:06 pm action. An open item that waits for no operation is judged against what the event records, as when the event comes after it. A promise with no object but an amount, extracted after the refund, is born closed the same way, from the confirmed state of the customer's objects: the last event of one of them is an operation of the same family, for that amount, within the window.
+
+A promise kept in the last 7 days does not leave the context: it stays among the open items saying when it was kept, next to the record that kept it ([context and views](/en/concepts/context#skeleton-and-per-turn-slots)). And the conversation that left the promise stops reading as pending: its summary was written when it ended, so the line of a conversation with an open outcome says its promises were kept, and when, however long ago, or that part of them was kept, when one is still open.
+
+### One id per open item
+
+An open item's id is a UUID derived once from what the item is: the customer it belongs to (the handle it came from), the content words of its description (no articles, prepositions or date words), its due date and its object. When an item has neither a due date nor an object, the conversation it was said in enters the id too. The same promise said again, in other words or in another conversation of the same person ("file the reply on plan and deed", "file the reply on the plan and the deed"), with the same due date and object, is the same item: the restatement updates it in place, and no second row is ever written for it. Another due date or another object sets two items apart, and an unpinned "call me back" said another day is a new item.
+
+So an item has one id for as long as it lives: feedback, an action's `closes.item_id`, the webhooks, the export and the receipts all name it by that id.
+
+## Context per task
+
+The internal agent reads context centered on the object, with a task view and the `no_customer` level, because no customer is present. At that level it reads only the categories the policy releases for tasks with no customer (`no_customer_allowed`), in the pack and in the recent turns in `live`; a turn that names an object is filed under the object's type:
+
+<CodeGroup>
+```python Python
+with niadra.task(
+    "billing-7741",
+    object="invoice:erp:0823",
+    view="task:billing",
+    verification="no_customer",
+    channel="erp",
+) as task:
+    ctx = task.context()
+    # the agent decides and posts the credit in the ERP, with its own credentials
+    task.action("credit", result="$40 credit on the August bill")
+# leaving the block sends task.ended
+```
+```typescript TypeScript
+const task = niadra.task({
+  task_id: "billing-7741",
+  channel: "erp",
+  object: "invoice:erp:0823",
+  view: "task:billing",
+  verification: "no_customer",
+});
+const ctx = await task.context();
+// the agent decides and posts the credit in the ERP, with its own credentials
+task.action({ operation: "credit", object_refs: ["invoice:erp:0823"], result: "$40 credit on the August bill" });
+await task.end();
+```
+</CodeGroup>
+
+A task view favours objects of the task's type, the open items tied to them and what was said about them in conversations. Whatever the source's purpose does not allow stays out: the billing agent reads invoices and disputes, not technical open items.
+
+## The 2:06 pm path
+
+1. **2:05 pm, app:** the dispute comes in and, with the batch's answer, is readable and tied to `invoice:erp:0823`.
+2. **2:06 pm, billing agent:** reads the invoice context, gets the dispute through `live`, posts the credit in the ERP and records the action.
+3. **2:06 pm, ERP:** emits `invoice.credited`; the action becomes `confirmed`.
+4. **Within seconds:** the voice context gains "Another agent: $40 credit, confirmed by the system".
+5. **2:07 pm, call:** the voice agent says the credit is already applied.
+
+No AI model sits between the action and the voice context: the action and the system event take the full transaction, and the workers recompile the profile's context next.
+
+<Note>
+Niadra never writes to a system of record. The agent acts, with its own credentials. To send the outcome back to your CRM, consume the `conversation.outcome`, `open_item.closed` and `action.recorded` webhooks ([Triggers and webhooks](/en/concepts/triggers-and-webhooks)).
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Internal agents" href="/en/guides/internal-agents">
+    the full guide to the billing agent.
+  </Card>
+  <Card title="Webhooks from your systems" href="/en/guides/system-webhooks">
+    mapping and authentication.
+  </Card>
+  <Card title="Read an object" href="/en/api/object">
+    derived state and open items.
+  </Card>
+  <Card title="Object types and state" href="/en/concepts/object-types">
+    declared types, freshness per field and the state the system of record pushes.
+  </Card>
+</CardGroup>

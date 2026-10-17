@@ -1,0 +1,6 @@
+apiVersion: v2
+name: niadra
+description: One Niadra cell and its control plane, the small-models server and the site, on any Kubernetes.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

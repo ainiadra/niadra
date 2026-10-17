@@ -1,0 +1,96 @@
+---
+title: "Memória do objeto"
+description: "O que pessoas e agentes disseram sobre um processo, um pedido ou uma fatura, preso ao objeto, entregue a quem participa dele e filtrado por público, ao lado do que o sistema de registro diz."
+---
+
+Um advogado diz ao assistente interno do escritório: "neste processo, não propor acordo". No dia seguinte, o cliente pergunta ao atendente de WhatsApp, de outro fornecedor, se vai haver acordo. A memória do objeto faz essa frase chegar ao atendente, presa ao processo, sem levar junto o que o advogado disse só para o time ("a tese é fraca").
+
+A memória do objeto é tudo o que uma pessoa ou um agente disse ou fez sobre um objeto em conversas e tarefas. Cada linha fica guardada sob o identificador de quem disse, presa ao objeto por referência, e é entregue ao lado do estado oficial do objeto, com a origem visível. Ela nunca escreve no estado do objeto: o objeto só nasce e só muda pelo seu sistema de registro.
+
+## O que fica preso a um objeto
+
+| Forma | Exemplo | Onde fica |
+|---|---|---|
+| Observação | "as chaves foram entregues em 15/09" | Um fato com o objeto. Vai para o predicado que o seu espaço declarar; sem predicado que sirva, para o predicado genérico `observation` (texto curto, categoria `object`) |
+| Instrução | "neste processo, não propor acordo" | Uma preferência declarada com escopo `object`, força `must` ou `must_not` e, opcionalmente, o campo do tipo a que se refere (`lawsuit.settlement`) |
+| Promessa, contestação, pedido | "vou mandar os extratos até sexta", "a cobrança foi contestada" | Uma pendência com o objeto e um `kind`: `promise` (o padrão), `dispute` ou `request`. Fecha como toda pendência, pelo que foi feito |
+| Conversa | uma conversa sobre o processo | O episódio guarda os objetos de que tratou: "conversas sobre este processo" é um filtro do histórico |
+
+Uma instrução só existe se alguém a disse. A extração nunca a infere e nunca a tira de uma pergunta nem da fala de um agente. Uma instrução que não cita objeto, dita numa conversa sobre uma organização a que quem fala está vinculado ("com este cliente, não falar de valores com a esposa", dito por um advogado numa conversa que nomeia o cliente), fica presa a essa organização: chega a toda leitura dela, a dela mesma e a de um contato com `about`, no bloco da conta e, como entrada dura, no bloco de restrições. A instrução sem objeto e sem organização é descartada e contada.
+
+Instruções precisam da funcionalidade `signals` ligada no espaço.
+
+## Como a conversa encontra o objeto
+
+Só por regra, nesta ordem:
+
+1. Os `object_refs` que o seu sistema marca no evento. É o caminho mais barato e exato: o assistente sabe qual processo está na tela.
+2. Um identificador do objeto escrito no texto, sem configuração: o valor exato de um campo de texto do objeto (a chave natural ou outro campo que não seja dado pessoal nem restrito), como um número de processo ou de pedido. Só conta um valor de 5 a 64 caracteres com pelo menos 3 dígitos (à chave natural do tipo basta 1, como `PED-AB7CD`), que não seja data ou instante nem valor com centavos, escrito inteiro, entre separadores. O valor só encontra um objeto que o cliente já tem, e um valor que dois objetos do cliente compartilham não encontra nenhum. `key.match` é opcional: declara o formato de uma chave, e o campo dela é o primeiro a ser procurado.
+3. O único objeto aberto do tipo citado ("o pedido", "o processo"), quando o cliente tem exatamente um.
+4. O único objeto do tipo com data no dia citado ("o pedido de ontem").
+
+Fora disso, a linha fica na pessoa, como sempre ficou. Uma chave natural escrita na conversa que não corresponde a nenhum objeto do cliente é contada e aparece na página de lacunas do Console, por tipo, como "objeto citado sem cadastro".
+
+```json
+{
+  "type": "lawsuit",
+  "ownership": "subject",
+  "mirror_of": {"system": "court"},
+  "key": {"natural": ["case_number"]},
+  "fields": {"case_number": {"type": "string"}, "due_date": {"type": "date"}}
+}
+```
+
+## Quem participa e quem lê
+
+Participa de um objeto o seu dono e todo identificador que um evento sobre ele nomeou: o sistema de registro, um agente que agiu sobre ele, e quem falou dele numa conversa marcada com o objeto. Para cada leitura, a memória de cada objeto aberto do cliente lido é reunida a partir do dono e dos participantes: todo objeto aberto do cliente e todo objeto que chegou a um estado final nos últimos 7 dias, sem janela dos mais novos. Por objeto, até 50 participantes, o dono e quem tem papel primeiro; os demais são contados (`handles_unread`). Acima de 500 objetos por cliente, uma trava contra laço, o resto é contado (`objects_unread`), nunca descartado em silêncio.
+
+Toda linha presa a objeto tem um **público**, calculado por regra quando ela é escrita, nunca por modelo:
+
+| De onde veio | Público |
+|---|---|
+| Fonte que fala com o cliente (`customer_agent`, `human`), em turno público | `shared` |
+| Promessa, contestação, pedido ou instrução, de qualquer fonte | `shared`: são compromissos e diretivas sobre o objeto |
+| Observação de fonte interna ou de turno interno | `internal` |
+
+Um leitor `customer_agent` recebe só o que é `shared`; os leitores internos (`internal_agent`, `human`, `reviewer`, `analyst`) recebem os dois. O acesso por campo do tipo e a política do espaço só restringem: uma linha que a política não abre para o leitor não chega, e nada sensível cruza de um participante para outro.
+
+## Como chega ao agente
+
+- **Na linha do objeto.** O contexto fixado e o bloco `state` dizem, em cada objeto, as instruções, com quem disse (`(equipe)` quando foi a equipe da empresa), e, logo abaixo da linha, todas as pendências abertas (as vencidas primeiro, depois por vencimento), as já feitas mais recentes, até 20, e as três observações mais recentes; quando há mais feitas ou mais observações, a linha diz quantas ("mais 4 registros (consulte o histórico)"). Nenhuma instrução nem pendência aberta fica de fora: no contexto fixado, cada instrução é uma linha própria que diz o nome do objeto e [abre o bloco](/concepts/context), antes de qualquer dado (`lawsuit [Número 1012345] · instrução: não propor acordo (equipe)`), e as pendências seguem a linha do objeto (`pendências abertas: promessa até 10/10/2026: mandar os extratos ao cliente`, `já feitas: protocolar a contestação (feito em 07/10/2026)`). No JSON do bloco `state`, cada objeto traz `memory` com todas as instruções e pendências abertas e até 20 observações. O bloco `state` mostra 20 objetos (primeiro os que têm instrução ou pendência aberta, depois os abertos, depois os mais novos) e diz quantos ficaram fora ("mais N objetos deste cliente fora desta lista (consulte o histórico)").
+- **No bloco de restrições, quando a leitura é sobre o objeto.** Numa leitura por `object`, ou numa visão de tarefa que nomeia o tipo do objeto, as instruções entram no bloco `constraints` como entradas duras, em `instructions`. Uma instrução sobre um campo do tipo também entra em `hard`, com `scope: object`, onde um vínculo de ferramenta a aplica. Fora de foco, a instrução fica presa à linha do objeto, nunca como uma linha solta.
+- **Sem custo na leitura.** Tudo isso é reunido quando o contexto é compilado. A leitura quente continua sem consulta ao banco.
+
+```json
+{
+  "object": {"type": "lawsuit", "namespace": "court", "id": "c-1"},
+  "view": "task:drafting",
+  "task_id": "draft-118",
+  "include": ["constraints", "state"]
+}
+```
+
+## O dito ao lado do registrado
+
+Um predicado pode declarar `observes`: o campo do tipo de que ele fala. Uma observação desse predicado nunca escreve o campo. A linha mostra os dois valores, cada um com a origem: `due_date 05/10 (sistema); dito 02/10 (lawyer, 20/09)`. Só o valor registrado pode ser afirmado (`claim_safe` é sempre falso no que foi dito). Quando os dois diferem, um problema de dado da classe `divergence` é aberto para o dono do sistema.
+
+```json
+{"name": "prazo_informado", "category": "object", "observes": "due_date"}
+```
+
+## Validade, correção e apagamento
+
+- Observações seguem a validade e o decaimento dos fatos; `retract` e `correct` valem para elas.
+- Uma instrução vale até o `expires_at` dela e enquanto o objeto estiver aberto: chegando a um estado final, ela sai das leituras sete dias depois e continua na linha para exportação e auditoria. Uma fala posterior a substitui; a rota de inferências do perfil a lista com `kind: instruction` e a retira com `DELETE`.
+- As linhas ficam sob quem disse. Apagar um membro do time apaga o que ele disse; o comprovante conta `object_bound_rows_erased` e lista em `objects` os objetos tocados, para a empresa registrar no sistema dela o que precisar.
+
+## Medição
+
+O aproveitamento do contexto conta, por agente e por dia, as linhas presas a objeto entregues (`object_rows`), as de objetos que o agente usou (`object_rows_used`) e as mensagens que fizeram o que uma instrução dizia para não fazer (`instruction_violations`): o agente que propôs acordo num processo com a instrução de não propor.
+
+## Próximos passos
+
+- [Tipos de objeto e estado](/concepts/object-types)
+- [Sinais do sujeito e o bloco de restrições](/concepts/signals)
+- [Contas e contatos](/concepts/accounts)
+- [Privacidade](/concepts/privacy)

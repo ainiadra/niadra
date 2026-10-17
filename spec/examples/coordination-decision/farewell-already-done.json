@@ -1,0 +1,12 @@
+{
+  "decision": "deny",
+  "reasons": [
+    "effect_done"
+  ],
+  "effect": {
+    "state": "done",
+    "attempt": 1
+  },
+  "decision_id": "0199a3b4-1b00-7c3d-8e5f-6a7b8c9d0e03",
+  "valid_for_s": 30
+}

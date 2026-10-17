@@ -1,0 +1,95 @@
+---
+title: "Amazon Bedrock"
+description: "The wrap() of Bedrock's Converse API, in boto3 and in @aws-sdk/client-bedrock-runtime: the pack in a system block, the answer recorded with its usage."
+---
+
+`wrap()` (Python, over a boto3 `bedrock-runtime` client) and `wrapBedrock()` (TypeScript, over a `BedrockRuntimeClient`) intercept `converse` and `converse_stream` (`ConverseCommand` and `ConverseStreamCommand`) so they get the context and record the answer. Every other method passes through untouched.
+
+## Install
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[bedrock]'   # boto3 1.40 or newer, below 2
+```
+```sh TypeScript
+npm install @niadra/sdk @aws-sdk/client-bedrock-runtime   # @niadra/sdk/bedrock
+```
+</CodeGroup>
+
+The TypeScript integration is in `@niadra/sdk` on npm.
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | The pack (after the agent's notes, with `agent_memory=`) goes in as one `system` text block after yours, followed by a `cachePoint` only when your system blocks already use one; the `turn_block` goes as a text block at the end of the last user message |
+| Turns | The answer is recorded as the agent's turn with Bedrock's usage (`inputTokens`, `cacheReadInputTokens`, `cacheWriteInputTokens`) and the `modelId`. In TypeScript, the newest user message is also recorded as the customer's turn |
+| Tools | `conversation.tools()` hands over the kit; take `function.parameters` into the `toolConfig`'s `inputSchema.json` |
+| Verification | `conversation.verify()` before the call |
+| Handoff | `conversation.handoff()` where your flow transfers |
+
+## Minimal example
+
+<CodeGroup>
+```python Python
+"""Amazon Bedrock's Converse API with the customer's context."""
+
+import boto3
+
+from niadra import Niadra, phone
+from niadra.integrations.bedrock import wrap
+
+niadra = Niadra(channel="chat")
+bedrock = wrap(boto3.client("bedrock-runtime"))
+
+with niadra.conversation("thread-81", subject=phone("+5511912345678")) as conversation:
+    conversation.customer("Where is my replacement lid?")
+    response = bedrock.converse(
+        modelId="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        system=[{"text": "You are Acme's agent."}],
+        messages=[{"role": "user", "content": [{"text": "Where is my replacement lid?"}]}],
+    )
+    print(response["output"]["message"]["content"][0]["text"])
+```
+```typescript TypeScript
+import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
+import { Niadra, handles } from "@niadra/sdk";
+import { wrapBedrock } from "@niadra/sdk/bedrock";
+
+const niadra = new Niadra();
+const client = new BedrockRuntimeClient({});
+
+/** One customer message in; `userId` comes from your session, never from the model. */
+export async function reply(userId: string, chatId: string, text: string): Promise<string> {
+  const convo = niadra.conversation({ subject: handles.appUserId(userId), channel: "web_chat", conversation_id: chatId });
+  const bedrock = wrapBedrock(client, convo);
+  const response = await bedrock.send(
+    new ConverseCommand({
+      modelId: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      system: [{ text: "You are Acme's support agent. Be brief." }],
+      messages: [{ role: "user", content: [{ text }] }],
+    }),
+  );
+  return response.output?.message?.content?.map((block) => block.text ?? "").join("") ?? "";
+}
+```
+</CodeGroup>
+
+The same code is in `examples/bedrock_converse.py` and `examples/bedrock.ts`.
+
+## Limits
+
+- Only the Converse calls are intercepted; `invoke_model` and the rest of the client pass through untouched.
+- Outside a conversation or task block, calls pass through untouched, and nothing the wrapper does can fail the call.
+- Tested against `boto3` 1.40 and `@aws-sdk/client-bedrock-runtime` 3.1140 with the transport replaced and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Strands Agents" href="/en/integrations/strands">
+    the AWS agent framework, through hooks.
+  </Card>
+  <Card title="Anthropic" href="/en/integrations/anthropic">
+    the same for the Messages API.
+  </Card>
+</CardGroup>

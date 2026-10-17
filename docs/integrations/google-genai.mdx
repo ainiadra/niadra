@@ -1,0 +1,93 @@
+---
+title: "Google GenAI"
+description: "O wrap() do cliente google-genai, para a API Gemini e o Vertex AI: contexto na system_instruction, resposta registrada com o usage_metadata."
+---
+
+`wrap()` (Python) e `wrapGoogleGenAI()` (TypeScript) embrulham o cliente do Google GenAI para `models.generate_content` e `generate_content_stream` (e o mesmo sob `client.aio`) receberem o contexto e registrarem a resposta.
+
+## Instalar
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[google-genai]'   # google-genai 2.25 ou mais novo, abaixo da 3
+```
+```sh TypeScript
+npm install @niadra/sdk @google/genai   # @niadra/sdk/google-genai
+```
+</CodeGroup>
+
+A integração em TypeScript está no `@niadra/sdk` no npm.
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | O contexto (depois das notas do agente, com `agent_memory=`) vai depois da sua `system_instruction`, e o `turn_block` como parte do usuário depois dos conteúdos |
+| Turnos | A resposta é registrada como turno do agente com o uso do Gemini: tokens do prompt, os que vieram do cache de conteúdo entre eles, e a versão do modelo. Em TypeScript, a mensagem mais nova do usuário também é registrada como turno do cliente |
+| Ferramentas | `conversation.tools()` entrega o kit; leve `function.parameters` para as `function_declarations` |
+| Verificação | `conversation.verify()` antes da chamada |
+| Transbordo | `conversation.handoff()` onde o seu fluxo transfere |
+
+## Exemplo mínimo
+
+<CodeGroup>
+```python Python
+"""Gemini through the Google GenAI SDK with the customer's context."""
+
+from google import genai
+
+from niadra import Niadra, phone
+from niadra.integrations.google_genai import wrap
+
+niadra = Niadra(channel="chat")
+gemini = wrap(genai.Client())
+
+with niadra.conversation("thread-81", subject=phone("+5511912345678")) as conversation:
+    conversation.customer("Where is my replacement lid?")
+    response = gemini.models.generate_content(
+        model="gemini-2.5-flash",
+        contents="Where is my replacement lid?",
+        config={"system_instruction": "You are Acme's agent."},
+    )
+    print(response.text)
+```
+```typescript TypeScript
+import { GoogleGenAI } from "@google/genai";
+import { Niadra, handles } from "@niadra/sdk";
+import { wrapGoogleGenAI } from "@niadra/sdk/google-genai";
+
+const niadra = new Niadra();
+const genai = new GoogleGenAI({});
+
+/** One customer message in; `userId` comes from your session, never from the model. */
+export async function reply(userId: string, chatId: string, text: string): Promise<string> {
+  const convo = niadra.conversation({ subject: handles.appUserId(userId), channel: "web_chat", conversation_id: chatId });
+  const ai = wrapGoogleGenAI(genai, convo);
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: text,
+    config: { systemInstruction: "You are Acme's support agent. Be brief." },
+  });
+  return response.text ?? "";
+}
+```
+</CodeGroup>
+
+O mesmo código está em `examples/google_genai_generate.py` e `examples/google-genai.ts`.
+
+## Limites
+
+- Fora de um bloco de conversa ou tarefa, as chamadas passam intactas, e nada do que o embrulho faz derruba a chamada.
+- Só `generate_content` e `generate_content_stream` são interceptados; chats, embeddings e o resto do cliente passam intactos.
+- Testado contra `google-genai` 2.25 e `@google/genai` 2.24 com o transporte substituído e a Niadra no emulador.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Google ADK" href="/integrations/google-adk">
+    o framework de agentes do Google, por callbacks.
+  </Card>
+  <Card title="O contexto e as views" href="/concepts/context">
+    o modelo de destino e os pisos de cache.
+  </Card>
+</CardGroup>

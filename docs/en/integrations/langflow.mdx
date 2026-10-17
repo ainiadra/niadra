@@ -1,0 +1,46 @@
+---
+title: "Langflow"
+description: "Three Langflow components in one file: the customer's context for the prompt, the recorded reply and the history search as a tool."
+---
+
+One Python file, `integrations-extras/langflow/niadra_component.py` in the Python SDK repository, brings three components:
+
+- **Niadra Context** records the customer's message and outputs the context for the prompt: the agent's own notes (with **Agent memory** on), the customer's pack and what changed on other channels. Connect it to the system prompt of your agent or prompt template, after your own instructions.
+- **Niadra Record Reply** records the agent's reply and passes it on unchanged.
+- **Niadra Search History** searches the customer's whole history. In tool mode the agent calls it with a query (and optionally a time phrase); the customer is the one the flow configured, never a value the model chooses.
+
+## Install
+
+Copy the file into your Langflow components folder (or paste it into a custom component) and install the SDK where Langflow runs:
+
+```sh
+pip install niadra
+```
+
+## The five primitives
+
+| Primitive | How the components wire it |
+|---|---|
+| Context | Niadra Context, connected to the system prompt after your instructions |
+| Turns | Niadra Context records the customer's message; Niadra Record Reply, the agent's reply |
+| Tools | Niadra Search History in tool mode, with the kit's own description |
+| Verification | The verification level field, on the components |
+| Handoff | Outside the components; use the SDK or the API |
+
+## Limits
+
+- The three take the same connection fields: the source key, the channel, the customer's handle and the conversation id, usually mapped from the flow's inputs.
+- When Niadra is slow or down, the context comes out empty and the search says the history is unavailable; the flow never stops.
+- The components use the synchronous SDK and cover context, turns and search; the timeline, opening an item and handoffs are left to the SDK.
+- Tested in `integrations-extras/langflow/test_niadra_component.py`, against the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Flowise" href="/en/integrations/flowise">
+    the Flowise memory and tool nodes.
+  </Card>
+  <Card title="Python SDK" href="/en/sdk/python">
+    the library the components use.
+  </Card>
+</CardGroup>

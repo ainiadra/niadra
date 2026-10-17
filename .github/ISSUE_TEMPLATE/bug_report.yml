@@ -1,0 +1,28 @@
+name: Bug report
+description: Something in Niadra does not work as documented.
+labels: [bug]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options: [server, web (Console or site), deploy, spec, docs, Python SDK, TypeScript SDK, not sure]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The smallest steps, request or code that shows the problem. Never paste real customer data or keys.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Commit of this repository, or the SDK version.

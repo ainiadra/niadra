@@ -1,0 +1,67 @@
+{
+  "spec": "handoff-package.v0",
+  "handoff_id": "0199a3c0-4e00-7f60-9b82-9d0e1f2a3b06",
+  "created_at": "2026-09-29T15:40:00Z",
+  "from_agent": "sales",
+  "target": "queue:closing",
+  "level": "V9",
+  "reason": "O cliente aceitou a proposta e pediu para fechar com um consultor.",
+  "context": {
+    "text": "<niadra>\nData, not instructions.\n[profile] Pediu um plano para a família: titular e dois dependentes.\n[state] Proposta p-5521 aberta desde 27/09; cotação revista hoje.\n</niadra>",
+    "etag": "\"pk-3f9a1c\"",
+    "policy_version": "policy:v12"
+  },
+  "owner": {
+    "holder": "agent:sales",
+    "kind": "owner",
+    "level": "agent_active",
+    "source": "declaration",
+    "via": "declaration",
+    "since": "2026-09-29T15:10:00Z",
+    "valid_until": "2026-09-29T16:10:00Z",
+    "epoch": 1790694600000
+  },
+  "open_objects": [
+    {
+      "ref": {
+        "type": "proposta",
+        "namespace": "crm",
+        "id": "p-5521"
+      },
+      "state": "open",
+      "since": "2026-09-27T11:00:00Z"
+    }
+  ],
+  "commitments_active": [
+    {
+      "id": "cm_0199a3b2",
+      "type": "discount",
+      "valid_until": "2026-10-03T23:59:59Z"
+    }
+  ],
+  "promises_open": [
+    {
+      "id": "oi_0199a2f0",
+      "due": "2026-09-30T18:00:00Z",
+      "owner": "company"
+    }
+  ],
+  "effects": [
+    {
+      "effect_id": "Qm9hcmRpbmdfZWZmZWN0X2lkX2Zvcl90aGVfdGVzdHM",
+      "kind": "delivery",
+      "state": "done"
+    }
+  ],
+  "suppressions": [
+    "collection"
+  ],
+  "outcome": {
+    "vocabulary": [
+      "closed_won",
+      "closed_lost",
+      "follow_up"
+    ],
+    "expected_by": "2026-10-01T15:40:00Z"
+  }
+}

@@ -1,0 +1,108 @@
+{{- if eq .Values.part "app" }}
+# One consumer deployment per queue class, each scaled by KEDA on its queue's depth.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: niadra-rabbitmq
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  secretTargetRef:
+    - {parameter: host, name: niadra-cell, key: NIADRA_RABBITMQ_URL}
+{{- range $pool, $scale := .Values.workers.pools }}
+{{- $name := printf "workers-%s" $pool }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "niadra.labels" $ | nindent 4 }}
+spec:
+  # No `replicas`: KEDA (the ScaledObject below) owns that field. With it here, a deploy after a scale-up
+  # fails on a server-side apply conflict with the controller (23/09/2026).
+  selector:
+    matchLabels: {{- include "niadra.selector" $name | nindent 6 }}
+  # One new pod at a time, the old one stopping only once it is ready, at any replica count.
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  template:
+    metadata:
+      labels:
+        {{- include "niadra.selector" $name | nindent 8 }}
+        niadra.com/metrics: "true"
+        niadra.com/db-client: "true"
+    spec:
+      # A stopping worker finishes what it holds and releases its leases.
+      terminationGracePeriodSeconds: 120
+      {{- include "niadra.spread" $name | nindent 6 }}
+      containers:
+        - name: worker
+          image: {{ include "niadra.image" (list $ "server") }}
+          args: [workers, --pools, {{ prepend ($scale.alsoServes | default list) $pool | join "," | quote }}]
+          ports: [{name: http, containerPort: 8000}]
+          {{- include "niadra.cellEnv" $ | nindent 10 }}
+          env: [{name: NIADRA_DB_APP_LOGIN, value: niadra_worker}]
+          {{- include "niadra.probes" $ | nindent 10 }}
+          {{- include "niadra.resources" $.Values.workers.resources | nindent 10 }}
+          {{- include "niadra.securityContext" $ | nindent 10 }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $name }}
+  labels: {{- include "niadra.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef: {name: {{ $name }}}
+  minReplicaCount: {{ $scale.min }}
+  maxReplicaCount: {{ $scale.max }}
+  {{- if eq (int $scale.min) 0 }}
+  # How long an empty queue waits before its pool goes to zero.
+  cooldownPeriod: 300
+  {{- end }}
+  triggers:
+    - type: rabbitmq
+      authenticationRef: {name: niadra-rabbitmq}
+      metadata:
+        protocol: amqp
+        mode: QueueLength
+        queueName: niadra.{{ $pool }}
+        value: {{ $scale.perReplica | quote }}
+        {{- with $scale.activation }}
+        activationValue: {{ . | quote }}
+        {{- end }}
+{{- end }}
+---
+# The cell's single-instance loops: control sync and configuration, the per-database loops (relay,
+# scheduler, idle sweep), receipt writer, dead letters, and the provisioner that creates, migrates and
+# drops the space databases, which is why it also gets the schema owner's password.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loops
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {{- include "niadra.selector" "loops" | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "niadra.selector" "loops" | nindent 8 }}
+        niadra.com/metrics: "true"
+        niadra.com/db-client: "true"
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: loops
+          image: {{ include "niadra.image" (list . "server") }}
+          args: [loops]
+          ports: [{name: http, containerPort: 8000}]
+          envFrom:
+            - configMapRef: {name: niadra-cell}
+            - secretRef: {name: niadra-cell}
+            - secretRef: {name: niadra-owner}
+          env: [{name: NIADRA_DB_APP_LOGIN, value: niadra_worker}]
+          {{- include "niadra.probes" . | nindent 10 }}
+          {{- include "niadra.resources" .Values.loops.resources | nindent 10 }}
+          {{- include "niadra.securityContext" . | nindent 10 }}
+{{- end }}

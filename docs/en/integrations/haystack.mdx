@@ -1,0 +1,89 @@
+---
+title: "Haystack"
+description: "The customer's memory in a Haystack 3 pipeline or Agent: two components, hooks and the kit as Tools."
+---
+
+In a pipeline, `NiadraContext` goes between the prompt builder and the chat generator, and `NiadraReply` after the generator. With an `Agent`, `NiadraAgentHooks(conversation).hooks` and `history_tools(conversation)` do the same. Python only; needs Haystack 3.2 or newer.
+
+## Install
+
+```sh
+pip install 'niadra[haystack]'   # haystack-ai 3.2 or newer, below 4
+```
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | The pack (after the agent's own notes, with `agent_memory=`) goes right after the leading system messages and the `turn_block` at the end, as system messages. Messages Niadra put in an earlier turn are taken out first, so a history passed back in never holds them twice, and the agent's `messages` output never carries them |
+| Turns | `NiadraContext` and the `before_run` hook record the last user message as the customer's turn; `NiadraReply` and the `after_run` hook record the assistant's text as the agent's, with its usage and model |
+| Tools | `history_tools()` gives Haystack `Tool`s whose parameters are the kit's JSON Schemas, bound to the customer, with a sync and an async function |
+| Verification | `conversation.verify()` before the run |
+| Handoff | Outside the components: `conversation.handoff()` where your flow transfers |
+
+## Minimal example
+
+```python
+"""A Haystack Agent with the customer's memory as hooks and tools."""
+
+from haystack.components.agents import Agent
+from haystack.components.generators.chat import OpenAIChatGenerator
+from haystack.dataclasses import ChatMessage
+
+from niadra import Niadra, phone
+from niadra.integrations.haystack import NiadraAgentHooks, history_tools
+
+niadra = Niadra(channel="chat")
+conversation = niadra.conversation("thread-81", subject=phone("+5511912345678"))
+agent = Agent(
+    chat_generator=OpenAIChatGenerator(model="gpt-4.1"),
+    system_prompt="You are Acme's agent.",
+    tools=history_tools(conversation),
+    hooks=NiadraAgentHooks(conversation).hooks,
+)
+result = agent.run(messages=[ChatMessage.from_user("Where is my replacement lid?")])
+print(result["last_message"].text)
+niadra.close()
+```
+
+The same code is in `examples/haystack_agent.py`.
+
+## In a pipeline
+
+```python
+from haystack import Pipeline
+from haystack.components.builders import ChatPromptBuilder
+from haystack.components.generators.chat import OpenAIChatGenerator
+
+from niadra.integrations.haystack import NiadraContext, NiadraReply
+
+pipeline = Pipeline()
+pipeline.add_component("prompt", ChatPromptBuilder())
+pipeline.add_component("niadra", NiadraContext(conversation))
+pipeline.add_component("llm", OpenAIChatGenerator())
+pipeline.add_component("reply", NiadraReply(conversation))
+pipeline.connect("prompt.prompt", "niadra.messages")
+pipeline.connect("niadra.messages", "llm.messages")
+pipeline.connect("llm.replies", "reply.replies")
+```
+
+## Agent memory
+
+`NiadraContext(conversation, agent_memory=True)`, `NiadraAgentHooks(conversation, agent_memory=True)` and `history_tools(conversation, agent_memory=True)` put the agent's own notes before the customer's context and add the two tools. See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- The components and the hooks take `Niadra` and `AsyncNiadra` conversations; with `AsyncNiadra`, run the pipeline or the agent with `run_async`.
+- Nothing here stops the pipeline: with Niadra slow or down, the messages go on without the pack and a tool answers that the history is unavailable.
+- Tested against `haystack-ai` 3.2.0 with the generator replaced by a fake and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="History navigation" href="/en/concepts/history">
+    the three tools the agent receives.
+  </Card>
+  <Card title="Context and views" href="/en/concepts/context">
+    what goes into the pack and why.
+  </Card>
+</CardGroup>

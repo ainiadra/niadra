@@ -1,0 +1,97 @@
+---
+title: "Strands Agents"
+description: "A memória do cliente num agente do Strands, como um HookProvider e as ferramentas do histórico."
+---
+
+`NiadraHooks` é um `HookProvider` do Strands Agents: antes de cada chamada ao modelo ele põe o contexto no prompt de sistema e depois a restaura; `tools` traz o kit do histórico. Em TypeScript, `NiadraPlugin` é um plugin do Strands Agents para TypeScript. Serve a quem já está na AWS.
+
+## Instalar
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[strands]'   # strands-agents 1.57 ou mais novo, abaixo da 2
+```
+```sh TypeScript
+npm install @niadra/sdk @strands-agents/sdk   # @strands-agents/sdk 1.19 ou mais novo, abaixo da 2; Node 22 ou mais novo
+```
+</CodeGroup>
+
+A integração em TypeScript está no `@niadra/sdk` no npm.
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | Antes de cada chamada ao modelo, o prompt de sistema do agente recebe o contexto e o `turn_block` como blocos de texto depois dos seus (pontos de cache incluídos); depois da chamada o seu prompt é restaurado, então nada se acumula e o seu prompt continua o prefixo cacheável |
+| Turnos | A mensagem do usuário é registrada quando a invocação começa, e cada resposta do modelo quando a chamada termina, com o uso daquela chamada (o uso acumulado do agente antes e depois dela) e o id do modelo |
+| Ferramentas | `tools`: as ferramentas do histórico como ferramentas do Strands, com os nomes, descrições e esquemas do kit, amarradas ao cliente |
+| Verificação | `conversation.verify()` antes de invocar |
+| Transbordo | `transferred_to_agent()` e `transferred_to_human()` registram a transferência; chame do seu swarm ou grafo onde a conversa muda de mãos |
+
+## Exemplo mínimo
+
+```python
+"""A Strands agent with the customer's memory as hooks."""
+
+import asyncio
+
+from strands import Agent
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.strands import NiadraHooks
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    memory = NiadraHooks(niadra.conversation("thread-81", subject=phone("+5511912345678")))
+    agent = Agent(system_prompt="You are Acme's agent.", tools=memory.tools, hooks=[memory])
+    print(await agent.invoke_async("Where is my replacement lid?"))
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+
+O mesmo código está em `examples/strands_agent.py`.
+
+## Em TypeScript
+
+`new NiadraPlugin(convo)` entra em `plugins` do `Agent`: um middleware de entrada do `InvokeModelStage` registra a mensagem mais nova do cliente uma vez, acrescenta o contexto depois do seu prompt de sistema e dobra o `turn_block` na última mensagem do usuário (mantendo o ponto de cache antes dele, como o injetor de contexto do próprio Strands faz), sem tocar em `agent.messages`; um middleware de saída registra a resposta final com o uso do modelo (Bedrock e Anthropic contam os tokens em cache à parte; os outros, dentro); `getTools()` dá o kit quando a sessão é fixa. O plugin recebe a conversa ou uma função do agente que a encontra a cada chamada.
+
+```typescript
+import { Agent, BedrockModel } from "@strands-agents/sdk";
+import { Niadra, handles } from "@niadra/sdk";
+import { NiadraPlugin } from "@niadra/sdk/strands";
+
+const niadra = new Niadra();
+const convo = niadra.conversation({ subject: handles.appUserId(user.id), channel: "web_chat", conversation_id: chatId });
+const support = new Agent({
+  model: new BedrockModel({ modelId: "us.anthropic.claude-sonnet-4-5-20250929-v1:0" }),
+  systemPrompt: "You are Acme's support agent.",
+  plugins: [new NiadraPlugin(convo)],
+});
+const result = await support.invoke("Where is my replacement?");
+```
+
+## Memória do agente
+
+`NiadraHooks(conversation, agent_memory=True)` põe as notas do próprio agente antes do contexto do cliente e acrescenta as duas ferramentas. Veja [Memória do agente](/concepts/agent-memory).
+
+## Limites
+
+- O `MemoryStore` do Strands guarda a sessão do próprio agente; a Niadra não é esse armazenamento, então entra por hooks, ao lado de qualquer gerenciador de sessão que você use.
+- Nada aqui derruba a invocação: sem contexto, o prompt de sistema segue como você o escreveu.
+- O Strands para TypeScript exige Node 22 ou mais novo.
+- Testado contra `strands-agents` 1.57 com o modelo substituído por um fake e a Niadra no emulador; em TypeScript, contra `@strands-agents/sdk` 1.19.0, com um `Agent` real pelo adaptador de modelo do AI SDK.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Amazon Bedrock" href="/integrations/bedrock">
+    o `wrap()` da API Converse, para quem chama o Bedrock direto.
+  </Card>
+  <Card title="Agentes internos" href="/guides/internal-agents">
+    tarefas, objetos e ações que fecham pendências.
+  </Card>
+</CardGroup>

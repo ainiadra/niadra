@@ -1,0 +1,257 @@
+---
+title: "Privacidade, apagamento e exportação"
+description: "Direitos do titular por API, apagamento por linhagem e exportação contínua para o seu bucket."
+---
+
+A sua empresa é a controladora dos dados; a Niadra atua como operadora, com DPA assinado. Todo direito do titular tem API: acesso e portabilidade pelo `export`, correção pelo `feedback` de um agente ou por [`POST /v1/corrections`](/api/corrections), que uma pessoa do Console com o papel `security` usa em nome do titular (retirar ou corrigir um fato, resolver uma pendência), com as ações Corrigir, Retirar e Resolver no perfil do Console; ela vira o mesmo evento de correção, a partir da fonte de governança do espaço, com quem a pediu entre os campos, e deixa um comprovante `admin`; eliminação pelo `forget` e oposição ao perfilamento pelo desligamento de padrões. O apagamento segue a linhagem, percorre tudo o que derivou do dado e termina com comprovante. Os seus dados nunca treinam modelos, nem os nossos, nem os de terceiros.
+
+## As leis, pelo nome
+
+O mesmo desenho cobre o núcleo comum da LGPD, do GDPR e do UK GDPR, da CCPA/CPRA e das leis estaduais dos Estados Unidos, da PDPA, da APPI, da DPDP e da PIPA: residência dos dados numa região só, papéis de controlador e operador, direitos por API, retenção configurável, apagamento com comprovante e nenhum treino com os seus dados. Para outros países, a lei aplicável entra no anexo do contrato. Regimes setoriais, como os de saúde e de serviços financeiros, são avaliados caso a caso, no anexo do contrato.
+
+Os dados de cada espaço ficam na região dele. O plano de controle não guarda conteúdo de cliente. Só sai da região texto já mascarado, o das conversas e as amostras de eventos que o assistente de configuração lê, para a IA da Niadra, com retenção zero pedida e sem treino. Ela extrai a memória de cada sessão e escreve as propostas do assistente, e responde, sempre com rótulos e probabilidades, nunca com texto, se uma sessão vale extrair, se um turno tenta instruir o agente, a categoria sensível de um texto, o tipo de uma pergunta do agente e se duas afirmações se contradizem. O caminho de leitura não chama modelo nenhum. Webhooks e o fluxo para o SIEM levam ids e hashes, nunca conteúdo, e a exportação contínua grava num bucket na região do espaço.
+
+## Apagar
+
+[`POST /v1/forget`](/api/forget) recebe um `target` (`profile`, `handle` ou `conversation`) e o `profile_id`, o `handle` ou o `conversation_id` correspondente. Pede uma pessoa do Console com o papel `security`, ou uma chave de escopo `admin`, e exige o `Idempotency-Key`: o mesmo pedido mandado duas vezes começa um apagamento só. A mesma chave com outro corpo, como outro handle ou outro perfil, é recusada com 409, nunca tratada como repetição do primeiro pedido, porque a segunda pessoa ficaria na memória.
+
+Só o que o cliente disse sustenta a memória. Uma retratação, uma correção ou uma restauração feita pela empresa deixa uma menção no fato, mas nunca o segura: quando os eventos do cliente que afirmaram um fato são apagados, o fato vai, com as correções que só esse feedback sustentava, e cada evento de feedback que o nomeou fica só com ids e tipos (nem valor, nem motivo). A resolução de uma pendência apagada é reescrita do mesmo jeito; uma nota de trabalho de agente perde o id da conversa apagada (muitas vezes um telefone ou um e-mail) e continua valendo; e uma conversa cujos eventos já saíram para o arquivo frio é achada pela própria linha dela e apagada por inteiro, inclusive o que os eventos arquivados produziram. As contagens do pedido dizem cada passo (`feedback_values`, `open_item_feedback`, `agent_note_evidence`). Um fato que um apagamento levou não volta: [restaurá-lo](/api/facts-restore) responde 404. Um evento de feedback é um registro de auditoria com ids e tipos, no banco vivo e no arquivo frio: quando o feedback que agiu sobre um fato ou uma pendência apagada já saiu da janela quente, a mesma passagem que tira as linhas do titular do arquivo reescreve as dele com ids e tipos só (`cold_feedback_values` nas contagens); o registro fica, uma repetição não muda nada. Toda resolução que nomeou uma pendência apagada é reescrita assim, inclusive as que a memória recusou (a pendência já estava fechada, ou era de outro cliente), no banco vivo e no arquivo; `open_item_feedback` conta cada evento de resolução que a nomeou.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/forget" \
+  -H "Authorization: Bearer $NIADRA_TOKEN" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target": "handle",
+    "handle": {"type": "phone_e164", "value": "+14155550123"}
+  }'
+```
+```python Python
+import os
+import uuid
+import httpx
+
+response = httpx.post(
+    "https://acme-prod.us-east-2.api.niadra.com/v1/forget",
+    headers={
+        "Authorization": f"Bearer {os.environ['NIADRA_TOKEN']}",
+        "Idempotency-Key": str(uuid.uuid4()),
+    },
+    json={
+        "target": "handle",
+        "handle": {"type": "phone_e164", "value": "+14155550123"},
+    },
+)
+erasure = response.json()  # {"request_id": "...", "status": "pending", "target_kind": "handle", ...}
+```
+```typescript TypeScript
+const response = await fetch("https://acme-prod.us-east-2.api.niadra.com/v1/forget", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.NIADRA_TOKEN}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    target: "handle",
+    handle: { type: "phone_e164", value: "+14155550123" },
+  }),
+});
+const erasure = await response.json();
+```
+</CodeGroup>
+
+A resposta é 202, com um `request_id` e `status: "pending"`. Acompanhe por [`GET /v1/forget/{request_id}`](/api/forget-status) (`pending`, `running`, `completed` ou `failed`, com o que foi apagado em `erased` e quando terminou em `completed_at`), ou liste todos os apagamentos do espaço por [`GET /v1/forget`](/api/forget-list), filtrando por `status`. Um apagamento que esgota as novas tentativas fica `failed`, nunca `running` para sempre. Ele aparece em [`GET /v1/operations/dead-tasks`](/api/dead-tasks), a lista do trabalho parado do espaço (só ids e nomes de tarefa, nunca conteúdo), e volta com [`POST /v1/operations/dead-tasks/replay`](/api/dead-tasks-replay), com `task: "erase"` ou sem filtro: ele continua de onde parou, porque cada passo da cascata é idempotente, e termina `completed`; o reenvio deixa um comprovante `admin`. A tela Dados do Console mostra a lista e reenvia, para o papel `security`, e a operação da Niadra faz o mesmo para qualquer espaço. Um apagamento concluído também deixa um registro lacrado fora do banco (só ids e o resumo do pedido, cifrados com a chave do espaço), que uma restauração de cópia de segurança não desfaz: quando um espaço é restaurado a partir de uma cópia, cada apagamento que a cópia não conhece como concluído volta a `pending`, com o escopo dele, a cascata roda de novo como na primeira vez, e o comprovante da restauração os lista. Esse registro dura 40 dias, mais que os 35 das cópias, e um espaço apagado o leva junto. O apagamento percorre a linhagem inteira, nesta ordem:
+
+1. O conteúdo dos eventos (fica uma lápide mínima).
+2. As menções e os fatos que ficaram sem evidência, inclusive fatos sobre uma conta de que a pessoa falou.
+3. Episódios e pendências.
+4. Objetos de negócio cujo dono é o handle.
+5. As ações sobre a pessoa, inteiras.
+6. Padrões, derivados de novo sem a evidência apagada.
+7. Vínculos com contas e parceiros, que são apagados.
+8. Linhas da medição, amostras de revisão e conteúdo de disparos de gatilho.
+9. Vetores, contexto compilado, arquivos no armazenamento e os pacotes de exportação do titular.
+10. Lápides na exportação contínua; os turnos recentes e todo o contexto compilado do perfil saem do cache. Se o cache estiver fora do ar nessa hora, o contexto que ficou lá é recusado na leitura e expira em até 72 horas.
+11. Nos espaços com as funcionalidades de agente ligadas: os [registros de turno](/concepts/turn-records) da pessoa, pelo prefixo do hash com chave de cada conversa dela, e os cenários de replay que os guardavam; a [memória de trabalho](/concepts/agent-state) dos escopos dela e a que a nomeia em `subject`; as interações, os sinais e as [inferências](/concepts/signals) dela, com os de todos os beneficiários; os objetos tipados e as observações dela; as reivindicações, o registro de contatos e as transferências da [coordenação](/concepts/coordination); e os vínculos de desfecho. A supressão de contato sobrevive, só como hash com chave: um opt-out não sai com a pessoa.
+
+**O que nomeia a pessoa no que é de outra.** O telefone, o e-mail, o documento ou o id da pessoa escrito no que pertence a outra pessoa (a mensagem de um cliente que passou o telefone da irmã) não leva o registro do outro junto: no lugar de cada um fica `[erased]`, e o resto do registro fica. O apagamento os tira de:
+
+- o conteúdo cru e o texto, os campos e o resultado de ação dos eventos, inclusive os turnos recentes guardados no cache;
+- os eventos que já estão no arquivo frio, reescritos na parte do arquivo que os guarda, com o digest da parte refeito no índice do arquivo;
+- os fatos, as pendências, os resumos e as resoluções de todas as versões de um episódio, os campos de perfil, os resumos acumulados do perfil e os resultados de extração guardados;
+- os valores fixados, que deixam de ser achados pelo valor apagado;
+- os resultados das ações de agente;
+- os objetos de negócio espelhados de um sistema da sua empresa, no estado e em cada observação de cada fonte, inclusive o valor que uma observação substituiu, e os valores calculados deles (veja abaixo);
+- as instruções, as preferências e os traços guardados nos [sinais](/concepts/signals), e as interações que ainda não viraram sinais, no banco e na camada de sessão;
+- as notas de trabalho de agente e as propostas de nota, em qualquer estado;
+- a [memória de trabalho](/concepts/agent-state) de outros clientes, no banco e nas cópias em cache, inclusive a que estava a caminho do banco quando o apagamento começou;
+- os termos dos compromissos e o pacote e o desfecho das transferências da [coordenação](/concepts/coordination);
+- os [registros de turno](/concepts/turn-records), em todas as camadas que guardam uma cópia, com o digest de cada valor guardado refeito, e a parte de um turno que espera a junção com ele;
+- os lotes de eventos e de turnos guardados depois de falhar (`kept_aside`): os da pessoa saem, e os de outros ficam com `[erased]`.
+
+**Objetos espelhados de um sistema da sua empresa.** A Niadra reescreve a cópia dela; o sistema de origem guarda a própria cópia, e o pedido conta cada objeto em `named_objects_in_source`, para a sua empresa apagar lá. Enquanto o registro não é apagado na origem, cada atualização dele reenvia o valor antigo: o objeto guarda o hash com chave de cada identificador apagado, e o próximo envio chega com eles trocados por `[erased]`, sem trazer a pessoa de volta, enquanto o resto do envio atualiza o objeto como sempre. Uma relação reversa deixa de achar o objeto pelo valor apagado, e as cópias dos objetos que a leitura serve são lidas de novo do banco.
+
+Os padrões não guardam texto livre: o valor de um padrão é uma categoria configurada, um canal ou uma contagem, e ele é derivado de novo, depois do apagamento, da memória que já está sem a pessoa.
+
+Cada linha e cada objeto é indexado, no momento em que é gravado, pelo que nomeia uma pessoa (telefone, e-mail, documento e id), cada termo com hash da chave do espaço, e o apagamento procura os termos da pessoa nesses índices em vez de ler o espaço. Um telefone é indexado e procurado em todas as formas da sua linha: como foi escrito, em E.164 e, num celular brasileiro, sem o nono dígito (num celular mexicano ou argentino, com o prefixo de celular). O handle guarda o E.164 enquanto um resumo guarda o número como foi dito, e apagar o handle ainda o encontra; o que já estava indexado casa como está, sem reindexar. Cada página da busca custa uma consulta, seja qual for o tamanho do espaço. O que foi gravado antes desses índices é lido uma vez, no primeiro apagamento do espaço. Um fato, uma pendência ou um episódio reescrito perde o vetor, que é refeito a partir do texto sem a pessoa; o contexto compilado do outro perfil deixa de ser servido (a versão de privacidade dele muda e o cache o descarta) e é compilado de novo, com os padrões e os resumos. O que está sob [retenção legal](#retenções-legais) não é reescrito e é contado em `named_held`; as outras contagens do pedido dizem o que foi reescrito (`named_payloads_redacted`, `named_events_redacted`, `named_rows_redacted`, `named_archived_redacted`, `named_objects_in_source`). O apagamento roda depois que o que esperava para entrar foi gravado, para que nada que chegue em seguida traga a pessoa de volta. Um pacote de acesso já gerado para outra pessoa, que nomeia a apagada, fica como está até vencer, em 24 horas; um pacote novo já sai sem ela. Um pacote de exportação já entregue no seu bucket fica com você, como na exportação contínua.
+
+O comprovante lista em `retained` o que ficou por obrigação legal: os turnos de uma conversa sob [retenção legal](#retenções-legais) (`held_turn_conversations`), os pedidos de revisão e as próprias retenções.
+
+No fim vem o **comprovante de apagamento** (o hash dele volta em `receipt_hash`), que lista também, em `export_run_ids`, as execuções de exportação que já continham o dado, e o webhook `erasure.completed`, para você limpar o seu próprio lago de dados. A Niadra nunca entra no seu bucket para apagar. Comprovantes de leitura antigos guardam só ids e hashes: provam que a leitura aconteceu sem reter o conteúdo.
+
+Esquecer uma pessoa nunca apaga a conta a que ela estava ligada, e esquecer uma conta nunca apaga a memória pessoal dos contatos. Veja [Contas e parceiros](/concepts/accounts).
+
+## Onde cada cópia mora, e por quanto tempo
+
+| Armazenamento | Retenção | Como o apagamento chega | Prazo |
+|---|---|---|---|
+| Banco de dados vivo | Eventos pela janela quente, 90 dias por padrão (ajustável de 30 a 90); cada mês que sai dela vai para o arquivo frio e deixa o banco. Fatos, episódios, pendências fechadas, comprovantes e sessões ficam até serem apagados, ou pelo prazo que a sua empresa define em `retention_days` (`facts`, `episodes`, `open_items`, `receipts` e `sessions`, os dois últimos com no mínimo 30 dias, que a medição e um turno tardio leem de volta): a limpeza diária apaga, em lotes curtos, os fatos confirmados pela última vez antes do prazo com as menções e relações deles, todas as versões dos episódios encerrados antes dele, as pendências resolvidas antes dele (uma pendência aberta nunca vence), as sessões fechadas ouvidas pela última vez antes dele com o que a extração guardou delas, e os comprovantes dos dias anteriores com as cabeças de cadeia e as raízes desses dias (as cópias ancoradas guardam só raízes e ficam); cada fato, episódio e pendência que sai deixa lápide para a exportação contínua, e um cliente que perdeu algum deles tem o contexto e os padrões refeitos sem eles. O resto da memória fica até ser apagado | Exclusão e lápide | 24 horas |
+| Backups automáticos | Até 35 dias | Expiração | 35 dias |
+| Conteúdo cru e mídia | Fica até um apagamento, ou pelo prazo que você definir em `retention_days` (`raw_content`, no mínimo 7 dias, para que um mapeamento novo remapeie o que chegou); o cru de um tipo não mapeado também | Exclusão por espaço e handle; o cru guardado sem handle é indexado ao ser gravado pelo que nomeia uma pessoa (telefone, e-mail, documento e id, a partir de 4 caracteres quando é um valor inteiro), cada termo com hash da chave do espaço, e o apagamento procura os termos da pessoa nesse índice em vez de ler cada payload. A retenção `raw_content` lê o mesmo índice, por página, só o que venceu | 24 horas |
+| Arquivo frio de eventos | Fica até um apagamento, ou pelo prazo que o seu espaço definir em `retention_days` (`cold_events`) | Só as linhas atingidas são reescritas; o feedback da empresa sobre linhas apagadas fica com ids e tipos, na mesma passagem; os valores não são tirados antes de arquivar, então uma exportação ou uma linha do tempo além da janela quente mantém o motivo da empresa sobre o que ninguém apagou | 30 dias |
+| Pacote de exportação sob demanda | 24 horas; depois sai do armazenamento | Os pacotes do titular são apagados | Na hora |
+| Turnos recentes | 24 horas depois de o contexto cobri-los, no máximo 72 horas | Chaves purgadas na hora | Minutos |
+| Contexto compilado em cache | Até 72 horas, cifrado | Sai do cache no apagamento; com o cache fora do ar, é recusado na leitura e expira sozinho | Na hora; até 72 horas com o cache fora do ar |
+| A IA da Niadra | Retenção zero | Nada a apagar | Nenhum |
+| Logs | 30 dias, sem dado de cliente (veja abaixo) | Expiração | 30 dias |
+| Registros de turno | Ficam até um apagamento, ou pelo prazo que você definir em `recording.kept_days` (no mínimo 7 dias, sem máximo), em todas as camadas; os turnos de um cenário de replay, `scenario_days` depois da última execução, se definido. No modo `pointer`, os valores ficam no seu bucket | Exclusão pelo prefixo da conversa; uma retenção legal os segura até ser liberada | 24 horas |
+| Memória de trabalho dos agentes | Fica até o tipo do agente definir uma retenção (`retention.state`), e menos por campo quando o tipo diz | Exclusão pelo escopo e por `subject` | 24 horas |
+| Interações cruas | Ficam até um apagamento, ou pelo prazo que você definir em `raw_content` | Exclusão | 24 horas |
+| Sinais do sujeito | O que a memória **derivou** (afinidade, interesses, o que a pessoa viu) decai com o tempo e sai depois de 13 meses sem atividade; o que a pessoa **disse** (preferências, atributos, instruções e restrições) e **decidiu** (inferências que apagou, objetos que recusou) fica até um apagamento ou a retenção que você definir: a inatividade não apaga o que foi dito. Uma interação de uma conversa que ainda não disse quem é a pessoa fica guardada até a conversa dizer, e então vai para ela | Exclusão, também a que ainda espera a conversa dizer quem é | 24 horas |
+| Registro de contatos da coordenação | 90 dias | Exclusão; a supressão fica como hash com chave | 24 horas |
+| Vínculos de desfecho | 13 meses | Exclusão pela linhagem | 24 horas |
+| O seu bucket (exportação) | Definida por você, o controlador | Lápides e `erasure.completed` | Seu |
+
+## Exportação sob demanda
+
+[`POST /v1/export`](/api/export) reúne os dados de um titular para acesso e portabilidade, por `profile_id` ou `handle`: eventos, fatos, episódios, valores fixados, pendências, objetos, ações (só os que chegaram por handles confirmados: o que veio por um [vínculo não confirmado](/concepts/identity#proteções-contra-união-errada) fica fora do pacote até a confirmação, e no Console só `admin` e `security` o veem), todos os padrões do perfil (os retirados e os vencidos também, com as evidências e as datas), as oposições ao perfilamento (`profiling_objections`, com o handle e a hora de cada uma), vínculos, os eventos e turnos do titular em lotes guardados depois de falhar (`kept_aside`) e os registros de turno das conversas dele (`turn_recordings`). A resposta é 201, com o `run_id`, a lista de `files`, o `sha256` deles e uma `download_url` que vale 15 minutos (até `download_expires_at`). [`GET /v1/exports/{run_id}/download`](/api/export-download) serve o arquivo de novo, com a mesma autorização. O pacote sai inteiro, sem corte por tamanho: um zip escrito seção a seção enquanto é gerado, com episódios, objetos, ações, eventos e comprovantes lidos em páginas de 1.000 linhas, cada página numa transação curta; os eventos do arquivo frio entram parte a parte, e um evento de um mês arquivado e ainda não expurgado sai uma vez. O pacote é o dado do titular decifrado, então ele vive 24 horas: depois disso a rota de download responde 404, o arquivo sai do armazenamento na limpeza diária e é preciso pedir outro `export`. Um apagamento do titular apaga também os pacotes dele. As duas são rotas do papel `security`, e cada pedido de pacote e cada download pela célula deixam um comprovante na trilha.
+
+## Exportação contínua para o seu bucket
+
+Além da exportação sob demanda, o seu espaço pode agendar uma exportação contínua que escreve a memória, de forma incremental, no seu próprio bucket. Os dados são seus; a Niadra não é o seu lago de dados.
+
+- **Destino:** S3 ou armazenamento compatível com S3, Google Cloud Storage (pela API compatível com S3, com uma chave HMAC) ou Azure Blob (blobs de bloco, com um SAS de contêiner), na região do seu espaço. A configuração recusa, no envio e na aprovação, um agendamento fora da região do espaço, e cada execução confere de novo. O endereço do destino (o endpoint do S3, o host de um SAS do Azure) precisa resolver só para endereços públicos, conferido quando a credencial é registrada e antes de cada execução conectar, como nas entregas de webhook.
+- **Credencial:** uma credencial fornecida por você, só de escrita, gravada pelo Console, ou por [`PUT /v1/exports/destinations/{schedule_id}/credential`](/api/export-destination-credential), direto no cofre da sua célula; a resposta traz só a nova `version`. No registro, uma chave de S3 ou de GCS que consegue listar o bucket é recusada, e um SAS com mais permissões que criar, gravar e acrescentar, ou para outro contêiner ou host, também; a exportação escreve por uma porta que só grava.
+- **Formato:** Parquet, um arquivo por tabela e período, com versão de esquema, manifesto JSON e SHA-256 por arquivo.
+- **Tabelas:** eventos, conversas, episódios, fatos e menções, pendências, objetos e eventos de objeto, ações, padrões e evidências, comprovantes e aproveitamento do contexto, e a identidade que liga tudo ao cliente (handles, perfis, vínculos, asserções, registro de uniões).
+- **Pseudonimizada, se você pedir (`pseudonymize`):** a tabela de handles sai sem o valor de cada telefone, e-mail, documento ou id de sistema e fica com o HMAC dele (`value_hmac`, com a chave do espaço), então as linhas continuam se ligando entre arquivos e execuções sem nomear a pessoa. As outras tabelas saem como estão.
+- **Incremental:** cada linha sai com `op` (`upsert` ou `delete`); as lápides têm arquivo próprio. Linhas apagadas são puladas e listadas como `erased` no manifesto, e um arquivo de correção fecha qualquer lacuna. A primeira execução de um agendamento começa do início: os meses que já saíram da janela quente vivem só no arquivo frio, e essa execução os escreve na tabela de eventos antes das linhas vivas, com `change_seq` 0, e o manifesto lista os meses arquivados que mandou.
+- **Frequência:** a cada quantas horas você definir, no mínimo uma. Cada destino recebe um agendamento só: a configuração recusa, no envio e na aprovação, um segundo agendamento no mesmo tipo, bucket e prefixo.
+
+O conteúdo sai decifrado apenas no caminho até o seu bucket, que o cifra conforme a configuração dele. Cada execução, agendada ou sob demanda, aparece com a faixa de sequência, o estado e o manifesto em [`GET /v1/exports/runs`](/api/export-runs).
+
+## Acesso negado por padrão, liberado por finalidade
+
+A política do seu espaço decide, item a item, o que cada leitor recebe, e começa pelo não:
+
+- Um fato de uma categoria que a política nunca declarou não chega a ninguém.
+- As categorias que a lei chama de sensíveis são fixadas pelo produto: `health`, `religion`, `philosophical_belief`, `political_opinion`, `union_membership`, `sexual_life`, `sexual_orientation`, `racial_or_ethnic_origin`, `genetic`, `biometric` e `criminal_record`. Elas são reconhecidas também por outros nomes (`medical`, `clinical`, `saude`, `religiao`, `genetica`, `biometria`, `antecedentes_criminais`) e pela família antes do ponto, como `health.exam`. Uma categoria com um desses nomes é sensível mesmo que a sua política diga o contrário, e sem declaração ela nasce sensível, com mínimo V3.
+- Um item sensível só chega a um agente quando a política o libera para uma finalidade que a fonte tem: pelas finalidades da própria categoria ou por uma regra `allow` que nomeia a finalidade. Uma regra `allow` sem finalidade não basta.
+- Um item sobre uma conversa carrega também a categoria da conversa: a promessa feita numa conversa sobre saúde é dado de saúde.
+- Pessoas do Console não leem por finalidade, e sim pela audiência do papel delas: administração e segurança como pessoa, revisão como revisor, análise e integração como analista. Sensibilidade, regras e visibilidade valem igual.
+
+A política inicial de um espaço novo (versão `starter-3`) já vem assim: saúde só para a finalidade `care`, em V3, e nunca para quem lê como analista; cobrança para as finalidades `billing` e `support`, em V2; assuntos técnicos para `support` e `technical`; e o espelho ligado em toda categoria menos saúde. O agente de cobrança nunca vê dado de saúde, sem nenhuma configuração.
+
+### O espelho da política
+
+Cada categoria da política tem uma chave `mirror`, desligada por padrão. Numa categoria com ela ligada, um item que são as próprias palavras do cliente chega ao leitor a partir de V1, seja qual for o nível mínimo da categoria: a empresa só devolve ao cliente o que ele mesmo lhe contou. Só o nível muda; finalidades, regras, audiências e concorrentes valem como antes. O que a empresa guarda sobre o cliente (um saldo que ela informou, um registro dos sistemas dela) fica no nível da categoria.
+
+De quem são as palavras vem da evidência, nunca da opinião de um modelo. Um fato é do cliente quando a primeira evidência dele é um turno do cliente. Uma conversa é do cliente quando só ele falou, e mista quando a empresa respondeu sem declarar nada do que guarda sobre ele; uma quantia, um CEP ou um código que a empresa disse primeiro, ou um fato cuja primeira evidência é um turno dela, tornam a conversa da empresa, e ela fica inteira no nível da categoria, mesmo que o cliente repita o valor depois. O protocolo que a empresa deu é o comprovante da conversa, não dado sobre a pessoa, e não muda de quem ela é. Uma promessa feita numa conversa do cliente ou mista é tão dele quanto a conversa. Cada conversa registra de quem são as palavras dela (`spoken_by`: `customer`, `mixed` ou `company`); uma conversa gravada antes desse registro nunca é espelhada.
+
+O espelho nunca vale:
+
+- em V0: quem ainda não provou nada não ouve nada;
+- por um handle que uma afirmação ligou ao perfil e ninguém confirmou: nem para os itens que chegaram por ele, nem para quem lê por ele;
+- para uma organização, nem para um item sobre outro contato;
+- para um texto que nomeia um assunto sensível (saúde, crença), seja qual for a categoria em que foi arquivado;
+- numa categoria sensível: a política ignora a chave, e a configuração recusa o documento que a liga (`policy category health is sensitive and cannot mirror`).
+
+Um espaço desliga o espelho por categoria, com `mirror: false` na categoria do documento da política: um banco que quer V2 até para a contestação que o cliente escreveu desliga em `billing`, e em V1 o contexto diz que há um protocolo registrado, retido até a verificação, em vez de dizer que não há ([o contexto e as views](/concepts/context#esqueleto-e-encaixes-por-turno)). O esquema de extração não muda com a chave: nada é extraído de novo. A decisão nomeia a regra: no [manifesto da entrega](/concepts/receipts#o-que-um-comprovante-guarda), um item liberado pelo espelho leva `rule: mirror`, com `spoken_by` e `own_words`, e a [simulação de política](/api/policy-simulate) mostra o mesmo `rule` em cada item que o espelho liberou, para você ver o que um leitor em V1 recebe antes de mudar a política.
+
+## Finalidade e base legal por item
+
+Cada item da memória (fato, conversa, pendência e valor fixado) guarda as finalidades para as quais foi colhido e a base legal de cada uma naquele momento. As regras ficam no documento de configuração `purposes`, escrito pelo papel `security` por diff aprovado, como a política:
+
+- **Finalidades:** cada uma com o nome, a base legal (`consent`, `contract`, `legal_obligation`, `legitimate_interest`, `vital_interest`, `health_protection`, `public_task`, `research`, `legal_claims`, `credit_protection` ou `fraud_prevention`, as bases da LGPD, arts. 7 e 11, e do GDPR, art. 6) e, se quiser, a retenção em dias.
+- **De onde vem a finalidade de um item:** a primeira regra que nomeia uma decide. A categoria do fato ou a categoria da conversa (`categories`), os tipos de evento de sistema que deram origem ao item (`event_types`, com `*` no fim para um prefixo), as finalidades declaradas da fonte que colheu, e por fim `default`. Só contam finalidades declaradas no documento. Um valor fixado segue a conversa em que foi dito.
+- **Quando:** o item recebe as finalidades na mesma transação em que é gravado. O que foi gravado antes do documento existir recebe numa passagem por espaço, em lotes curtos, e o que nenhuma regra nomeou é olhado de novo quando o documento ou as finalidades de uma fonte mudam.
+
+A base legal gravada é a que valia na coleta: mudar o documento depois não reescreve itens antigos, porque a lei fixa a base antes do tratamento.
+
+**Leitura por finalidade compatível.** Um agente lê um item colhido para uma das finalidades dele, ou para uma finalidade que a política declara compatível: `compatible_purposes` no documento da política, escrito pela equipe jurídica do cliente (o que a LGPD chama de compatibilidade, art. 6, I, e o GDPR, art. 6(4)). Sem declaração, vale só a própria finalidade: uma leitura de marketing não vê o que a cobrança colheu. A compatibilidade mora na política para que mudá-la invalide os contextos compilados como qualquer mudança de política. Um agente que não declara finalidade não lê item colhido para uma. Nada disso chama modelo, e um espaço sem o documento `purposes` continua como antes, byte a byte.
+
+**Retenção por finalidade.** Uma vez por dia, depois das 03:00 no fuso do espaço, sai o item cujas finalidades têm todas um prazo e todos venceram: vale a última finalidade a vencer. O prazo conta da última confirmação de um fato, do fim de uma conversa ou de um valor, e do fechamento de uma pendência; uma promessa ainda aberta não vence por finalidade. A saída deixa lápide para a [exportação contínua](#exportação-contínua-para-o-seu-bucket) e recompila o contexto do cliente. Esses prazos somam-se aos da retenção por classe do espaço.
+
+**Oposição a uma finalidade.** [`POST /v1/forget`](/api/forget) com `purpose` e um alvo `profile` ou `handle` registra a oposição do titular a uma finalidade, ou a retirada do consentimento dela (LGPD, art. 18; GDPR, arts. 7(3) e 21). Sai o que foi colhido só para essa finalidade; um item que também serve a outra fica, sem ela. O que for gravado depois já chega sem essa finalidade, e um item que ficaria sem nenhuma não é guardado. A resposta é final (`completed`), com as linhas apagadas por tabela e `purpose_narrowed`, os itens que continuam para outras finalidades. A oposição fica nos identificadores confirmados do cliente, vale de novo todo dia para o que uma união ou uma confirmação trouxe depois, sai com o cliente num apagamento e aparece no arquivo do titular. Se a oposição se aplica é decisão da empresa; a Niadra executa. As conversas ficam como registro do que foi dito.
+
+**No arquivo do titular.** Cada fato, conversa, pendência e valor sai com `purposes`, a lista de finalidades e a base legal de cada uma, e o arquivo traz `purpose_objections.jsonl` com as oposições.
+
+## Retenções legais
+
+Uma disputa, uma investigação ou uma ordem de um tribunal pode exigir que os dados de uma pessoa, de um objeto ou de uma conversa não sejam expurgados enquanto ela durar. Uma **retenção legal** ([`POST /v1/legal-holds`](/api/legal-holds-create), com `Idempotency-Key`) nomeia exatamente um `handle`, um `object` ou um `conversation_id` e mantém os dados dele fora do expurgo: as varreduras de retenção os pulam, um apagamento do titular deixa esses dados esperando e os conta em `retained`, e os [registros de turno](/concepts/turn-records) da conversa são copiados para um prefixo sem regra de ciclo de vida. Liberada a retenção ([`/release`](/api/legal-hold-release)), o que os apagamentos deixaram esperando segue, e a cópia dos turnos é apagada. As duas rotas pedem o papel `security`, deixam comprovante `admin` e são a funcionalidade `legal_holds` do espaço, desligada por padrão e ligada no documento `features`. Uma retenção também protege as linhas de [coordenação](/concepts/coordination) da pessoa.
+
+## O perfil revisável
+
+Uma pessoa pode ver o que a memória inferiu sobre ela, corrigir e contestar. O que a memória **inferiu** (uma afinidade, um tamanho inferido, um interesse) fica à parte do que a pessoa disse, em [`GET /v1/profiles/{profile_id}/inferences`](/api/profile-inferences), cada inferência com origem, evidência em contagens, confiança, finalidades de uso e data; a sua equipe corrige uma pelo que a pessoa diz ([`/correct`](/api/profile-inference-correct)) ou a apaga com lápide ([`DELETE`](/api/profile-inference-delete)), e a mesma evidência nunca a infere de novo. Uma decisão automatizada pode ser contestada: um **pedido de revisão** ([`POST /v1/profiles/{profile_id}/review-requests`](/api/review-requests-create)) leva ao encarregado de proteção de dados da controladora a explicação montada dos [comprovantes](/concepts/receipts) da decisão (ids, tipos, superfícies, regras, versões e entradas, por referência, nunca conteúdo pessoal), e a decisão da controladora é registrada uma vez ([`/resolve`](/api/review-request-resolve)). Os pedidos ficam ao menos 395 dias depois de resolvidos, como obrigação legal, e aparecem em `retained` num apagamento. Tudo isso pede o papel `security` e as funcionalidades `signals` (as inferências e os pedidos, que a coordenação também abre); a oposição ao perfilamento continua em [`POST /v1/profiles/{profile_id}/traits/opt-out`](/api/traits-opt-out). Veja [Sinais e restrições](/concepts/signals#inferências-e-o-perfil-revisável).
+
+## Cartões, códigos de segurança e senhas nunca são gravados
+
+Antes de qualquer coisa ser gravada, a ingestão retém no texto de cada evento o número de cartão (ficam os quatro últimos dígitos), o código de segurança do cartão, a senha e as credenciais dentro de uma URL, e deixa no lugar um marcador que diz o que havia ali: `[retido:cartão ****1234]`, `[retido:cvv]`, `[retido:senha]`, `[retido:segredo]` (em inglês `[withheld:card ****1234]`, em espanhol `[retenido:tarjeta ****1234]`, conforme o idioma do espaço). Vale para o texto das mensagens, os campos de um evento de sistema, o texto de uma ação, o texto extraído de uma mídia (a foto de um cartão), o payload cru, os arquivos de histórico em fila e a camada quente. Nenhuma dessas cópias guarda o valor, e a extração o recebe já como marcador: "o cliente informou um cartão" continua sendo extraível, o número não.
+
+O que a memória precisa nunca é tocado: número de protocolo, pedido, ticket, rastreio, fatura, boleto, CEP, valor e data ficam como foram ditos. Um cartão precisa passar no dígito verificador e ter a forma de cartão (grupos de quatro) ou uma palavra de cartão perto, nunca uma palavra de pedido ou protocolo logo antes; um número solto, sem palavra própria, toma a palavra do turno anterior ("qual o número do cartão?", até 30 minutos antes), então o cliente que responde só com o número também fica protegido. Um código de segurança é um grupo isolado de três ou quatro dígitos logo depois da palavra (`cvv`, "código de segurança"), nunca parte de um CEP, uma data, uma hora ou um valor; uma senha é o que vem logo depois da palavra ("senha:", "a senha é"), e "esqueci a senha" não retém nada. As regras estão escritas em português, inglês e espanhol e são idempotentes: mascarar um texto já mascarado não muda nada.
+
+A resposta do lote conta o que foi retido por tipo, em `masked` ([`POST /v1/batch`](/api/batch)), e [`POST /v1/ingest/status`](/api/ingest-status) traz a mesma contagem por conversa ou tarefa. O documento de configuração `ingest-masking`, escrito pelo papel `security` por diff aprovado, lista os tipos retidos (`card`, `cvv`, `password`, `secret`); todos vêm ligados. No plano Regulado, `card`, `cvv` e `password` são retidos seja qual for a lista.
+
+O que já estava gravado passa pelas mesmas regras: na primeira vez que um espaço as recebe, e sempre que as regras ou os tipos do espaço mudam, uma passagem limitada por espaço mascara os eventos que estão no banco, os payloads crus e a camada quente dos handles deles, em páginas curtas entre as outras tarefas, e sobe a sequência de mudanças de cada linha, então a [exportação contínua](#exportação-contínua-para-o-seu-bucket) reenvia essas linhas ao seu bucket. Os meses que já saíram para o arquivo frio não são reescritos: toda linha lida do arquivo é mascarada na saída, então uma exportação ou uma linha do tempo nunca serve um cartão. Os episódios, fatos e resumos já extraídos passam por uma passagem própria, descrita logo abaixo. Esta retenção acontece antes e independe da troca de dados pessoais por marcadores que antecede o modelo de IA, descrita abaixo.
+
+
+## O que a extração nunca guarda
+
+Depois que o modelo de extração responde e antes de qualquer coisa ser gravada, todo texto que a extração pode guardar (resumo, solução, intenção, categoria, desfecho, valores de fatos, promessas, campos do perfil, o que o agente afirmou e os [valores fixados](/concepts/events#valores-fixados)) passa pelas regras da ingestão (cartão, código de segurança, senha, segredo) e pelos vetos dos valores fixados (número de documento de pessoa física ou jurídica, conta bancária), além dos números que os próprios turnos da sessão chamaram de documento: o número que o cliente disse como "o número da minha identidade" fica retido onde quer que o modelo o repita, mesmo sozinho. Cada um vira um marcador com o tipo, no idioma do espaço: `[retido:documento]`, `[retido:conta]`, `[retido:cartão ****1234]`, `[retido:segredo]` (em inglês `[withheld:document]`, em espanhol `[retenido:documento]`). Um fato, uma promessa, um campo do perfil ou um valor fixado que seria só esse número não é gravado, e a execução conta quantos saíram. Número de protocolo, pedido, ticket, CEP, valor e data ficam como foram ditos.
+
+Um conteúdo de categoria sensível (saúde, religião, política, vida sexual, filiação sindical, biometria, genética, origem, antecedentes criminais) que a extração arquivou sob um predicado comum, pela decisão da IA da Niadra sobre cada texto que ficaria como dado comum (na dúvida, sem resposta ou com o modelo fora, o texto é tratado como sensível de categoria desconhecida), vai para o predicado sensível da mesma categoria, quando o esquema do espaço tem um, e sai quando não tem: o esquema diz que dado sensível o espaço coleta, e nunca como dado comum. O episódio da conversa passa para essa categoria também, então o resumo e as promessas dele seguem a política dela.
+
+A extração nomeia também o assunto de cada conversa: uma chave curta em inglês (`delivery_failed`), que as conversas do mesmo cliente sobre o mesmo problema compartilham, e um rótulo nas palavras dele, que a [contagem por assunto](/concepts/context#esqueleto-e-encaixes-por-turno) lê e escreve no contexto. Os dois são guardados em claro, sem mascaramento, então nunca podem carregar um identificador nem um valor retido: uma chave ou um rótulo com dígito, colchete, arroba ou outro sinal de marcador é descartado, e uma chave feita de uma palavra que não nomeia coisa nenhuma (service, product, support) também. Uma conversa que toca conteúdo sensível, pelo texto ou pela categoria em que foi arquivada, não guarda assunto nenhum: nem a chave nem o rótulo dizem o que a política da categoria retém.
+
+O que já estava gravado passa pelo mesmo crivo: uma passagem limitada e idempotente por espaço revê os fatos, as versões dos episódios, as pendências, os valores fixados, os campos do perfil e os resultados de extração guardados, troca os números pelos marcadores e apaga, com lápide, o que era só um número ou conteúdo sensível que o espaço não coleta. Os registros dela guardam só contagens.
+
+## O que fica protegido por desenho
+
+- O papel de banco que atende toda requisição só acrescenta eventos: ele não altera nem apaga uma linha da tabela de eventos, nem na tabela nem em cada partição semanal, e uma restauração aplica a mesma regra de novo. As marcas de um evento (injeção, texto de mídia), o apagamento e o expurgo de um mês arquivado rodam como o papel de sistema.
+- Handle, consulta de busca e texto livre só viajam no corpo da requisição, nunca na URL, então não chegam a log de balanceador. Toda leitura que leva um `conversation_id` tem uma forma `POST`, com o id no corpo, e o Console e os SDKs usam essa forma; nas formas `GET`, que continuam, use um id opaco do seu sistema. Veja [Limites e convenções](/conventions).
+- Nenhuma linha de log leva dado de cliente. Um erro registrado guarda onde falhou (arquivo, linha e função) e a classe de cada exceção, nunca a mensagem, e um comando de banco que falha não cita os parâmetros. Um teste da suíte do servidor passa um valor canário pela ingestão (um item aceito e um recusado pelo lote), pela extração (uma que dá certo e uma em que o erro do provedor cita o prompt), pela leitura do contexto com consulta e `delta` e pela busca no histórico, e confere que ele não aparece em nenhuma linha de log, em nenhum nível, pelo formatador de produção.
+- O conteúdo é cifrado com AES-256-GCM sob a chave de dados do seu espaço, que só existe embrulhada pela chave mestra de cifra da célula. Essa chave mestra fica no AWS KMS, em HSMs com validação FIPS 140-3, e nunca sai de lá. Sob contrato, a chave que embrulha as chaves de dados do seu espaço pode ser a sua, no serviço de chaves da sua conta na nuvem: a operação da Niadra a nomeia ([`PUT /v1/spaces/{space_id}/kms-key`](/api/control/space-kms-key)), a célula passa a gerar a próxima chave de dados do espaço sob ela e continua abrindo o que já foi gravado com a chave que o embrulhou; se você desligar a chave ou retirar a concessão, o espaço para de gravar em vez de voltar à chave da Niadra. Em trânsito, TLS 1.3: a borda e o banco recusam versões anteriores, e os serviços de nuvem e a IA da Niadra, com que a célula fala, negociam 1.3. Numa entrega para um endpoint seu (webhook, SIEM, exportação), vale a versão mais alta que ele aceitar.
+- Antes de uma conversa chegar a qualquer modelo de terceiro, o de geração ou o de decisão, regras determinísticas e o modelo de dado pessoal da célula trocam por marcadores o e-mail, o telefone, o cartão (conferido por Luhn), o IBAN, os códigos postais, o endereço, os números de documento de pessoa física e de pessoa jurídica de vários países conferidos pelo dígito verificador ou pela forma escrita (os dois formatos brasileiros, o Social Security Number dos Estados Unidos, o SIN canadense, o National Insurance number britânico, o DNI e o NIE espanhóis, o NIF português, o CURP mexicano, o RUT chileno, o Aadhaar indiano) e, quando vêm junto do nome, o RG, o passaporte, o DNI argentino e a cédula, além da agência e conta bancária e da chave PIX aleatória (`bank_account`); a versão das regras é `pii-rules@3`. Um número escrito depois de um código de país (`+55 11 91234-567`) ou de um DDD entre parênteses (`(11) 91234-567`) é telefone, em qualquer país, mesmo quando os últimos grupos têm a forma de um CEP: nenhum país escreve código postal assim. Um celular brasileiro de antes do nono dígito, escrito depois do código do país, também é telefone. Parecidos que falham no dígito verificador, conversa em minúsculas e números sem o nome ao lado ficam como estão, e o valor de um fato sensível já guardado nunca vai junto. Quando a resposta do modelo volta, os marcadores de e-mail ou telefone voltam a ser os valores dentro da célula, mas um marcador de documento, cartão ou conta bancária volta como marcador retido, nunca como o valor.
+- Os eventos saem do banco vivo quando passam da janela quente e ficam cifrados no arquivo frio. O arquivo frio fica até o seu espaço definir uma retenção para ele; as amostras de revisão e o registro de entregas de webhook têm retenção configurável, e o que vence é apagado de verdade.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Comprovantes e auditoria" href="/concepts/receipts">
+    a trilha que cada apagamento e cada leitura deixam.
+  </Card>
+  <Card title="Apagar" href="/api/forget">
+    o endpoint em detalhe.
+  </Card>
+  <Card title="Padrões" href="/concepts/patterns">
+    oposição ao perfilamento e retirada de padrão.
+  </Card>
+  <Card title="Segurança e privacidade no site" href="https://niadra.com/recursos">
+    as seis camadas que protegem os dados.
+  </Card>
+  <Card title="Modelo de ameaças" href="/security/threat-model">
+    ativos, fronteiras, controle por componente e riscos residuais.
+  </Card>
+  <Card title="Questionário de segurança" href="/security/questionnaire">
+    as perguntas da revisão de segurança, respondidas com evidência.
+  </Card>
+  <Card title="Uso de dados" href="/security/data-use">
+    o que sai da célula, e o que a Niadra nunca faz com os dados.
+  </Card>
+  <Card title="Resposta a incidentes" href="/security/incident-response">
+    papéis, severidades e a notificação no prazo do contrato.
+  </Card>
+</CardGroup>

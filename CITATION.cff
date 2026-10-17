@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+title: "Niadra: an open-source memory layer for AI agents"
+message: "If you use Niadra or its benchmark in your work, please cite it."
+type: software
+authors:
+  - name: Niadra
+    website: "https://niadra.com"
+repository-code: "https://github.com/ainiadra/niadra"
+url: "https://niadra.com"
+license: Apache-2.0
+keywords:
+  - ai-agents
+  - agent-memory
+  - long-term-memory
+  - memory-layer
+  - context-engineering
+  - identity-resolution
+  - omnichannel
+  - model-context-protocol

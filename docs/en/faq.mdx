@@ -1,0 +1,56 @@
+---
+title: "FAQ"
+description: "What product, engineering and security teams ask before connecting their agents to Niadra."
+---
+
+## The platform
+
+<AccordionGroup>
+  <Accordion title="Doesn’t my AI agent vendor already do this?">
+    It does, but only inside its own product. The WhatsApp agent cannot see the call handled by another vendor, and no vendor will open its memory to a competitor. That is why the memory has to sit above all of them.
+  </Accordion>
+  <Accordion title="Isn’t this my CRM?">
+    No. The CRM stores history for a person to look up later. Niadra hands the context to the AI agent during the conversation, with no AI model on the read and, with a warm context, no database statement. The outcome of each one goes out by webhook, and your CRM records it.
+  </Accordion>
+  <Accordion title="Does it work for internal agents that never talk to the customer?">
+    Yes. The billing agent that applies a credit, the orders agent that changes a delivery in the ERP and the one that triages tickets use the same three calls: they receive the customer context for the task, search the history and record what they did. The next agent, internal or customer-facing, starts out knowing.
+  </Accordion>
+  <Accordion title="How do my systems get into the memory?">
+    Through webhooks, the API or batch files. Your CRM, ERP, help desk, billing and order systems send the events they already emit, and Niadra ties every order, ticket and bill to the right customer by each system’s ID. Agents also record what they did in each system. The systems remain the official source: Niadra keeps what the agents need to remember and points back to where it came from.
+  </Accordion>
+  <Accordion title="How do I know my agents are actually using the memory?">
+    Niadra measures it. It delivered the context and receives the conversation that came next, so it checks, per agent and per vendor: what was used, what was asked again, what was said against what the memory already knew, and who transferred without reading. In the Console, each conversation’s detail shows every delivery, item by item. No agent vendor can give you that number, because none of them holds both sides.
+  </Accordion>
+  <Accordion title="Does Niadra recognize companies, or only people?">
+    Both, and partners too. The customer can be a person, an account (the company that buys from you) or a partner (the carrier, the broker, the clinic that takes part without being a customer). Each person is linked to the organization by their role, with a validity period: the retailer’s buyer, the carrier’s driver. The agent serving the company gets the account’s context; the one serving the contact gets theirs, plus whatever the account holds that matters for the task.
+  </Accordion>
+  <Accordion title="Does Niadra run actions or workflows?">
+    No. Niadra notifies. When a rule of yours happens in the memory (a promise falls due, a third complaint about the same subject shows up, an agent ignores the context it received), it sends a signed webhook to your system or your agent. They act. Niadra does not handle customers, does not orchestrate and has no support screen.
+  </Accordion>
+  <Accordion title="Do I need to deploy or run any infrastructure?">
+    No. Niadra is fully managed: we build and run the servers, database, keys, updates, backups and monitoring. On your side, you install the SDK and connect your agents.
+  </Accordion>
+  <Accordion title="How does Niadra protect my customers’ data?">
+    In six layers. All data is encrypted at rest and travels over the network with TLS 1.3 (on a delivery to an endpoint of yours, at the highest version it accepts), and the content gets a second cipher, AES-256-GCM, with an exclusive key per company, protected by a master key in a FIPS 140-3 validated HSM. Access denied by default and granted by purpose. Every read logged in a tamper-evident trail, chained by SHA-256. Niadra acts as a processor under GDPR and LGPD, never uses your data to train models, and erases a customer’s data with a receipt. On the Regulated plan, your company gets a dedicated environment, with its own servers, database and keys.
+  </Accordion>
+</AccordionGroup>
+
+## The memory
+
+<AccordionGroup>
+  <Accordion title="Can the agent search the customer’s entire history?">
+    Yes. Beyond the context delivered before the reply, the agent searches the entire history, with any LLM: what has happened before, how many times, how it was settled and what was promised. It works through the SDK, the API or MCP, and every result respects that agent’s permissions.
+  </Accordion>
+  <Accordion title="How does Niadra know it is the same person?">
+    It matches the identifiers from each channel: phone, email, ID number, app login. Each one carries a weight. A phone number is a hint, a login with a password is proof. And if two people are merged by mistake, Niadra splits them without losing the history of either.
+  </Accordion>
+  <Accordion title="Does it work with the AI model I already use?">
+    Yes. The context arrives ready for the prompt, and the history search uses the tool format every LLM understands. The provider does not matter, and neither does whether you host the model yourself.
+  </Accordion>
+  <Accordion title="Does this raise my AI bill?">
+    It tends to go down. The agent receives a compact context instead of the whole history with every message. The savings depend on the provider and the model, and the Console shows the measurement: how much of each agent's prompt the provider read from its cache and the estimated savings, from the usage every model call reports.
+  </Accordion>
+  <Accordion title="Do the agents also keep a memory of their own work?">
+    Yes. Beyond the customer memory, each agent keeps its own working notes: procedures, how the company's tools and processes behave and known pitfalls. They enter the prompt before the customer's context and never carry personal data: a note with a phone number, an e-mail or a customer's name is refused, not masked. Your team turns the feature on in the Console and reads, revises and retires the notes there.
+  </Accordion>
+</AccordionGroup>

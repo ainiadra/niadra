@@ -1,0 +1,1078 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/constraints.v0.json",
+  "title": "Niadra Constraints Block v0",
+  "description": "What one subject wants, refuses and is, for the tools of one turn. See spec/constraints.md.",
+  "$defs": {
+    "AttributeEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^z[0-9]{1,4}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}(?:\\.[a-z0-9_]{1,64}){0,3}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "system": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "maxLength": 256,
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "source": {
+          "enum": [
+            "stated",
+            "correction",
+            "acquired",
+            "kept",
+            "returned_for_size",
+            "inferred"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "apply": {
+          "enum": [
+            "always",
+            "when_asked"
+          ],
+          "title": "Apply",
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "value",
+        "confidence",
+        "source",
+        "apply"
+      ],
+      "title": "AttributeEntry",
+      "type": "object",
+      "if": {
+        "required": [
+          "apply"
+        ],
+        "properties": {
+          "apply": {
+            "const": "always"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source": {
+            "enum": [
+              "stated",
+              "correction"
+            ]
+          }
+        }
+      }
+    },
+    "BlockSubject": {
+      "additionalProperties": false,
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        }
+      },
+      "title": "BlockSubject",
+      "type": "object"
+    },
+    "CompanyRule": {
+      "additionalProperties": false,
+      "description": "A rule of the company delivered in the block, with where it lives and its rank in the order the company declared: the block never ranks two origins by itself.",
+      "properties": {
+        "id": {
+          "pattern": "^r[0-9]{1,4}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "origin": {
+          "description": "`code`, `db:<table>`, `prompt:<version>`, `policy:<version>`...",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Origin",
+          "type": "string"
+        },
+        "rank": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "attr": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,39}\\.[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attr"
+        },
+        "op": {
+          "anyOf": [
+            {
+              "enum": [
+                "in",
+                "not_in",
+                "eq",
+                "ne",
+                "lt",
+                "lte",
+                "gt",
+                "gte",
+                "between"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Op"
+        },
+        "values": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "maxLength": 256,
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 50,
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "origin",
+        "rank"
+      ],
+      "title": "CompanyRule",
+      "type": "object"
+    },
+    "Conflict": {
+      "additionalProperties": false,
+      "description": "Two entries that cannot both hold, and the one that won: the current utterance over what was stated before, and a stated entry over an inferred one. Between two company rules, it is also a data issue.",
+      "properties": {
+        "ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "minItems": 2,
+          "title": "Ids",
+          "type": "array"
+        },
+        "kept": {
+          "title": "Kept",
+          "type": "string"
+        },
+        "by": {
+          "enum": [
+            "current_utterance",
+            "precedence",
+            "rule_rank"
+          ],
+          "title": "By",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ids",
+        "kept",
+        "by"
+      ],
+      "title": "Conflict",
+      "type": "object"
+    },
+    "ConstraintOrigin": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "stated",
+            "tool_args",
+            "correction"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "event_key": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Key"
+        },
+        "turn_id": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Turn Id"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ConstraintOrigin",
+      "type": "object"
+    },
+    "ContactWindow": {
+      "additionalProperties": false,
+      "description": "The local hours a suppression applies in (the suppression-list spec, 6.1): from `from` up to `to`, in the IANA zone `tz`, on the ISO weekdays `days` (1 is Monday; null for every day). A window whose `to` is not after its `from` crosses midnight and belongs to the day it starts on.",
+      "properties": {
+        "from": {
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "title": "From",
+          "type": "string"
+        },
+        "to": {
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "title": "To",
+          "type": "string"
+        },
+        "tz": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Tz",
+          "type": "string"
+        },
+        "days": {
+          "anyOf": [
+            {
+              "items": {
+                "maximum": 7,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 7,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Days"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "tz"
+      ],
+      "title": "ContactWindow",
+      "type": "object"
+    },
+    "ContactWindowEntry": {
+      "additionalProperties": false,
+      "description": "A contact window the subject said, in their own block (the suppression-list spec, 6.1).",
+      "properties": {
+        "channel": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channel"
+        },
+        "window": {
+          "$ref": "#/$defs/ContactWindow"
+        },
+        "said_at": {
+          "format": "date-time",
+          "title": "Said At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "window",
+        "said_at"
+      ],
+      "title": "ContactWindowEntry",
+      "type": "object"
+    },
+    "HardConstraint": {
+      "additionalProperties": false,
+      "description": "Only what the person said: an inference is never hard.",
+      "properties": {
+        "id": {
+          "pattern": "^h[0-9]{1,4}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "attr": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}\\.[a-z][a-z0-9_]{0,63}$",
+          "title": "Attr",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "in",
+            "not_in",
+            "eq",
+            "ne",
+            "lt",
+            "lte",
+            "gt",
+            "gte",
+            "between"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "maxLength": 256,
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Values",
+          "type": "array"
+        },
+        "source": {
+          "enum": [
+            "stated",
+            "tool_args",
+            "correction"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "turn",
+            "session",
+            "persistent",
+            "object"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        },
+        "relax": {
+          "default": "never",
+          "enum": [
+            "never",
+            "ask"
+          ],
+          "title": "Relax",
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/ConstraintOrigin"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "object": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "With `scope: object`, the object the instruction is about.",
+          "title": "Object"
+        }
+      },
+      "required": [
+        "id",
+        "attr",
+        "op",
+        "values",
+        "source",
+        "scope",
+        "origin"
+      ],
+      "title": "HardConstraint",
+      "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "enum": [
+                  "eq",
+                  "ne",
+                  "lt",
+                  "lte",
+                  "gt",
+                  "gte"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "values": {
+                "maxItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "const": "between"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "values": {
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ObjectInstruction": {
+      "additionalProperties": false,
+      "description": "What someone said must or must not be done about an object the read is about: a task on the object, a read by the object, or a task view of its type. Hard, never relaxed, never inferred; one about a field of the object's type is also in `hard`, where a tool binding applies it.",
+      "properties": {
+        "id": {
+          "pattern": "^i[0-9]{1,4}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "object": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The object it is about.",
+          "title": "Object"
+        },
+        "about": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Naming no object: the organization (its profile) it is about, a client the read is about, its own reads or a contact's read with `about`.",
+          "title": "About"
+        },
+        "text": {
+          "description": "As it was said, short: what a reader honors without a tool binding.",
+          "maxLength": 256,
+          "title": "Text",
+          "type": "string"
+        },
+        "strength": {
+          "enum": [
+            "must",
+            "must_not"
+          ],
+          "title": "Strength",
+          "type": "string"
+        },
+        "attr": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,39}\\.[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The field of the object's type it is about.",
+          "title": "Attr"
+        },
+        "hard": {
+          "anyOf": [
+            {
+              "pattern": "^h[0-9]{1,4}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The entry of `hard` that carries it for a tool, when `attr` is set.",
+          "title": "Hard"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The role on the object of who said it (`owner`, `participant`, `lawyer`).",
+          "title": "Role"
+        },
+        "only_with": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The one person it holds with, as the conversation named them: it binds the readers dealing with that person, not whoever is speaking. With `contact`, the person it is the preference of.",
+          "title": "Only With"
+        },
+        "contact": {
+          "default": false,
+          "description": "A contact preference (a channel, hours): how the company reaches `only_with`, never a limit on what may be said to them.",
+          "title": "Contact",
+          "type": "boolean"
+        },
+        "said_at": {
+          "format": "date-time",
+          "title": "Said At",
+          "type": "string"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "strength",
+        "said_at"
+      ],
+      "title": "ObjectInstruction",
+      "type": "object"
+    },
+    "Rendered": {
+      "additionalProperties": false,
+      "description": "The block for one tool, through its bindings (`constraints.v0`, rendering).",
+      "properties": {
+        "tool": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Tool",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "advisory",
+            "apply"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "args": {
+          "additionalProperties": true,
+          "description": "Argument values that carry hard constraints and attributes.",
+          "title": "Args",
+          "type": "object"
+        },
+        "residual": {
+          "description": "Ids no argument of the tool can express.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Residual",
+          "type": "array"
+        },
+        "post_filter": {
+          "description": "Residual ids the SDK filters from the results of an overfetch.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Post Filter",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tool",
+        "mode",
+        "args"
+      ],
+      "title": "Rendered",
+      "type": "object"
+    },
+    "Shown": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+          "title": "Ref",
+          "type": "string"
+        },
+        "times": {
+          "minimum": 1,
+          "title": "Times",
+          "type": "integer"
+        },
+        "last_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last At"
+        },
+        "values": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ShownValue"
+          },
+          "description": "The numbers the object was last shown with (a price, a total, a discount, an installment), by field: each field its type declares as `money`, `percent` or `number`. A claim check takes them as evidence for the offer an agent quotes back.",
+          "title": "Values",
+          "type": "object"
+        }
+      },
+      "required": [
+        "ref",
+        "times"
+      ],
+      "title": "Shown",
+      "type": "object"
+    },
+    "ShownValue": {
+      "additionalProperties": false,
+      "description": "A number an object showed the subject, as they were shown it.",
+      "properties": {
+        "v": {
+          "title": "V",
+          "type": "number"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The field's role, for claims.",
+          "title": "Role"
+        },
+        "claim_safe": {
+          "description": "Whether it may be claimed now: its type allows claims of the field, and no more than the field's age for claims has passed since it was shown.",
+          "title": "Claim Safe",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "v",
+        "claim_safe"
+      ],
+      "title": "ShownValue",
+      "type": "object"
+    },
+    "SoftConstraint": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^s[0-9]{1,4}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "attr": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}\\.[a-z][a-z0-9_]{0,63}$",
+          "title": "Attr",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "maxLength": 256,
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        },
+        "polarity": {
+          "default": "prefer",
+          "enum": [
+            "prefer",
+            "avoid"
+          ],
+          "title": "Polarity",
+          "type": "string"
+        },
+        "weight": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Weight",
+          "type": "number"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "source": {
+          "enum": [
+            "inferred",
+            "stated"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        }
+      },
+      "required": [
+        "id",
+        "attr",
+        "value",
+        "weight",
+        "confidence",
+        "source"
+      ],
+      "title": "SoftConstraint",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "description": "A digest of the block, which the turn record cites.",
+      "pattern": "^cv_[0-9a-f]{8,64}$",
+      "title": "Version",
+      "type": "string"
+    },
+    "subject": {
+      "$ref": "#/$defs/BlockSubject"
+    },
+    "hard": {
+      "items": {
+        "$ref": "#/$defs/HardConstraint"
+      },
+      "maxItems": 100,
+      "title": "Hard",
+      "type": "array"
+    },
+    "soft": {
+      "items": {
+        "$ref": "#/$defs/SoftConstraint"
+      },
+      "maxItems": 100,
+      "title": "Soft",
+      "type": "array"
+    },
+    "attributes": {
+      "items": {
+        "$ref": "#/$defs/AttributeEntry"
+      },
+      "maxItems": 50,
+      "title": "Attributes",
+      "type": "array"
+    },
+    "exclude": {
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+        "type": "string"
+      },
+      "maxItems": 200,
+      "title": "Exclude",
+      "type": "array"
+    },
+    "already_presented": {
+      "items": {
+        "$ref": "#/$defs/Shown"
+      },
+      "maxItems": 200,
+      "title": "Already Presented",
+      "type": "array"
+    },
+    "relaxation_order": {
+      "description": "What gives way first when a search finds nothing: `soft`, ids.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Relaxation Order",
+      "type": "array"
+    },
+    "precedence": {
+      "items": {
+        "enum": [
+          "current_utterance",
+          "stated_persistent",
+          "inferred"
+        ],
+        "type": "string"
+      },
+      "title": "Precedence",
+      "type": "array"
+    },
+    "rules": {
+      "items": {
+        "$ref": "#/$defs/CompanyRule"
+      },
+      "maxItems": 50,
+      "title": "Rules",
+      "type": "array"
+    },
+    "conflicts": {
+      "items": {
+        "$ref": "#/$defs/Conflict"
+      },
+      "maxItems": 50,
+      "title": "Conflicts",
+      "type": "array"
+    },
+    "instructions": {
+      "description": "What people said must or must not be done about the objects the read is about.",
+      "items": {
+        "$ref": "#/$defs/ObjectInstruction"
+      },
+      "maxItems": 500,
+      "title": "Instructions",
+      "type": "array"
+    },
+    "omitted": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "description": "How many entries of each kind (`hard`, `soft`, `exclude`, `already_presented`, `instructions`) the block's sizes left out; the restrictions keep their room first. Absent when nothing was left out; `text` says it too.",
+      "title": "Omitted",
+      "type": "object"
+    },
+    "ask": {
+      "description": "Questions the agent should ask, as `for_whom`, before assuming.",
+      "items": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Ask",
+      "type": "array"
+    },
+    "contact_windows": {
+      "description": "The local hours the subject said they may not be contacted in, one per channel (null: every channel), the latest said: a contact of any purpose waits for the window's end.",
+      "items": {
+        "$ref": "#/$defs/ContactWindowEntry"
+      },
+      "maxItems": 10,
+      "title": "Contact Windows",
+      "type": "array"
+    },
+    "text": {
+      "description": "The block as lines for a model, in the space's language, each field by its label and each operator in words; an empty string when the block has nothing to say. Not part of `version`.",
+      "title": "Text",
+      "type": "string"
+    },
+    "rendered": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Rendered"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "version",
+    "text"
+  ],
+  "type": "object"
+}

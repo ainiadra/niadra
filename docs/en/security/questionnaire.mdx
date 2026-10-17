@@ -1,0 +1,161 @@
+---
+title: "Security questionnaire"
+description: "The common questions of a security review by a bank, an insurer or a health operator, answered as the platform stands today, with the evidence for each answer."
+---
+
+Answers to the questions a security questionnaire usually asks, true on 30/09/2026. Every answer points to its evidence: a file in Niadra's open-source repository ([github.com/ainiadra/niadra](https://github.com/ainiadra/niadra): `server/`, `deploy/`, `web/`), a page of this documentation or a cloud resource. Where the honest answer is "not yet", it says so and says what exists instead.
+
+If your questionnaire has its own format, Niadra answers it from these same answers; ask through the [Enterprise form](https://niadra.com/en/enterprise).
+
+## Organization and certifications
+
+**Does Niadra hold ISO 27001, SOC 2 or PCI DSS certification?**
+No. The certifications belong to the cloud Niadra runs on (AWS: EC2, RDS, S3, KMS, Secrets Manager, SNS, CloudWatch Logs, ECR, SES, in `us-east-2`), not to Niadra. A certification of its own is not contracted.
+
+**Has there been a penetration test by an independent firm?**
+Not yet. What exists: the automated isolation tests that run on every pull request of the server (PostgreSQL row-level security, one database per space, one company's key that does not open another's data: `server/tests/unit/test_keys.py::test_one_companys_key_never_opens_anothers_data`), the [threat model](/en/security/threat-model) and the responsible disclosure channel at [niadra.com/.well-known/security.txt](https://niadra.com/.well-known/security.txt) (RFC 9116). On the Regulated plan, a penetration test by an independent firm is part of the contract, with the report available under a non-disclosure agreement.
+
+**Who is responsible for security?**
+The founder, who operates the platform and responds to incidents. There is no separate security team and no on-call rota; the [incident response plan](/en/security/incident-response) says how that works in practice.
+
+**Who has access to production?**
+One person, the founder, through the AWS account, with no SSH port: the machine is reached through Systems Manager, with the session recorded in the account's CloudTrail. No AWS credential exists outside that account; GitHub has none (`deploy/README.md`, "Continuous integration and deploy").
+
+## Access control
+
+**How do agents and systems authenticate?**
+With one source key per agent, vendor or channel, with scopes (`track`, `act`, `context`, `search`, `identify`, `admin`, `analytics` and the agent features' scopes) and an audience class. A route without the scope answers 403 `scope_missing` and leaves a `denied` receipt. The key is stored only as hashes: a peppered HMAC for lookup and a slow scrypt for verification (`server/src/niadra/domain/edge/keys.py`). See [Spaces and keys](/en/concepts/spaces-and-keys).
+
+**Is there immediate revocation and key rotation?**
+Yes. Revoking a key cuts access within seconds; an optional grace period lets the old key answer while the agent switches to the new one (`server/src/niadra/app/control.py`, `expire_key`). Keys are created and revoked in the Console or through the control API.
+
+**How do people sign in to the Console?**
+With a password (scrypt hash, about 50 ms and 16 MiB per check) and a TOTP second factor, required by default on every tenant (`server/src/niadra/domain/control/credentials.py`; `app/control.py`, `mfa_required`), or through SSO with your company's identity provider, over OIDC or SAML 2.0, with roles taken from the provider's groups (`server/src/niadra/app/sso.py`). The session is a short-lived EdDSA JWT.
+
+**Are there roles and least privilege?**
+Yes. Roles `admin`, `security`, `integration`, `review`, `analysis` and `vendor`, combinable (`server/src/niadra/domain/control/records.py`). Erasing, exporting, creating a legal hold and changing the policy require `security`; every person action leaves an `admin` receipt. See [Console access](/en/concepts/console-access).
+
+**What can an agent read?**
+What the space's policy releases, item by item, by category, sensitivity, purpose, audience and the customer's verification level in the conversation. The policy denies by default: an undeclared category reaches no one, and a sensitive category only reaches through a release that names a purpose. See [Access denied by default](/en/concepts/privacy#access-denied-by-default-released-by-purpose).
+
+## Encryption
+
+**Is data encrypted at rest?**
+Yes, in two layers. The cloud encrypts the database disk (`StorageEncrypted: true` in `deploy/aws/cluster.yaml`) and the buckets. The application encrypts the content of conversations, events, facts and context with AES-256-GCM under the space's data key, with space, table, column and row as authenticated data: one company's row does not decrypt under another's key (`server/src/niadra/adapters/outbound/keys/kms.py`; test `tests/unit/test_keys.py`).
+
+**Where are the keys?**
+The master key is in AWS KMS (`alias/niadra-cell`), in HSMs validated to FIPS 140-3, and never leaves it; KMS rotates the material every year. Each space's data keys come from `GenerateDataKey` and are stored wrapped, in the cell database, outside the space's database. The key policy separates who uses it (the machine's role: `Encrypt`, `Decrypt`, `GenerateDataKey`, `DescribeKey`) from who administers it (the account); changing that takes a policy change, which CloudTrail records (`deploy/aws/cluster.yaml`, `CellKey`). On the Regulated plan, the dedicated cell has its own master key, and under contract the key that wraps the data keys can be the one in your cloud account.
+
+**Is data encrypted in transit?**
+Yes. TLS 1.3 at least at the edge, on every host (`deploy/k8s/charts/niadra/templates/ingress.yaml`, `TLSOption`), and TLS 1.3 required between the connection pooler and the database (`ssl_min_protocol_version: TLSv1.3` in `aws/cluster.yaml`). Between the pods inside the same machine the traffic is not encrypted; it is a declared residual risk in the [threat model](/en/security/threat-model#residual-risks).
+
+**Does personal data reach Niadra's AI?**
+The text goes masked: e-mail, phone, card, IBAN, address, postal codes, documents of several countries and bank accounts are replaced by placeholders inside the cell before the call (`server/src/niadra/domain/extract/redaction.py`), and every request requires zero retention and forbids keeping the text for training (`server/src/niadra/adapters/outbound/llm/`). See [Data use](/en/security/data-use).
+
+## Logging and monitoring
+
+**What records exist and for how long?**
+Three kinds. (1) Receipts: every agent read, the refused one included, every person action, every erasure and every configuration change leave a receipt chained by SHA-256, with the daily root sealed in write-once storage for five years; the retention of receipts in the database is configurable, 30 days at least ([Receipts](/en/concepts/receipts)). (2) Process logs: 30 days in CloudWatch Logs, with no customer content, proven by a canary test (`server/tests/unit/flow/test_log_canary.py`). (3) Calls to the AWS account, KMS and Systems Manager included: the account's CloudTrail.
+
+**Can the records go to my SIEM?**
+Yes. An endpoint with the `ocsf` or `hec` format receives the receipts within seconds, in batches of up to 200, signed, with retries for 24 hours and a dead-letter queue; ids and hashes only. See [Receipts](/en/concepts/receipts).
+
+**Is there monitoring and alerting?**
+Yes. Prometheus and Grafana in the cluster; 21 alert rules in `deploy/k8s/charts/niadra/files/alerts.yaml` (context latency above 100 ms at p95, ingestion acknowledgement above 80 ms, server errors, stale outbox and queue, lost receipts, failing cache and state store, failing space database, pending deletion receipt, failed or stale backup, among others). Those of severity `page` and `ticket` go to an SNS topic with a confirmed e-mail subscription and repeat every 4 hours while they last.
+
+## Backups and recovery
+
+**What are the backups like?**
+Every night, at 02:30 UTC, a `pg_dump` of the cell database and of every space database goes to the cell bucket, encrypted, kept 35 days (`deploy/k8s/charts/niadra/templates/ops.yaml`). RDS keeps the instance's automated backup for one day, what the account's plan allows today; the instance has deletion protection.
+
+**Is restoration tested?**
+Yes, every week: on Sunday the same job restores each latest backup into a scratch database and counts rows. An alert fires when a backup fails or grows stale (`BackupJobFailed`, `BackupStale`). Restoring one space alone, without touching the others, and checking a backup by hand are runbooks in `server/README.md`.
+
+**What are the RPO and RTO?**
+RPO: up to one day for the instance's automated backup and up to 24 hours for the nightly per-database backups. RTO: not measured. The rebuild is by the template (`deploy/scripts/stack.sh`) and a deploy; see the [incident response plan](/en/security/incident-response#recovery).
+
+## Incident response
+
+**Is there an incident response plan?**
+Yes: [Incident response](/en/security/incident-response), with roles, severities, what detects, the steps, customer notification and the review after the incident. The founder is the responder and the on-call.
+
+**How soon is my team told?**
+Within the contract's deadline. With no deadline in the contract, within 24 hours after Niadra confirms an incident that touches your company's data, with updates every 24 hours until closure and a written report at the end.
+
+## Vulnerability management
+
+**Is there vulnerability scanning of dependencies and images?**
+For dependencies, yes; for images, not yet. Since 30/09/2026, every component and SDK with dependencies runs an audit against its lock file before every merge and in CI (the workflows in `.github/workflows/`):
+
+- server, specifications and Python SDK: `pip-audit` over every version in `uv.lock`, including development ones and those of the integration extras; any known vulnerability blocks the merge, whatever its severity (`scripts/audit.py`);
+- TypeScript SDK and site: `pnpm audit --prod` and `npm audit --omit=dev`, which block a high or critical vulnerability in the dependencies that go to production. The TypeScript SDK has no production dependency;
+- the documentation is left out: it ships no code of its own, and Mintlify serves it.
+
+A vulnerability with no fixed version only passes through an exception list with a reason and an expiry date at most 30 days out; once the date passes, the merge is blocked again. In the first round, the server's (PyJWT) and the Python SDK's that had a fix (LiteLLM, oauthlib) were fixed by upgrading; those with no published fix, or pinned by an integration framework (ChromaDB, DiskCache, NLTK and Werkzeug), are exceptions until 30/10/2026, all in extras used only by the SDK's tests. The system packages of the container images are not scanned, and the development dependencies of the TypeScript repositories do not block a merge. The rest: pinned versions (`uv.lock`, `pnpm-lock.yaml`, `package-lock.json`), tests on every pull request (lint, types, module boundaries, unit and integration tests against a real PostgreSQL, PgBouncer, RabbitMQ and Redis), images built on the machine from the released commit, and the responsible disclosure channel.
+
+**How do I report a vulnerability?**
+Through the channel at [niadra.com/.well-known/security.txt](https://niadra.com/.well-known/security.txt): the Enterprise form with the "Security" interest, in Portuguese or English. There is no bounty programme.
+
+**How do fixes reach production?**
+By pull request into `main` with a green CI; a person moves the `release` branch and the machine deploys, with an end-to-end check afterwards and an automatic rollback when it fails (`deploy/scripts/cd.sh`, `on-ops.sh`). A security fix takes the same path, on the day it is ready.
+
+## Secure development
+
+**What is the development cycle?**
+Every change enters by pull request, and CI (`.github/workflows/server.yml`) requires: migrations equal to the models (`alembic check` on the three histories), `ruff` (lint and format), `mypy`, `import-linter` (the code's layers do not invert) and the unit and integration test suite, with more than three thousand tests. The front requires types, tests and a build with internal links checked; the infrastructure requires `shellcheck`, the chart rendered in both modes, the alert routes tested with `amtool`, the memory budget and `cfn-lint`.
+
+**Are environments separated?**
+Yes. The local cell runs with PostgreSQL, Valkey, RabbitMQ, S3-compatible storage and a simulated Niadra AI, on synthetic data only; production has a synthetic tenant for the end-to-end check. Per customer project, the `sandbox` and `production` environments are separate spaces, with isolated keys and data.
+
+**Are secrets kept in repositories?**
+No. They are born once in Secrets Manager (`deploy/scripts/bootstrap-secrets.sh`) and reach each process only through its own Secret; the machine uses the instance role, never access keys.
+
+**Is there code review?**
+Every change goes through a pull request, with CI as the automated reviewer. As Niadra has one person developing today, review by a second person does not exist; it is said here so it does not look otherwise.
+
+## Retention and deletion
+
+**How long is data kept?**
+By data class, configurable per space: events for the hot window (90 days by default, 30 to 90) and then in the cold archive until the space sets a window; facts, episodes, receipts, sessions and raw content (payloads, media and interactions) for each one's `retention_days`, kept until you set a window. The full table, store by store, is at [Where each copy lives](/en/concepts/privacy#where-each-copy-lives-and-how-long-it-stays).
+
+**How is a data subject erased?**
+Through [`POST /v1/forget`](/en/api/forget), by profile, identifier or conversation: the cascade walks the whole lineage (events, facts, episodes, objects, actions, patterns, links, vectors, compiled context, files, cache, turn records) and ends in an erasure receipt and an `erasure.completed` webhook. A sealed record outside the database makes a backup restore re-run the erasure. See [Forget](/en/concepts/privacy#forget).
+
+**And at the end of the contract?**
+Deleting a space drops its database, deletes objects, nightly backups, secrets and cache keys, and destroys the data keys last; the receipt records the destroyed versions and states when the last automated instance backup expires, from which point destruction by key holds for every copy. Export (on demand or continuous, in Parquet) goes out first, to your bucket.
+
+## Business continuity
+
+**What is the availability architecture?**
+One k3s machine and one RDS without Multi-AZ, in one zone of `us-east-2`. Losing the machine or the zone takes the API and the Console down until the rebuild. The path to three machines in three zones and a Multi-AZ database is described in `deploy/README.md` and is not deployed. There is no availability SLA published outside the contract.
+
+**What happens when Niadra's AI is down?**
+Ingestion acknowledges before any model, the context read calls no model, extraction waits and retries, and every decision takes its conservative label. Nothing is lost; new memory is delayed.
+
+**Is there dependence on one person?**
+Yes. Operation is the founder's; the cloud template, the chart, the scripts and the runbooks are in the repository (`deploy/`) so that another person with access to the account can rebuild and operate the platform.
+
+## Data use
+
+**Is data used for another purpose, sold or used to train models?**
+No, no and no. See [Data use](/en/security/data-use), with each statement checked in the code.
+
+**Where does data live?**
+In `us-east-2`, the AWS region the contract names. Only the masked text that goes to Niadra's AI leaves the region, as [Data use](/en/security/data-use) says.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Threat model" href="/en/security/threat-model">
+    control per component and residual risks.
+  </Card>
+  <Card title="Incident response" href="/en/security/incident-response">
+    the plan, as it runs today.
+  </Card>
+  <Card title="Data use" href="/en/security/data-use">
+    what leaves the cell and what Niadra never does with the data.
+  </Card>
+  <Card title="API versioning policy" href="/en/security/api-versioning">
+    what changes, what does not, and with what notice.
+  </Card>
+</CardGroup>

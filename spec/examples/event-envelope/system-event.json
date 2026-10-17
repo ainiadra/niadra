@@ -1,0 +1,14 @@
+{
+  "kind": "system_event",
+  "idempotency_key": "erp/evt/99120",
+  "channel": "erp",
+  "object_refs": [{"type": "invoice", "namespace": "erp", "id": "0823"}],
+  "subjects": [
+    {"kind": "person", "role": "payer", "handles": [{"type": "system_id", "value": "C-1042", "scope": "crm"}]},
+    {"kind": "account", "role": "employer", "handles": [{"type": "system_id", "value": "A-77", "scope": "crm", "subject_kind": "account"}]}
+  ],
+  "speaker": {"role": "system"},
+  "canonical_type": "invoice.credited",
+  "fields": {"amount": "40.00", "currency": "BRL"},
+  "occurred_at": "2026-09-22T14:06:31-03:00"
+}

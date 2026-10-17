@@ -1,0 +1,74 @@
+type: intimacao_com_prazo
+ownership: subject
+mirror_of: {system: banco_do_produto, derived_by: introspection, fingerprint: "sha256:…", drift: alert}
+key: {natural: [source, source_id], fingerprint: "sha256(case_number, made_available_on, content_hash)"}
+revisions: {allowed: true, novelty: keep_first_seen}          # o dispositivo e depois o inteiro teor
+content: {mode: pointer, scan: required, fields: [content]}
+time:
+  occurred_on:       {origin: source}
+  made_available_on: {origin: source}
+  published_on:      {origin: derived, rule: "publicacao_primeiro_dia_util@v3"}
+  known_at:          {origin: platform, immutable: true}
+  content_changed_at: {origin: platform}
+  timers_on: published_on
+fields:
+  case_number: {type: string, freshness: {class: stable}}   # how a lawsuit finds its notices (`match`)
+  addressee_is_client:
+    type: bool
+    logic: tri
+    observers: [{who: machine, rule: "casamento_nome_ou_registro@v7", validity: 24h},
+                {who: human, validity: never, overrides: [machine]}]
+    unobserved_blocks: [count_deadline, draft, notify]
+  content:
+    type: text
+    completeness: {levels: [dispositive, full]}
+  under_seal:
+    type: bool
+    logic: tri
+    observers: [{who: machine, validity: 24h}, {who: human, validity: never, overrides: [machine]}]
+    unobserved_blocks: [model_read, derive]
+values:
+  due_date:
+    rule: "prazo_forense@v9"
+    inputs: [published_on, days_in_text, counting, "calendar@2026"]
+    validity: until_input_or_rule_change
+    declared_gaps: [feriado_estadual_e_municipal, portaria_de_tribunal, prazo_em_dobro]
+    gap_effect: errs_early
+    absent_as: sem_prazo
+sources:
+  public_publications: {kind: pull, precedence: 2, authoritative_for: [content, made_available_on], cost: free}
+  public_movements:    {kind: pull, precedence: 3, authoritative_for: [act_code], cost: free,
+                        licence: {commercial_use: forbidden, exclude_from_purposes: [paid_response]}}
+  paid_vendor:         {kind: pull, precedence: 4, authoritative_for: [], cost: paid}
+  human:               {kind: human, precedence: 1, authoritative_for: ["*"]}
+union: {"*": first_authoritative_live}
+states: [observed, sem_prazo, open, fulfilled, expired_without_act, sealed]
+lifecycle:
+  transitions:
+    - {from: observed, to: open, by: [source], when: "addressee_is_client == yes and due_date != sem_prazo"}
+    - {from: open, to: fulfilled, by: [source, human], evidence: required}        # fecha no protocolo
+    - {from: open, to: expired_without_act, by: [clock]}
+    - {from: "*", to: sealed, by: [source, human], erase_derived: [parties, subjects, author_keys]}
+  forbidden: [{from: fulfilled, to: open}]
+  latches: [fulfilled]
+  outcome: {final: [fulfilled], expired_without_outcome: {after: due_date}}
+timers:
+  notice_48h: {due: "due_date - 48h", once_per: publication, on_fire: [notify]}
+refetch:
+  reasons:
+    - {name: never_updated,   when: "observer(content) == none"}
+    - {name: new_activity,    when: "changed(last_movement_at)", priority: high}
+    - {name: open_deadline,   when: "state == 'open'"}
+    - {name: hearing_scheduled, when: "changed(hearing_at)"}
+    - {name: floor_expired,   when: "age(content) > 7d"}
+  never: [no_news]
+  budget: {unit: paid_update, never_money: true, min_interval: 24h, floor: 7d}
+purposes:
+  display: {on_stale: serve_with_age}
+  claim:   {on_stale: serve_with_prohibitions,
+            prohibitions: [affirm_no_new_activity, affirm_deadline_as_final]}
+  decide:  {on_stale: serve_with_age}
+readings:
+  portfolio: {expr: "due_date - now()", purposes: [portfolio]}
+  assistant: {fields: [due_date, counting, source, age, declared_gaps], purposes: [assistant]}
+  night_batch: {expr: "state == 'open' and content.completeness == 'full' and under_seal == no", purposes: [batch]}

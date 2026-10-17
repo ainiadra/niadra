@@ -1,0 +1,116 @@
+---
+title: "Desfechos e atribuição"
+description: "Quanto os agentes venderam, pedido por pedido, com o método de cada atribuição, a reconciliação com o seu BI, experimentos por braço, intercalação e o contrafactual de ferramenta."
+---
+
+A [medição do aproveitamento](/concepts/context-use) diz se cada agente usou o contexto que recebeu. A **medição de desfechos** vai um passo adiante: liga o que os agentes fizeram ao que aconteceu depois nos seus sistemas de registro, pedido por pedido, com o método de cada atribuição dito ao lado do valor, e confere o total contra o seu BI. Ela nunca multiplica um valor por uma confiança, nunca soma um valor provável a um determinístico, e nunca nomeia uma pessoa.
+
+## Ligar e desligar
+
+A medição de desfechos é a funcionalidade `measurement` do espaço, ligada por padrão; um espaço a desliga no documento `features`, pelo papel `security`. As definições ficam no documento `measurement`, do papel `analysis`: a definição de receita (bruta ou líquida de desconto, cupons, frete, impostos, cancelamentos, trocas, pedidos divididos, moeda), os **desfechos** (um tipo de objeto, os estados de sucesso, o campo de receita, as linhas dele com o item, a quantidade, o estado e o carimbo do token de exposição, o campo do handoff, e `final_after`), a atribuição (métodos, janelas de clique e de visualização, a tolerância da reconciliação), os experimentos, o mínimo de pessoas da demanda não atendida e o custo por turno sem memória que a sua empresa mediu. As rotas pedem o papel `analysis`.
+
+## A definição de receita
+
+O número só bate com o seu BI se a Niadra contar a receita como ele conta. A definição de receita do documento `measurement` (`revenue`) diz o que entra no valor de cada linha e de cada pedido, e vale para todo vínculo de desfecho, para a soma por dia e para a reconciliação. Sem ela, os desfechos são contados e nenhum valor é atribuído.
+
+O valor de uma linha (`lines.value`) é o valor dela antes de descontos, cupom, frete e impostos: o preço vezes a quantidade. O resto chega em campos à parte, que você nomeia:
+
+| Onde | Campo | O que guarda |
+|---|---|---|
+| Linha | `lines.discount` (padrão `discount`) | O desconto da própria linha |
+| Linha | `lines.tax` (padrão `tax`) | O imposto da linha, fora do valor dela |
+| Linha | `lines.replaces` (padrão `replaces`) | O `line_id` da linha do mesmo pedido que ela substituiu numa troca |
+| Pedido | `coupon_field` | O cupom aplicado ao pedido inteiro |
+| Pedido | `shipping_field` | O frete do pedido |
+| Pedido sem linhas | `revenue_field`, `discount_field`, `tax_field` | O valor do pedido, o desconto dele e o imposto dele |
+| Pedido | `purchase_field` | O id da compra de onde vieram as partes de um pedido dividido por vendedor |
+
+Cada ajuste da definição diz o que o valor leva:
+
+| Ajuste | Valores | O que faz |
+|---|---|---|
+| `basis` | `net_of_discount` (padrão), `gross` | Líquido tira o desconto da linha e o cupom; bruto não tira nenhum dos dois |
+| `coupons` | `prorated_by_line` (padrão), `order_level` | Rateado: o cupom do pedido é dividido entre as linhas na proporção do valor de cada uma, em centavos inteiros que somam o cupom exato (as maiores sobras levam os centavos que faltam). No nível do pedido: as linhas ficam inteiras, e o cupom sai só do valor do pedido como um todo (o de um pedido sem linhas, ou o de uma transferência que ajudou a venda) |
+| `shipping` | `excluded` (padrão), `included` | Incluído: o frete é dividido entre as linhas como um cupom rateado |
+| `taxes` | `excluded` (padrão), `included` | Incluídos: cada linha leva o próprio imposto, e um pedido sem linhas, o dele |
+| `cancellations` | `by_line` (padrão), `whole_order` | Por linha: uma linha num estado de falha (`failed_states`, como cancelada ou devolvida) não vale nada e o resto do pedido mantém o valor. Pedido inteiro: o estado das linhas não tira valor; só o estado do próprio pedido tira |
+| `exchanges` | `new_item` (padrão), `same_item` | Item novo: a linha que nomeia a substituída é uma linha como as outras, e a substituída segue o próprio estado. Mesmo item: a troca é a mesma venda, então a linha substituída mantém o valor e a atribuição, mesmo devolvida, e a que a substituiu não conta |
+| `split_orders` | `by_seller` (padrão), `whole_order` | Por vendedor: cada parte de uma compra dividida é um pedido. Pedido inteiro: as partes que nomeiam a mesma compra (`purchase_field`) contam como um pedido só nos totais, cada vínculo traz a compra em `purchase`, e a reconciliação compara pedido a pedido |
+
+Uma linha que substitui outra nunca recebe parte do cupom nem do frete: os dois foram divididos quando o pedido foi feito, e a parte de uma linha cancelada vai embora com ela. Uma definição revisada vale para os desfechos atribuídos depois dela: os vínculos já gravados ficam como estão, a não ser os dos últimos 10 minutos, que são atribuídos de novo sob a definição nova, porque ela leva alguns segundos para chegar a cada processo. Um exemplo, com os padrões: um vestido de R$ 199,90 com R$ 20,00 de desconto e uma bolsa de R$ 100,00, com um cupom de R$ 30,00, valem R$ 160,62 e R$ 89,28.
+
+## Do que o agente mostrou ao pedido
+
+Um agente mostra uma lista de cartões; o cliente compra um deles, no checkout da própria loja. Para ligar a linha do pedido ao cartão exato que o agente mostrou, o cartão leva um **token de exposição** curto, e o app da loja o copia, como texto opaco, para uma propriedade da linha do carrinho. O pedido chega com o token, e a memória atribui a linha à exposição e à posição, de forma determinística, sem o app saber mais nada.
+
+```text
+nx1.<id da exposição>.<posição>.<verificador>
+```
+
+O SDK cria o token quando a lista é apresentada (`exposure_token(exposure_id, pos)` em Python, `exposureToken()` em TypeScript), e a interface o põe no cartão. Ele leva só o id da exposição e a posição: nada sobre o cliente, o item ou o preço. O verificador, os 4 primeiros caracteres do SHA-256 do começo do token, pega um token copiado errado; ele não é uma assinatura, e a memória só aceita um token de uma exposição que o espaço gravou, numa posição que ela tinha. Uma linha cujo token não confere é atribuída pelos outros métodos, nunca por este.
+
+## Os métodos
+
+| Método | Faixa | Como |
+|---|---|---|
+| `line` | Determinístico | O token de exposição na própria linha do pedido, nunca um inferido |
+| `order` | Determinístico | O token no pedido, ou a última ação do próprio agente sobre o objeto |
+| `identity` | Provável | O mesmo item com que o cliente interagiu ou que viu, dentro da janela (`click_window_days`, 7 por padrão; `view_window_days`, 1) |
+| `assisted_handoff` | Provável | Uma transferência que ajudou a venda: o desfecho chegou dentro da janela (`handoff_window_days`, 7 por padrão) depois da transferência que o objeto nomeia |
+
+Cada **vínculo de desfecho** ([`GET /v1/measure/outcomes`](/api/measure-outcomes)) leva o método, a faixa, o valor da linha inteiro ou nenhum (em unidades menores da moeda, só sob a definição assinada de receita), o estado do objeto ou da linha, quando o desfecho passou a contar e a finalidade: `provisional` até a janela de troca fechar (`final_after`) ou o objeto chegar a um estado final do [ciclo de vida](/concepts/object-types#ciclo-de-vida-e-temporizadores), o que vier antes, ou `expired_without_outcome` quando o prazo do tipo passou antes. Um vínculo `identity` traz a **confiança** do método neste espaço: com que frequência ele nomeia a exposição que o token da própria linha nomeia, nas linhas em que os dois existem. Ela fica ao lado do valor, nunca multiplicada por ele.
+
+[`GET /v1/measure/attribution`](/api/measure-attribution) soma por dia, agente, método e faixa, em dias UTC, determinístico e provável à parte. Um desfecho que vem por uma transferência aparece como a ação `handoff.outcome` de quem recebeu, e os compromissos e desfechos da [coordenação](/concepts/coordination) entram na memória como ações sobre os objetos deles.
+
+## Reconciliar com o seu BI
+
+O número que vale é o seu. [`POST /v1/measure/reconcile/uploads`](/api/measure-reconcile-uploads) reserva o upload do CSV do seu BI para um período (`order`, `line` opcional, `value` em unidades maiores como a definição assinada o líquida, `currency`), lido uma vez e apagado; [`POST /v1/measure/reconcile`](/api/measure-reconcile) compara linha a linha as linhas atribuídas com as do arquivo, nas linhas que os dois lados conhecem, e devolve o desvio (`|nosso - BI| / BI`), as linhas que mais divergem e, à parte, as que só um lado conhece, que nunca entram no desvio. Com `split_orders: whole_order`, os dois lados são comparados pedido a pedido, com as linhas de cada pedido somadas, porque o seu BI conhece a compra e não as partes dela. A tolerância fica no documento `measurement`.
+
+## Experimentos
+
+O espaço pode medir o efeito de um elemento ou de um agente por braços, no documento `measurement`: um experimento `element` tira de um braço o bloco de restrições, os sinais brandos inferidos, os tamanhos inferidos e derivados de desfechos, o bloco de estado ou uma seção do pacote (`facts`, `episodes`, `actions` ou `objects`); um `agent` compara agentes; um `interleave` intercala dois rankings de uma ferramenta. Os braços são sorteados como o grupo de controle da memória, pelo HMAC do handle mais antigo do cliente, então a mesma pessoa fica no mesmo braço em todos os canais e fornecedores. Fontes críticas nunca vão a um braço de controle, e o grupo de controle da memória não recebe bloco nenhum.
+
+[`GET /v1/measure/experiments`](/api/measure-experiments) compara cada braço com `control` em cada métrica (conversão e valor por pessoa), a partir do que as pessoas fizeram depois de designadas: **incremental**, como só um grupo de controle diz. A diferença é ajustada por **CUPED**, com os dias antes da designação de cada pessoa como covariável (`cuped_days`), quando o histórico varia, e o relatório diz quanto da variância o ajuste removeu. O teste é o **sequencial de mistura** (mSPRT, com a variância de mistura do documento): o p-valor e o intervalo valem em qualquer leitura, então o relatório pode ser lido todo dia sem inflar o erro; `decided` diz quando a diferença é real no `alpha` do teste. As comparações ficam vazias até cada braço ter gente bastante para a aproximação normal. [`POST /v1/measure/power`](/api/measure-power) diz quantos dias do tráfego do espaço uma diferença relativa precisa para ser detectada, olhando uma vez no fim ou todo dia, a partir do histórico do espaço ou dos números que você der.
+
+### Intercalação
+
+Quando duas classificações de uma ferramenta são intercaladas (um sorteio por times, semeado pelo turno), `team` em cada item da exposição diz qual delas o contribuiu, e o engajamento e o carrinho vão para a lista que contribuiu o item. [`GET /v1/measure/interleaving`](/api/measure-interleaving) conta, por dia e no período, as impressões que o engajamento creditou a `a` (a classificação em produção) ou a `b` (a candidata) e os empates, com o teste do sinal bilateral sobre as impressões decididas.
+
+### O contrafactual de ferramenta
+
+Antes de rodar um experimento sobre um elemento do bloco de restrições, uma pergunta menor: o elemento muda o que a ferramenta devolve? Uma busca que ignora um filtro, ou um filtro que não tira nada, faz de toda medição posterior desse elemento uma medição de nada. O **contrafactual de ferramenta** responde a partir dos turnos gravados: o comando `niadra counterfactual` do SDK de Python roda cada chamada gravada da ferramenta ao vivo, dentro da sua empresa, três vezes no mesmo momento (duas com o elemento, para medir o ruído da própria ferramenta, e uma sem), e reporta só posições e sobreposições, nunca itens, argumentos ou resultados. Uma ferramenta que escreve estado roda como o ensaio dela, e sem ensaio nunca é chamada. O executor lê a ferramenta pela [vinculação](/concepts/signals#vinculações-de-ferramenta) que o espaço declara e o perfil do SDK serve; uma ferramenta que o espaço não vincula para antes da primeira chamada.
+
+```sh
+niadra counterfactual --tools app.tools:TOOLS --tool search_products --element hard --scenario sc_01J9... --label "$GIT_SHA"
+```
+
+A sobreposição é `overlap@k`, ponderada pela profundidade com o mesmo peso de exposição dos sinais (`1 / log2(pos + 1)`); `k` é o `visible_k` da lista gravada, ou 10. O relatório ([`POST /v1/measure/counterfactual-runs`](/api/measure-counterfactual-runs-create), lido em [`GET /v1/measure/counterfactual-runs/{run_id}`](/api/measure-counterfactual-run)) traz a sobreposição média, o piso de ruído, o efeito (`noise_floor - overlap`), o teste do sinal, para onde foram os itens com que a pessoa interagiu (mantidos, perdidos, ganhos, o deslocamento médio) e os casos pulados. Ele diz também os próprios limites: `not_quality` (diz se a lista mudou, não se melhorou), `model_reaction_not_measured`, `trivial_for_hard` (uma restrição rígida muda uma lista por construção), `few_cases` (menos de 30 concluídos), `noisy_tool` (piso de ruído abaixo de 0,9), `cases_skipped` e `dry_run`. A Niadra guarda o relatório, nunca os ids dos turnos e das chamadas.
+
+## Demanda não atendida
+
+[`GET /v1/measure/unmet-demand`](/api/measure-unmet-demand) lista o que as pessoas pediram às ferramentas e não receberam: por semana e por combinação do que foi pedido (nos campos do registro de tipos, com os valores normalizados), as chamadas que voltaram vazias e as que voltaram com um ou dois resultados, e quantas pessoas distintas pediram. Uma combinação pedida por menos gente que o mínimo do espaço (10 pessoas por padrão) fica de fora: nunca uma pessoa.
+
+## Custo com e sem memória
+
+Com os [registros de turno](/concepts/turn-records) ligados, o [aproveitamento](/api/context-use) traz em `cost`, por fonte e agente, as chamadas, os tokens e o dinheiro por turno, contra o custo por turno sem memória que a sua empresa mediu e declarou em `memory_off_costs` do documento `measurement`; `difference_usd` acima de zero custa mais. A Niadra soma o que os registros dizem; a linha de base é a sua.
+
+## Privacidade
+
+A medição de desfechos lê o que a célula já tem, e o resultado é sobre o agente, a ferramenta e o pedido, nunca sobre o titular: os relatórios trazem contagens, valores agregados e ids de objeto, e a demanda não atendida só acima do mínimo de pessoas. Os vínculos de desfecho ficam 13 meses. Apagar um cliente remove as linhas dele pela mesma linhagem, e um relatório já calculado não é refeito.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Sinais e restrições" href="/concepts/signals">
+    a exposição de onde o token de exposição nasce.
+  </Card>
+  <Card title="Tipos de objeto e estado" href="/concepts/object-types">
+    o ciclo de vida que dá o estado final de um pedido.
+  </Card>
+  <Card title="Aproveitamento do contexto" href="/concepts/context-use">
+    a medição que diz se o agente usou o que recebeu.
+  </Card>
+  <Card title="Desfechos atribuídos" href="/api/measure-outcomes">
+    a referência de `GET /v1/measure/outcomes`.
+  </Card>
+</CardGroup>

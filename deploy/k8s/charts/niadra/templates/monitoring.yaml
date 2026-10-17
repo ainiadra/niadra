@@ -1,0 +1,96 @@
+{{- if eq .Values.part "app" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: niadra
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels: {niadra.com/metrics: "true"}
+  podMetricsEndpoints:
+    - {port: http, path: /metrics, interval: 15s}
+---
+# Per-queue depth and consumers come from the detailed endpoint; the aggregated one has no queue label.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: niadra-rabbitmq
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: niadra-rabbitmq}
+  podMetricsEndpoints:
+    - port: prometheus
+      path: /metrics/detailed
+      params: {family: [queue_coarse_metrics, queue_consumer_count]}
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: niadra
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: niadra-slo
+      rules: {{- tpl (.Files.Get "files/slo-rules.yaml") . | nindent 8 }}
+    - name: niadra
+      rules: {{- .Files.Get "files/alerts.yaml" | nindent 8 }}
+---
+# The test alert of scripts/on-ops.sh, once a week: amtool (the Alertmanager's own image) adds
+# NiadraDeployCanary as a `ticket` ending in 5 minutes, which reaches the alert e-mail as an alert and
+# as resolved. Not a check: nothing reads the inbox.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: niadra-alert-canary
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.monitoring.canary.schedule | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels: {{- include "niadra.selector" "niadra-alert-canary" | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: canary
+              image: {{ .Values.monitoring.canary.image }}
+              command:
+                - sh
+                - -c
+                - >-
+                  amtool alert add NiadraDeployCanary severity=ticket release=weekly
+                  --annotation='summary="Weekly test alert: the path to the alert e-mail works. It ends by itself in 5 minutes."'
+                  --start="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  --end="$(date -u -d "@$(( $(date +%s) + 300 ))" +%Y-%m-%dT%H:%M:%SZ)"
+                  --alertmanager.url={{ .Values.monitoring.alertmanagerUrl }}
+              {{- include "niadra.resources" .Values.monitoring.canary.resources | nindent 14 }}
+              # The image's user is `nobody` by name, which the kubelet cannot check against runAsNonRoot.
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 65534
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+                seccompProfile: {type: RuntimeDefault}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: niadra-dashboard
+  namespace: monitoring
+  labels:
+    {{- include "niadra.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  niadra-cell.json: |
+    {{- .Files.Get "files/dashboard.json" | nindent 4 }}
+{{- end }}

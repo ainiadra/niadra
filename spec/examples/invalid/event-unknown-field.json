@@ -1,0 +1,1 @@
+{"idempotency_key": "k7", "channel": "chat", "handles": [{"type": "email", "value": "m@example.com"}], "speaker": {"role": "customer"}, "content": {"text": "hello"}, "occurred_at": "2026-09-22T14:02:11Z", "priority": "high"}

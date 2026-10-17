@@ -1,0 +1,89 @@
+---
+title: "Derive types from your database"
+description: "Propose an object type from a table of your PostgreSQL, review what the tool could not read, submit the declaration and check for drift on every schema change."
+---
+
+A company that keeps its state in PostgreSQL already wrote much of an [object type](/en/concepts/object-types): the columns, the values a `CHECK` allows, the enumerations, the foreign keys. The SDKs' `niadra types derive` command reads a table's catalog inside your company, proposes the type and lists what a person must look at before submitting it. The catalog, the proposal and the review never leave your company through the tool; only the schema fingerprint and the counts of what changed do, and only when you send them.
+
+This guide is optional. With no declaration at all, Niadra already learns the type from your system's traffic ([types inferred from traffic](/en/concepts/object-types#types-inferred-from-traffic)); declaring adjusts what inference can't know, such as freshness, computed rules and who may read each field.
+
+## Before you start
+
+- The Python SDK (`pip install niadra`) or the TypeScript one (`npm install @niadra/sdk`); the command is the same in both.
+- A **read-only** connection to the database, preferably a replica: the tool reads the catalog (`pg_catalog`), never a row, in a read-only transaction whose `search_path` is `pg_catalog` alone, so every name outside it comes schema-qualified. Pass the connection in `--dsn` or in the `NIADRA_DERIVE_DSN` variable.
+- To submit the declaration, the `integration` role in the Console (or an `admin` key); a declaration that touches sensitivity, access, personal data, licence or purposes also needs `security`.
+
+## 1. Propose the type
+
+```sh
+niadra types derive --dsn "postgresql://reader@replica.internal/erp" --table public.orders \
+  --type order --system erp --ownership subject --out types/order.json
+```
+
+The tool reads the table's catalog: each column with its type and nullability, the primary key, each `CHECK`, the enumerations, the foreign keys and the triggers. It normalizes it (sorted by name, so the same schema always gives the same fingerprint) and proposes:
+
+| Member | Where it comes from |
+|---|---|
+| `type` | `--type`, or the table's name as a type name (up to 40 characters) |
+| `ownership` | `--ownership`, `subject` by default, or `shared`. An agent's working state is never derived |
+| `mirror_of` | `system` (`--system`, `postgresql` by default), `derived_by: introspection`, the catalog's `fingerprint` and `drift: alert` |
+| `key.natural` | The primary key's columns, when it has at most 8 columns and every one became a field |
+| `fields` | One field per column, typed by the column's type: `ref` on a single-column foreign key, `enum` on an enumeration or a list `CHECK`, `list` on an array, `string`, `number`, `money`, `bool`, `date`, `datetime`, `duration`. `json`, `bytea`, `time` and the geometric and network types become no field |
+| `states` | The values of the first column named `status` or `state` that became a field, when they come from an enumeration or a list `CHECK` and are 1 to 50 valid names |
+| `relations` | One per single-column foreign key, up to 20, with the role taken from the column's name without `_id` |
+
+Catalog names become type names (lowercase ASCII, `_` for any other character, `c_` in front of one that starts with a digit, `_` after a word the language reserves): `Delivery Window` becomes `delivery_window`, `state` becomes `state_`, `2fa` becomes `c_2fa`. The proposal declares no claim, freshness, sources, lifecycle or purposes: that is what your company's rules say, and a person adds it.
+
+## 2. Review
+
+With the proposal, the tool lists what a person must look at, in this order: the columns that became no field, with their type; the `CHECK`s that are not a list of constants of one column (a comparison, two conditions), which go to the review; the states column whose values cannot be states; the foreign keys that became no relation; and each **trigger**, with its name and whether it is enabled. A trigger is code: the transitions it enforces are your company's to declare in `lifecycle`, and the tool never guesses them. The review stays with your company.
+
+Then complete the type with what only your company knows: the freshness class and the claim age of each field an agent may claim, the sources and their precedence, the values computed by your rules, the lifecycle, the timers and the purposes. The proposal validates against the open `object-type.v0.json` schema, and Niadra's validation beyond the schema (every expression resolves against the type, every named state is declared) runs when you submit.
+
+## 3. Submit the declaration
+
+The type enters the space's `object-types` document, through an approved diff in the Console or the [control API](/en/api/control/config-diffs):
+
+```sh
+curl -X POST "https://control.api.niadra.com/v1/config/diffs" \
+  -H "Authorization: Bearer $NIADRA_TOKEN" -H "Content-Type: application/json" \
+  -d "$(jq -n --arg space "$SPACE_ID" --slurpfile type types/order.json \
+       '{space_id: $space, type: "object-types", reason: "order type derived from erp.public.orders", patch: [{op: "add", path: "/types/-", value: $type[0]}]}')"
+```
+
+The declaration applies to what was already recorded: which declared source an observation belongs to is decided at the read. With the `state` feature on, [`POST /v1/objects/push`](/en/api/objects-push) starts taking that type's state, and the reads start saying the freshness and what may be claimed.
+
+## 4. Check for drift
+
+A schema changes. `--check` reads the catalog again, computes the fingerprint and compares the current proposal with the declaration you kept:
+
+```sh
+niadra types derive --dsn "$NIADRA_DERIVE_DSN" --table public.orders --check --declaration types/order.json --no-send
+```
+
+The type **drifted** when the fingerprint differs from `mirror_of.fingerprint`. The changes count `fields_added`, `fields_removed`, `fields_retyped`, `states_added`, `states_removed`, `relations_added`, `relations_removed` and `key_changed`, and list in `fields` the removed or retyped fields (up to 50); never a new name, a value or a definition. A drift with every count at zero changed a part the type does not show: another column's `CHECK`, a trigger, a column type that maps to the same field type. The command exits with 0 when nothing drifted, 1 when it did and 2 when it could not run, so it fits the CI that runs your migrations.
+
+Without `--no-send`, the command reports the fingerprint and the counts to [`POST /v1/types/fingerprint`](/en/api/types-fingerprint), with a key of the `state:push` scope, and Niadra compares them with the declared type's `mirror_of.fingerprint`. The same fingerprint answers `drift: false`. Another one, for a type with `drift: alert`, answers `drift: true` and an `issue_id`: it opens a [data issue](/en/concepts/object-types#data-issues) of kind `drift` for the data's owner, or counts one more occurrence in the open one, names the field when `changes.fields` names exactly one, and sends the `type.drift` webhook once per issue, when it opens. For a type with `drift: ignore`, the answer is `drift: true` with no issue opened. A type the space does not declare answers 404, and a declared type with no `mirror_of.fingerprint` answers 422 `no_fingerprint`. `--no-send` keeps the check local, for a CI that has no key. Niadra points out drift another way all the same: a transition seen in the sources that the type does not declare, or a value outside the vocabulary, opens the same data issue, by observation.
+
+The ready-made CI step, with `types derive --check` and `contract test`, is in [`examples/ci/niadra-checks.yml`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/ci/niadra-checks.yml) in both SDKs.
+
+## What leaves your company
+
+Through the tool, nothing but the fingerprint (a SHA-256 over the normalized catalog, as canonical JSON) and the counts of what changed, and only when you do not pass `--no-send`. The catalog, the proposal, the review and the full declaration stay with you until you submit the declaration through the configuration, which is what Niadra keeps. A row of the table is never read.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Object types and state" href="/en/concepts/object-types">
+    the full format of a type and what a read returns.
+  </Card>
+  <Card title="The resolver worker" href="/en/guides/resolver-worker">
+    the state your system pushes and the re-reads Niadra asks for.
+  </Card>
+  <Card title="Retail agents" href="/en/guides/retail-agents">
+    an item type derived from the variants table.
+  </Card>
+  <Card title="Data issues" href="/en/api/data-issues">
+    where drift and null fields arrive.
+  </Card>
+</CardGroup>

@@ -1,0 +1,64 @@
+---
+title: "LiteLLM"
+description: "completion() e acompletion() com o contexto, e um CustomLogger que registra os turnos, para qualquer provedor roteado pelo LiteLLM."
+---
+
+`niadra.integrations.litellm` traz `completion()` e `acompletion()`, o `litellm.completion` e o `litellm.acompletion` com o contexto, e `NiadraLogger`, um `CustomLogger` do LiteLLM que registra a resposta de cada chamada feita dentro de uma conversa. Só em Python; cobre qualquer provedor que o LiteLLM roteia.
+
+## Instalar
+
+```sh
+pip install 'niadra[litellm]'   # litellm 1.102 ou mais novo, abaixo da 2
+```
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | Dentro de um bloco de conversa ou tarefa, `completion()` e `acompletion()` põem o contexto (depois das notas do agente, com `agent_memory=`) depois das suas mensagens de sistema iniciais e o `turn_block` no fim. Todo outro argumento vai ao LiteLLM sem mudança |
+| Turnos | A resposta (com streaming ou sem) é registrada como turno do agente com o uso que o LiteLLM normalizou. `NiadraLogger`, em `litellm.callbacks`, faz o mesmo para código que chama o LiteLLM (ou o `Router` dele) direto; ele nunca injeta |
+| Ferramentas | `conversation.tools()` entrega o kit para `tools=` |
+| Verificação | `conversation.verify()` antes da chamada |
+| Transbordo | `conversation.handoff()` onde o seu fluxo transfere |
+
+## Exemplo mínimo
+
+```python
+"""Any provider through LiteLLM with the customer's context."""
+
+from niadra import Niadra, phone
+from niadra.integrations.litellm import completion
+
+niadra = Niadra(channel="chat")
+
+with niadra.conversation("thread-81", subject=phone("+5511912345678")) as conversation:
+    conversation.customer("Where is my replacement lid?")
+    response = completion(
+        model="anthropic/claude-sonnet-4-5",
+        messages=[
+            {"role": "system", "content": "You are Acme's agent."},
+            {"role": "user", "content": "Where is my replacement lid?"},
+        ],
+    )
+    print(response.choices[0].message.content)
+```
+
+O mesmo código está em `examples/litellm_completion.py`.
+
+## Limites
+
+- Fora de um bloco, `completion()` e `acompletion()` são as chamadas do próprio LiteLLM.
+- `NiadraLogger` só registra; para o contexto entrar, use `completion()`.
+- O extra `litellm` fixa versões incompatíveis com `openai-agents`; instale um por ambiente.
+- Testado contra `litellm` 1.102 com o transporte substituído e a Niadra no emulador.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="OpenAI e Azure OpenAI" href="/integrations/openai">
+    o `wrap()` do cliente, sem roteador no meio.
+  </Card>
+  <Card title="SDK de Python" href="/sdk/python">
+    a conversa, o `mark_injected()` e o uso do provedor.
+  </Card>
+</CardGroup>

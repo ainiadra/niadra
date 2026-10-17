@@ -1,0 +1,76 @@
+---
+title: "Coming from Mem0"
+description: "The name of every Mem0 call in Niadra, with the route and the difference that matters: one memory per session, per resolved customer, under policy."
+---
+
+Anyone coming from Mem0 knows `add`, `search`, `get_all`, `update`, `delete`, `history`, the filters, feedback, webhooks and the project's instructions. Each has a name here, and almost every one does something similar by a different path, because Niadra is a different category of product: the omnichannel, multi-platform memory management layer for a company's AI agents. Mem0 receives a ready `user_id` and keeps the memory of one agent. Niadra receives the events from every channel, platform and system, resolves who the customer is before it stores anything, extracts once per session and delivers one memory to any agent, from any vendor, under policy and verification level. This page gives the name and the route, and where the difference changes your code. What does not exist here is said, with the reason.
+
+## Writing
+
+| In Mem0 | In Niadra | What changes |
+|---|---|---|
+| `add(messages, user_id=...)`, one call per exchange, with the model running on each | `customer()` and `agent()` on a `conversation()`, or `track()`; over HTTP, [`POST /v1/batch`](/en/api/batch) | Extraction runs once, when the session closes (by inactivity or `conversation.ended`), in one call. The write is acknowledged before extraction, and [`POST /v1/ingest/status`](/en/api/ingest-status) says when the conversation became memory |
+| `add(..., infer=False)` (store without extracting) | A system event (`system_event`) with `canonical_type`, an object and fields, with no AI model | Structured data changes an object's state; a free-text fact with no evidence is not accepted |
+| `timestamp`, `observation_datetime` | `occurred_at` on every event | Memory is ordered by `occurred_at`, and an episode is dated by the conversation's last turn |
+| Free `metadata` on a memory | `fields` on the system event; the business object with its state | There is no loose metadata on a memory item: an item is born from several events |
+| `custom_instructions`, `includes`, `excludes` | The `extraction-guidance` configuration document: instructions, `include`, `exclude`, per space and per source | Changed by an approved diff, like the schema; enters the prompt after the rules it cannot change |
+| Custom categories | The schema's predicates, categories and episode categories, per space and per source | |
+| `immutable` | Does not exist | A data subject's correction always wins: it is the right to rectification |
+| `expiration_date` | `valid_until` on the event and on the agent's note | After the date, the fact leaves the context and the search; `show_expired` still finds it |
+| Direct import | [`POST /v1/ingest/files`](/en/api/ingest-files), a CSV for identity or a JSONL of batch items; `import.completed` and `import.failed` announce the end | |
+| Images, PDFs and Office files | PDF text (the text layer, and OCR of scanned pages), image OCR and the text of DOCX, XLSX and PPTX inside the cell, only for the types the space lists | |
+
+## Reading
+
+| In Mem0 | In Niadra | What changes |
+|---|---|---|
+| `search(query, user_id=...)` before every answer, `top_k`, `threshold` | [`context()`](/en/concepts/context): the pack ready for the prompt, pinned per conversation; [`search()`](/en/concepts/history) only when the context does not answer, with `max_tokens` and `limit` | The context is not a search: it is compiled when the memory changes and delivered in under 100 ms, without a model. No `threshold`: the cut is by token budget and by value |
+| v2 filters (`AND`, `OR`, `NOT`, `eq`, `in`, `gte`, `contains`...) | `filters.where` on the search and the timeline, with the same grammar | Checked after the policy: it only narrows what the reader could already see, and never changes the ranking |
+| `agent_id` as a filter | `source_id` and `vendor` in `where` | The source is the agent, with its own vendor and key |
+| `rerank=True` | Does not exist | No model on the read path: latency and receipts stay predictable |
+| `get_all(user_id=...)` | [`timeline()`](/en/api/history-timeline), one line per conversation or action; for governance, [`GET /v1/profiles/{profile_id}/memory`](/en/api/profile-memory) | |
+| `get(memory_id)` | [`open()`](/en/api/history-open): the whole conversation or the object, with what was asked, promised and settled | |
+| `history(memory_id)` | `versions` on the opened item; [`GET /v1/profiles/{profile_id}/facts/{fact_id}/history`](/en/api/profile-fact-history) for every value a fact held | |
+| Graph memory | Objects, links, accounts and partners: a typed graph, with no co-occurrence links | |
+| Temporal reasoning (`reference_date`) | `when` on the search, in Portuguese, English and Spanish, without a model; and the [anchors on the system's events](/en/concepts/events#anchors-on-the-systems-events) | `timestamp`, `reference_date` and `decay` belong to Mem0's paid platform; the open source SDK refuses them |
+| Usage decay | Does not exist | Event recency and the context-use measurement decide what gets in |
+
+## Correcting and erasing
+
+| In Mem0 | In Niadra | What changes |
+|---|---|---|
+| `update(memory_id, data)` | [`POST /v1/feedback`](/en/api/feedback) with `correct_fact`, by the agent; [`POST /v1/corrections`](/en/api/corrections), by the security role | It becomes an event, with lineage and a receipt |
+| `batch_update`, `batch_delete` | [`POST /v1/feedback/batch`](/en/api/feedback-batch) (up to 500) and [`POST /v1/corrections/batch`](/en/api/corrections-batch) (up to 100) | One bad item never fails the rest |
+| `delete(memory_id)` | `retract_fact` on the feedback | The fact leaves every pack |
+| `delete_all(user_id=...)`, `delete_users()` | [`POST /v1/forget`](/en/api/forget), by profile, handle or conversation, with a receipt and a deadline | Never within the model's reach: erasure stays with people and admin keys |
+| `feedback(memory_id, "POSITIVE" ...)` | The rating does not exist | Use is measured without anyone clicking: what the agent used, repeated or contradicted, in [`GET /v1/context-use`](/en/api/context-use) |
+| `reset()` | Deleting the space, in the control plane, with a receipt | |
+
+## Notifications and clients
+
+| In Mem0 | In Niadra | What changes |
+|---|---|---|
+| Webhooks `memory_add`, `memory_update`, `memory_delete` | `fact.added` and `fact.retracted`, with `replaces`, `replaced_by` and `by`; never the value | Only the endpoint whose source may read the fact receives it. Signed in the Standard Webhooks format, retried for 24 hours |
+| `ingest_job_completed`, `_failed` | `import.completed` and `import.failed`, only to the source that imported | |
+| Event list, `get_event_status` | [Receipts](/en/concepts/receipts), [webhook deliveries](/en/api/webhook-deliveries) and [`POST /v1/ingest/status`](/en/api/ingest-status) | |
+| MCP `add_memory`, `search_memories`, `get_memories`, `update_memory` | The eight tools of the [space's MCP server](/en/guides/mcp), with the customer bound by the `subject_token`; `correct_customer_memory` corrects or retracts | No `delete_memory`, `list_entities` or `list_events`: an agent never lists customers or erases |
+| `ping`, `users` | [`GET /v1/sources/me`](/en/api/sources-me) says what the key authenticates as; customers are never listed by an agent key | |
+| Admin client (`get_all`, `users`, `batch_update`, `export`) | `niadra.admin` in both SDKs, for keys with the `admin` scope | |
+| `user_id`, `agent_id`, `run_id` | The customer's handle (phone, e-mail, `wa_id`, app id, system id), the source and the conversation or task | Identity is resolved across channels: the same customer on WhatsApp, on the phone and in the CRM is one profile |
+
+## What stays out, and why
+
+- Model-written patterns ("Dream"), a model summary on the read path and model-filled schemas on export: every field would lose its evidence, and a model on the read path breaks latency and the receipt.
+- One model call per exchange: extracting on every exchange brought no accuracy gain, and it costs more. In the [benchmark](https://niadra.com/en/benchmark) of 2026-09-30 (same agent and same judge; three repetitions for Niadra, on a temporary cell running production's images, and three for Mem0; [result files](https://github.com/ainiadra/niadra-sdk-python/tree/main/benchmarks/results/2026-09-30-6e6d07)), Niadra scored 98.7% by the judge on the same 165 valid cases (98.7% to 100% across repetitions) and Mem0 open source 77.6% (76.4% to 79.4%) with the same id on every channel, its best case, and 28.5% when each channel sends its own id. On model spend per 1,000 conversations of 10 exchanges, by the same method for both (the model tokens from writing until the memory settled, at the harness's public prices, servers and databases not priced; Mem0's counted at its gateway, Niadra's from the extractions recorded in the cell), Niadra spent US$ 0.36 and Mem0 US$ 1.88 (US$ 4.82 with rerank). The cell's own spend ledger, every purpose included, gave US$ 0.50. That is model spend, not price: Niadra's public price, models included, runs from US$ 2.00 to US$ 3.00 per 1,000 conversations.
+- An OpenAI-compatible proxy: the [adapters](/en/integrations/overview) plug into your framework without standing between you and the model call.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" href="/en/quickstart">
+    the key, the sandbox space and the first context.
+  </Card>
+  <Card title="Integrations" href="/en/integrations/overview">
+    your framework's adapter, and the short table of names.
+  </Card>
+</CardGroup>

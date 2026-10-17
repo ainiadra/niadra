@@ -1,0 +1,204 @@
+---
+title: "Início rápido"
+description: "Da chave de API ao primeiro contexto entregue, em Python, TypeScript ou cURL."
+---
+
+A Niadra é a camada de memória omnichannel para os agentes de IA da sua empresa: os eventos de cada canal, plataforma e sistema viram uma memória só de cada cliente, e qualquer agente, de qualquer fornecedor, a lê antes de agir. Este início rápido liga o primeiro agente a ela: uma chave, o SDK, uma conversa registrada, o contexto lido de volta e uma busca no histórico. Leva uns dez minutos num espaço de sandbox, que nunca se mistura com os dados de produção.
+
+## 1. Pegue uma chave
+
+Todo agente, fornecedor ou sistema que fala com a Niadra é uma **fonte**, com chaves, escopos e finalidade próprios. Crie uma fonte para o seu agente no Console:
+
+1. Entre no [Console](https://niadra.com/console) com o papel Administração, escolha o espaço de **Sandbox** do projeto e abra **Agentes e chaves**.
+2. Toque em **Nova fonte** e preencha o nome e a audiência (agente de atendimento, agente interno, atendente humano ou análise). O canal, as finalidades e o teto de verificação são opcionais.
+3. Deixe marcado **Emitir a primeira chave agora** e toque em **Criar e emitir a chave**. O segredo aparece uma vez, pronto para copiar.
+
+Sem escopos pedidos, a chave sai com todos os escopos de um agente; os administrativos (`admin`, `analytics`, `identity:link`, `state:push`) só em chaves pedidas para isso.
+
+Depois da chave, não há mais nada a configurar. Os recursos vêm ligados, e a Niadra aprende pelo tráfego os tipos de objeto, os campos, os estados e as operações dos seus sistemas e agentes, com os rótulos no idioma do espaço. O que parecer dado pessoal fica retido até alguém decidir, e o Console mostra o que foi aprendido como nota. Configurar é só ajuste opcional. Pela [API de controle](/api/control/sources-create), o mesmo passo é `POST /v1/sources` e depois [`POST /v1/sources/{source_id}/keys`](/api/control/keys-create).
+
+Uma chave tem este formato:
+
+```text
+nia_sk_test_us-east-2_acme-sandbox_7sxl9auib3sdmkzu_<secret>
+```
+
+Chaves `test` chegam aos espaços de sandbox; chaves `live`, aos de produção. A região e o espaço dentro da chave dizem ao SDK para onde ir: `https://acme-sandbox.us-east-2.api.niadra.com`. O segredo aparece uma vez só; guarde no seu cofre de segredos e entregue ao agente como variável de ambiente.
+
+```sh
+export NIADRA_API_KEY="nia_sk_test_us-east-2_acme-sandbox_7sxl9auib3sdmkzu_..."
+```
+
+## 2. Instale o SDK
+
+<CodeGroup>
+```sh Python
+pip install niadra
+```
+```sh TypeScript
+npm install @niadra/sdk
+```
+</CodeGroup>
+
+Os dois SDKs são de código aberto, sob Apache 2.0. Com HTTP puro não há nada para instalar: toda chamada abaixo tem também a versão em cURL.
+
+Se o seu agente já roda num framework (LiveKit, Pipecat, OpenAI Agents, LangGraph, Vercel AI SDK e outros), o adaptador dele faz as chamadas abaixo por você: veja as [integrações](/integrations/overview). Um assistente de código faz esse trabalho com a [skill `niadra`](/integrations/coding-assistants).
+
+## 3. Registre uma conversa
+
+Uma sessão de conversa fixa o contexto, captura os turnos e envia `conversation.ended` ao fechar. As escritas vão para uma fila local e saem em lote, então nunca deixam o agente mais lento.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+
+niadra = Niadra(channel="whatsapp")
+marina = phone("+14155550123")
+
+with niadra.conversation("wa-8812", subject=marina) as conv:
+    conv.customer("The technician never showed up. I am calling you.")
+    conv.agent("I am sorry, Marina. I am checking the visit now.")
+# leaving the block sends conversation.ended
+
+niadra.flush()
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+const marina = handles.phone("+14155550123");
+
+const conv = niadra.conversation({ subject: marina, channel: "whatsapp", conversation_id: "wa-8812" });
+conv.customer("The technician never showed up. I am calling you.");
+conv.agent("I am sorry, Marina. I am checking the visit now.");
+await conv.end(); // sends conversation.ended
+
+await niadra.flush();
+```
+```bash cURL
+curl -X POST "https://acme-sandbox.us-east-2.api.niadra.com/v1/batch" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "items": [
+    {"type": "event", "idempotency_key": "wamid.001", "channel": "whatsapp", "conversation_id": "wa-8812",
+     "handles": [{"type": "phone_e164", "value": "+14155550123"}], "speaker": {"role": "customer"},
+     "content": {"text": "The technician never showed up. I am calling you."}, "occurred_at": "2026-09-22T17:02:11Z"},
+    {"type": "event", "idempotency_key": "wamid.002", "channel": "whatsapp", "conversation_id": "wa-8812",
+     "handles": [{"type": "phone_e164", "value": "+14155550123"}], "speaker": {"role": "ai_agent"},
+     "content": {"text": "I am sorry, Marina. I am checking the visit now."}, "occurred_at": "2026-09-22T17:02:19Z"},
+    {"type": "conversation.ended", "idempotency_key": "wa-8812-end-1", "conversation_id": "wa-8812",
+     "occurred_at": "2026-09-22T17:03:00Z"}
+  ]
+}'
+```
+</CodeGroup>
+
+A API responde `200` quando todos os itens entraram, ou `207` quando algum foi recusado, sempre com `accepted`, `duplicates` e um erro para cada item recusado: um item ruim nunca derruba o lote. Mandar o mesmo `idempotency_key` de novo não tem problema; ele conta como duplicado e é gravado uma vez só.
+
+## 4. Leia o contexto
+
+Agora um agente de voz atende uma ligação do mesmo número. Ele registra o atestado de rede da ligação, que prova o nível V1 desta conversa, e pede o contexto antes de dizer alô; sem prova nenhuma, a leitura sairia em V0:
+
+<CodeGroup>
+```python Python
+# The carrier's attestation proves V1 for this call
+niadra.verify("network_attestation", "V1", handle=marina, conversation_id="call-4471")
+ctx = niadra.context(subject=marina, view="voice", verification="V1", conversation_id="call-4471")
+
+print(ctx.text)           # the pack, ready for the system prompt
+print(ctx.withheld)       # items held back at this verification level
+print(ctx.origin)         # network, cache, stale, last_good or empty
+```
+```typescript TypeScript
+// The carrier's attestation proves V1 for this call
+await niadra.verify({ handle: marina, method: "network_attestation", level: "V1", conversation_id: "call-4471" });
+const ctx = await niadra.context({ subject: marina, view: "voice", verification: "V1", conversation_id: "call-4471" });
+
+console.log(ctx.text);    // the pack, ready for the system prompt
+console.log(ctx.suffix);  // live turns and deltas, for the end of the prompt
+console.log(ctx.source);  // network, cache, stale, fallback or none
+```
+```bash cURL
+BASE=https://acme-sandbox.us-east-2.api.niadra.com
+
+# The carrier's attestation proves V1 for this call
+curl -X POST "$BASE/v1/batch" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"items": [{"type": "verify", "idempotency_key": "call-4471-attestation", "method": "network_attestation", "level": "V1",
+       "handle": {"type": "phone_e164", "value": "+14155550123"}, "conversation_id": "call-4471", "occurred_at": "2026-09-22T17:07:01Z"}]}'
+
+curl -X POST "$BASE/v1/context" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"subject": {"type": "phone_e164", "value": "+14155550123"}, "view": "voice", "verification": "V1", "conversation_id": "call-4471"}'
+```
+</CodeGroup>
+
+Ponha `text` no prompt de sistema, depois das suas instruções. A mensagem de WhatsApp de agora há pouco já está lá: os turnos ficam legíveis para todos os agentes em menos de um segundo depois que chegam à API, e a memória derivada (pendências, fatos, o episódio) vem logo depois do fim da sessão, com meta de um minuto.
+
+<Tip>
+Chame `context()` enquanto o telefone ainda toca, ou assim que a mensagem chega. O SDK tem o próprio tempo máximo (300 ms; na view `voice`, `begin()` começa a primeira leitura quando a ligação começa e `ready()` a espera até 1,5 s enquanto o telefone toca, e cada turno seguinte recebe o corpo fixado da memória do SDK na hora, esperando 200 ms no máximo pelos encaixes), então uma resposta lenta nunca atrasa o seu agente: ele recebe um contexto vazio, ou o corpo sem encaixes, e segue.
+</Tip>
+
+## 5. Busque no histórico
+
+Quando a cliente diz "da outra vez vocês me deram um crédito", o agente confere:
+
+<CodeGroup>
+```python Python
+found = niadra.search(marina, "credit for missed technician visit", max_tokens=300, verification="V1", conversation_id="call-4471", voice=True)
+
+for item in found.items:
+    print(item.at, item.channel, item.text)
+if found.recurrence:
+    print(found.recurrence.occurrences, "times in", found.recurrence.window_days, "days")
+```
+```typescript TypeScript
+const { data } = await niadra.search({
+  subject: marina,
+  query: "credit for missed technician visit",
+  verification: "V1",
+  conversation_id: "call-4471",
+  max_tokens: 300,
+});
+
+for (const item of data?.items ?? []) console.log(item.at, item.channel, item.text);
+```
+```bash cURL
+curl -X POST "https://acme-sandbox.us-east-2.api.niadra.com/v1/history/search" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"subject": {"type": "phone_e164", "value": "+14155550123"}, "query": "credit for missed technician visit", "max_tokens": 300, "verification": "V1", "conversation_id": "call-4471"}'
+```
+</CodeGroup>
+
+Para o seu LLM decidir sozinho quando buscar, entregue a ele o kit de ferramentas: `niadra.tools(marina, verification="V1", conversation_id="call-4471")` devolve as definições de função amarradas à Marina e leva as chamadas do modelo de volta à Niadra. Veja [Navegação do histórico](/concepts/history).
+
+## 6. Confira o que aconteceu
+
+Cada leitura deixou um comprovante: qual fonte leu, quais itens recebeu e quais ficaram retidos, sob qual política. Abra o Console para ver as leituras desta conversa, ou liste pela rota [`GET /v1/receipts`](/api/receipts), como pessoa com o papel `security` ou com uma chave de escopo `admin`.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Espaços e chaves" href="/concepts/spaces-and-keys">
+    Fontes, escopos, ambientes e o endereço estável.
+  </Card>
+  <Card title="Eventos e o lote" href="/concepts/events">
+    Mensagens, eventos de sistema e ações num formato só.
+  </Card>
+  <Card title="Agentes de voz" href="/guides/voice-agents">
+    Contexto antes do alô, atestado de rede e transbordo.
+  </Card>
+  <Card title="Agentes internos" href="/guides/internal-agents">
+    Tarefas, objetos e ações que fecham pendências.
+  </Card>
+  <Card title="Integrações" href="/integrations/overview">
+    Adaptadores prontos para os frameworks de voz e de agentes.
+  </Card>
+  <Card title="Assistentes de código" href="/integrations/coding-assistants">
+    A skill que ensina o Claude Code, o Cursor ou o Codex a fazer a integração.
+  </Card>
+</CardGroup>

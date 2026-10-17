@@ -1,0 +1,56 @@
+---
+title: "Perguntas frequentes"
+description: "O que times de produto, engenharia e segurança perguntam antes de ligar os agentes à Niadra."
+---
+
+## A plataforma
+
+<AccordionGroup>
+  <Accordion title="Meu fornecedor de agentes de IA já não faz isso?">
+    Faz, mas só dentro dele. O agente do WhatsApp não enxerga a ligação atendida por outro fornecedor, e nenhum fornecedor vai abrir a própria memória para o concorrente. Por isso a memória precisa ficar acima de todos eles.
+  </Accordion>
+  <Accordion title="Isso não é o meu CRM?">
+    Não. O CRM guarda o histórico para uma pessoa consultar depois. A Niadra entrega o contexto ao agente de IA durante a conversa, sem modelo de IA na leitura e, com o contexto aquecido, sem consulta ao banco. O desfecho de cada atendimento sai por webhook, e o seu CRM registra.
+  </Accordion>
+  <Accordion title="Serve para agentes internos, que não falam com o cliente?">
+    Serve. O agente de cobrança que lança um crédito, o de pedidos que muda uma entrega no ERP e o que classifica tickets usam as mesmas três chamadas: recebem o contexto do cliente para a tarefa, consultam o histórico e registram o que fizeram. O próximo agente, interno ou de atendimento, já começa sabendo.
+  </Accordion>
+  <Accordion title="Como os meus sistemas entram na memória?">
+    Por webhook, API ou lote de arquivos. CRM, ERP, help desk, cobrança e pedidos mandam os eventos que já emitem, e a Niadra liga cada pedido, ticket e fatura ao cliente certo pelo ID de cada sistema. Os agentes também registram o que fizeram em cada sistema. Os sistemas continuam sendo a fonte oficial: a Niadra guarda o que os agentes precisam lembrar e aponta para a origem.
+  </Accordion>
+  <Accordion title="Como eu sei que os meus agentes estão usando a memória?">
+    A Niadra mede. Ela entregou o contexto e recebe a conversa que veio depois, então confere, por agente e por fornecedor: o que foi usado, o que foi perguntado de novo, o que foi dito contra o que a memória já sabia e quem transferiu sem ler. No Console, o detalhe de cada conversa mostra cada entrega, item a item. Nenhum fornecedor de agente consegue dar esse número, porque nenhum segura os dois lados.
+  </Accordion>
+  <Accordion title="A Niadra reconhece empresas, ou só pessoas?">
+    As duas, e os parceiros também. O cliente pode ser uma pessoa, uma conta (a empresa que compra de você) ou um parceiro (a transportadora, a corretora, a clínica que participa sem ser cliente). Cada pessoa fica ligada à organização pelo papel dela, com validade: o comprador da rede, o motorista da transportadora. O agente que atende a empresa recebe o contexto da conta; o que atende o contato recebe o dele, mais o que a conta tem de relevante para a tarefa.
+  </Accordion>
+  <Accordion title="A Niadra executa ações ou fluxos?">
+    Não. A Niadra avisa. Quando uma regra sua acontece na memória (uma promessa vence, a terceira reclamação sobre o mesmo assunto aparece, um agente ignora o contexto que recebeu), ela manda um aviso assinado por webhook para o seu sistema ou para o seu agente. Quem age é ele. A Niadra não atende, não orquestra e não tem tela de atendimento.
+  </Accordion>
+  <Accordion title="Preciso instalar ou operar alguma infraestrutura?">
+    Não. A Niadra é totalmente gerenciada: a gente cria e opera servidores, banco de dados, chaves, atualizações, cópias de segurança e monitoramento. Do seu lado, você instala o SDK e conecta os seus agentes.
+  </Accordion>
+  <Accordion title="Como a Niadra protege os dados dos meus clientes?">
+    Em seis camadas. Todo dado é cifrado em repouso e trafega pela rede com TLS 1.3 (numa entrega para um endpoint seu, na versão mais alta que ele aceitar), e o conteúdo ganha uma segunda cifra, AES-256-GCM, com uma chave exclusiva por empresa, protegida por uma chave-mestra em HSM com validação FIPS 140-3. Acesso negado por padrão e liberado por finalidade. Cada leitura registrada em trilha à prova de adulteração, encadeada por SHA-256. A Niadra atua como operadora sob a LGPD e o GDPR, nunca usa os seus dados para treinar modelos e apaga os dados de um cliente com comprovante. No plano Regulado, a sua empresa ganha um ambiente dedicado, com servidores, banco de dados e chaves exclusivos.
+  </Accordion>
+</AccordionGroup>
+
+## A memória
+
+<AccordionGroup>
+  <Accordion title="O agente consegue consultar todo o histórico do cliente?">
+    Consegue. Além do contexto entregue antes da resposta, o agente busca no histórico inteiro, com qualquer LLM: o que já aconteceu, quantas vezes, como foi resolvido e o que foi prometido. Funciona pelo SDK, pela API ou por MCP, e cada resultado respeita as permissões daquele agente.
+  </Accordion>
+  <Accordion title="Como a Niadra sabe que é a mesma pessoa?">
+    Ela cruza os identificadores de cada canal: telefone, e-mail, documento, login do app. Cada um tem um peso. Um número de telefone é uma pista, um login com senha é uma prova. E se duas pessoas forem unidas por engano, a Niadra separa as duas sem perder o histórico de nenhuma.
+  </Accordion>
+  <Accordion title="Funciona com o modelo de IA que eu já uso?">
+    Funciona. O contexto chega pronto para o prompt, e a busca no histórico usa o formato de ferramenta que todo LLM entende. Não importa o provedor, nem se o modelo é hospedado por você.
+  </Accordion>
+  <Accordion title="Isso aumenta o meu gasto com IA?">
+    Tende a diminuir. O agente recebe um contexto compacto em vez do histórico inteiro a cada mensagem. A economia depende do provedor e do modelo, e o Console mostra a medida: quanto do prompt de cada agente o provedor leu do cache e a economia estimada, pelo uso que cada chamada ao modelo informa.
+  </Accordion>
+  <Accordion title="Os agentes também têm memória própria, do trabalho deles?">
+    Têm. Além da memória do cliente, cada agente guarda as próprias notas de trabalho: procedimentos, como as ferramentas e os processos da empresa se comportam e armadilhas conhecidas. Elas entram no prompt antes do contexto do cliente e nunca levam dado pessoal: uma nota com telefone, e-mail ou nome de cliente é recusada, não mascarada. O seu time liga o recurso no Console e lê, revisa e aposenta as notas por lá.
+  </Accordion>
+</AccordionGroup>

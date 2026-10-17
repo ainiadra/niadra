@@ -1,0 +1,11 @@
+{
+  "idempotency_key": "0192b8a7-2c4e-7a10-9b3d-5e6f7a8b9c0d",
+  "subject": {
+    "type": "phone_e164",
+    "value": "+5511987654321"
+  },
+  "action": "correct_fact",
+  "fact_id": "0192b7f1-4a2c-7d10-8000-00000000f001",
+  "value": "prefers e-mail for invoices",
+  "reason": "the customer corrected the agent"
+}

@@ -1,0 +1,228 @@
+---
+title: "Webhooks dos seus sistemas"
+description: "CRM, ERP e help desk entram pelo webhook genérico, com mapeamento versionado e autenticação."
+---
+
+O seu CRM, ERP, help desk, cobrança e sistema de pedidos já emitem um evento quando algo muda: um pedido é criado, uma fatura é contestada, um ticket reabre, um pagamento é recusado. A Niadra recebe esses eventos por um webhook genérico, guarda o conteúdo bruto e aplica um mapeamento versionado que extrai o tipo, o objeto, o id do cliente naquele sistema, os campos e o horário. Nenhum modelo de linguagem lê um evento de sistema, e você não escreve código no sistema que envia.
+
+Este guia liga um ERP para que o `invoice.credited` da fatura 0823 chegue à memória da Marina Souza às 14h06, ao lado da ação que o agente de cobrança registrou.
+
+## Como um evento de sistema vira memória
+
+1. O ERP envia o JSON dele para `POST /v1/ingest/webhook/{source_id}`.
+2. A Niadra autentica a requisição com o método declarado para aquela fonte e grava o conteúdo bruto antes de responder.
+3. O mapeamento versionado da fonte gera o evento: `canonical_type`, o objeto, o `system_id` do cliente, os campos e o `occurred_at`.
+4. O objeto ganha linha do tempo e estado derivado, com `as_of` e referência ao registro de origem. Pendências ligadas a ele podem fechar.
+5. A camada ao vivo tem o evento em menos de um segundo; o contexto recompilado, em menos de dez.
+
+O valor oficial fica no ERP. A memória guarda o que os agentes precisam lembrar e aponta para a origem.
+
+## Passo a passo
+
+### 1. Crie uma fonte para o sistema
+
+Cada sistema é uma fonte, com finalidade e audiência próprias. Crie no Console ou pela [API de controle](/api/control/sources-create). Anote o `source_id`: ele é o último trecho do endereço do webhook.
+
+```text
+https://acme-prod.us-east-2.api.niadra.com/v1/ingest/webhook/0192f7b0-3c2d-7e41-9a55-6b1d0e8f2a13
+```
+
+### 2. Escolha como o sistema se autentica
+
+A autenticação é obrigatória e declarada por fonte, no mapeamento. Sem ela, quem descobrisse o endereço poderia injetar histórico falso, uma ação que fecha promessa ou uma fatura paga.
+
+| Método | Como funciona | Quando usar |
+|---|---|---|
+| `hmac` | O sistema assina o corpo; você declara o cabeçalho, o algoritmo, o texto assinado e o segredo. Com o carimbo no texto assinado (`timestamp.body`), carimbo com mais de 5 minutos é recusado | O sistema suporta webhook assinado |
+| `bearer` | Um token fixo em `Authorization` | O sistema deixa configurar um cabeçalho |
+| `url_token` | Um token secreto no endereço | O sistema só aceita uma URL |
+| `mtls` | O sistema apresenta um certificado de cliente TLS; a impressão SHA-256 dele é o segredo do mapeamento | O sistema sabe usar mTLS e não consegue assinar o corpo |
+
+O segredo é gravado direto no cofre da sua célula e nunca mais aparece. A verificação que alguns sistemas mandam por `GET` antes da primeira entrega (o `hub.challenge` da Meta) só é respondida por um mapeamento com `url_token`, e só com o token na query, porque esse `GET` não traz assinatura; nos outros modos a resposta é 404. Com `mtls`, o sistema envia para o endereço mTLS da região, `https://mtls.<região>.api.niadra.com/v1/ingest/webhook/<source_id>`, que pede o certificado do cliente no aperto de mão (TLS 1.3, sem conferir a cadeia, porque a célula fixa uma impressão por fonte) e o encaminha à célula; a célula toma o primeiro certificado, o do cliente, e compara a impressão em tempo constante com a do mapeamento. Certificado ausente ou diferente recebe 401 e conta como recusa. Só essa rota recebe o certificado: as outras rotas da borda descartam qualquer cabeçalho de certificado que um cliente mande, e nenhum cabeçalho com uma impressão é lido. Requisição que falha na autenticação recebe 401 e entra na cobertura da fonte, e um sistema mal configurado aparece antes de alguém sentir falta dos eventos dele. Quando o sistema de origem pede um desafio de verificação por `GET` antes de começar a enviar, a Niadra responde.
+
+### 3. Escreva o mapeamento
+
+O mapeamento transforma o conteúdo que o seu sistema já envia em eventos, com expressões JMESPath. Este é o conteúdo do ERP:
+
+```json Conteúdo do ERP
+{
+  "id": "evt_77120",
+  "event": "invoice.credited",
+  "invoice": "0823",
+  "customer_id": "48213",
+  "amount": 40.00,
+  "currency": "USD",
+  "at": "2026-09-22T17:06:21Z"
+}
+```
+
+E este é um mapeamento para ele:
+
+```json Mapeamento
+{
+  "source_id": "0192f7b0-3c2d-7e41-9a55-6b1d0e8f2a13",
+  "version": "3",
+  "auth": {
+    "mode": "hmac",
+    "header": "X-ERP-Signature",
+    "algorithm": "sha256",
+    "signed_payload": "timestamp.body",
+    "timestamp_header": "X-ERP-Timestamp",
+    "tolerance_seconds": 300,
+    "secret_ref": "spaces/0192f6e1-8b7a-7c20-b3d4-2a9e5f1c6d08/webhook/erp-inbound"
+  },
+  "rules": [
+    {
+      "match": "event == 'invoice.credited'",
+      "canonical_type": "invoice.credited",
+      "idempotency_key": "id",
+      "occurred_at": "at",
+      "channel": "erp",
+      "handles": [{ "type": "system_id", "scope": "crm", "value": "customer_id" }],
+      "object_refs": [{ "type": "invoice", "namespace": "erp", "id": "invoice" }],
+      "fields": { "amount": "amount", "currency": "currency" }
+    },
+    {
+      "match": "event == 'invoice.disputed'",
+      "canonical_type": "invoice.disputed",
+      "idempotency_key": "id",
+      "occurred_at": "at",
+      "channel": "erp",
+      "handles": [{ "type": "system_id", "scope": "crm", "value": "customer_id" }],
+      "object_refs": [{ "type": "invoice", "namespace": "erp", "id": "invoice" }]
+    }
+  ]
+}
+```
+
+Cada regra cujo `match` é verdadeiro gera um evento, e `idempotency_key` aponta para o id que o sistema dá ao evento. A assinatura chega em hexadecimal ou base64, com o prefixo `sha256=` opcional, e o carimbo, no cabeçalho de `timestamp_header`. O `secret_ref` aponta para o segredo que você gravou por [`PUT /v1/secrets/webhook/{id}`](/api/secrets), no formato `spaces/<espaço>/webhook/<id>`, sempre sob o seu próprio espaço: uma referência a um segredo de outro espaço é recusada no documento e na chegada. `anchor_terms` numa regra com `canonical_type` fixo nomeia as palavras com que o cliente chama esse evento (`vistoria`, `inspection`): uma pergunta como "depois da vistoria" passa a ser lida contra o último evento desse tipo do cliente, somando às [âncoras do espaço](/concepts/events#âncoras-nos-eventos-do-sistema). Só tipos mapeados entram. Esse filtro na borda protege a memória do volume de um ERP. O conteúdo cru de um tipo não mapeado fica guardado 7 dias, como chegou, e nunca entra na memória.
+
+<Tip>
+O assistente de configuração escreve a primeira versão para você. Peça por [`POST /v1/assist`](/api/assist) (`task: "webhook_mapping"` e o `source_id`, como pessoa com o papel `integration`): ele propõe o mapeamento, valida contra os eventos de amostra do seu espaço e lista em `problems` o que ficou sem mapear. Para uma fonte que ainda não mandou nenhum evento, passe `example_payload`, um evento de exemplo como ele vai chegar (até 64 KB): ele é mascarado na chegada, com as chaves e os códigos que nomeiam o tipo do evento preservados e os valores trocados, e só a cópia mascarada é guardada, enviada ao modelo e usada na checagem. A aba Assistente do Console tem o mesmo campo. A proposta vira um diff na API de controle, e uma pessoa aprova. Acompanhe a execução por [`GET /v1/assist/{run_id}`](/api/assist-run) e liste as anteriores por [`GET /v1/assist`](/api/assist-runs).
+</Tip>
+
+### 4. Proponha o mapeamento como mudança versionada
+
+Configuração nunca é gravada no lugar. Uma mudança de mapeamento é um diff na API de controle, com o `document` novo inteiro do tipo (a lista de mapeamentos do espaço, um por fonte) e um `reason`, aprovado por uma pessoa; a célula recebe a mudança por um snapshot assinado. [`GET /v1/config/types`](/api/control/config-types) lista os tipos e os papéis que podem mudar cada um, e [`GET /v1/config/mappings`](/api/control/config-document) devolve o documento vigente, para você partir dele. Toda versão fica no [histórico](/api/control/config-history) e pode ser [desfeita](/api/control/config-diff-rollback).
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://control.api.niadra.com/v1/config/diffs" \
+  -H "Authorization: Bearer $NIADRA_CONTROL_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d @- <<'EOF'
+{
+  "space_id": "0192f6e1-8b7a-7c20-b3d4-2a9e5f1c6d08",
+  "type": "mappings",
+  "document": [
+    {
+      "source_id": "0192f7b0-3c2d-7e41-9a55-6b1d0e8f2a13",
+      "version": "3",
+      "auth": {
+        "mode": "hmac",
+        "header": "X-ERP-Signature",
+        "algorithm": "sha256",
+        "signed_payload": "timestamp.body",
+        "timestamp_header": "X-ERP-Timestamp",
+        "tolerance_seconds": 300,
+        "secret_ref": "spaces/0192f6e1-8b7a-7c20-b3d4-2a9e5f1c6d08/webhook/erp-inbound"
+      },
+      "rules": [
+        {
+          "match": "event == 'invoice.credited'",
+          "canonical_type": "invoice.credited",
+          "idempotency_key": "id",
+          "occurred_at": "at",
+          "channel": "erp",
+          "handles": [{ "type": "system_id", "scope": "crm", "value": "customer_id" }],
+          "object_refs": [{ "type": "invoice", "namespace": "erp", "id": "invoice" }],
+          "fields": { "amount": "amount", "currency": "currency" }
+        },
+        {
+          "match": "event == 'invoice.disputed'",
+          "canonical_type": "invoice.disputed",
+          "idempotency_key": "id",
+          "occurred_at": "at",
+          "channel": "erp",
+          "handles": [{ "type": "system_id", "scope": "crm", "value": "customer_id" }],
+          "object_refs": [{ "type": "invoice", "namespace": "erp", "id": "invoice" }]
+        }
+      ]
+    }
+  ],
+  "reason": "Map ERP credits and disputes"
+}
+EOF
+```
+</CodeGroup>
+
+Veja [Propor mudança de configuração](/api/control/config-diffs) e [Aprovar mudança](/api/control/config-diff-approve).
+
+### 5. Aponte o sistema para o endereço
+
+Configure o webhook no seu ERP com o endereço do passo 1 e o segredo do passo 2. A partir daí, toda requisição responde no formato do lote: `accepted`, `duplicates` e `errors` por evento, com 200 quando tudo entrou e 207 quando algo foi recusado:
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/ingest/webhook/0192f7b0-3c2d-7e41-9a55-6b1d0e8f2a13" \
+  -H "X-ERP-Timestamp: 1790096781" \
+  -H "X-ERP-Signature: sha256=5f1c9e..." \
+  -H "Content-Type: application/json" \
+  -d '{ "id": "evt_77120", "event": "invoice.credited", "invoice": "0823", "customer_id": "48213", "amount": 40.00, "currency": "USD", "at": "2026-09-22T17:06:21Z" }'
+```
+</CodeGroup>
+
+```json Resposta
+{ "accepted": 1, "duplicates": 0, "errors": [] }
+```
+
+### 6. Confira o que chegou
+
+Leia o objeto para ver o estado derivado e a linha do tempo. O crédito aparece com o evento do ERP e a ação do agente de cobrança num registro só: a ação ficou `declared` às 14h06 e virou `confirmed` quando o `invoice.credited` chegou.
+
+<CodeGroup>
+```bash cURL
+curl "https://acme-prod.us-east-2.api.niadra.com/v1/objects/invoice/erp/0823/timeline" \
+  -H "Authorization: Bearer $NIADRA_API_KEY"
+```
+</CodeGroup>
+
+## Texto livre de dentro de um sistema
+
+A descrição de um ticket ou o corpo de um e-mail não é evento estruturado. Pelo SDK ou pelo lote, mande como `message` num canal próprio (`ticket`, `email`), com o id do ticket ou da thread em `conversation_id`, e ele passa pela extração normal, como uma conversa. Pelo webhook, escreva uma regra com `"kind": "message"` e a expressão do texto em `text`:
+
+```json Regra de texto livre
+{
+  "match": "event == 'ticket.comment'",
+  "kind": "message",
+  "idempotency_key": "id",
+  "occurred_at": "at",
+  "channel": "ticket",
+  "text": "comment.body",
+  "handles": [{ "type": "system_id", "scope": "crm", "value": "customer_id" }],
+  "object_refs": [{ "type": "ticket", "namespace": "helpdesk", "id": "ticket_id" }]
+}
+```
+
+Sem uma expressão em `conversation_id`, a regra arquiva o texto sob o objeto que ela nomeia, como `obj:ticket:helpdesk:4471`, então todo texto sobre o mesmo ticket forma uma conversa só; sem objeto, cada texto vira uma conversa própria. A sessão fecha por inatividade e passa pela extração como qualquer conversa. Eventos de sistema mapeados não são cobrados.
+
+## Sistemas sem webhook
+
+Para sistemas que só exportam arquivos, transforme a exportação em JSONL, com um item de lote por linha, e mande para [`POST /v1/ingest/files`](/api/ingest-files); cada linha é validada como um item de `POST /v1/batch`. Para semear identidade a partir de uma exportação do CRM, mande em CSV. Para sistemas que o seu time já integra por código, mande eventos de sistema pelo SDK ou por [`POST /v1/batch`](/api/batch), com `kind: "system_event"` e `canonical_type`.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Sistemas, objetos e ações" href="/concepts/systems">
+    objetos, estado derivado e como as ações fecham pendências.
+  </Card>
+  <Card title="Agentes internos" href="/guides/internal-agents">
+    o agente de cobrança que registrou o crédito.
+  </Card>
+  <Card title="Receber webhook de sistema" href="/api/ingest-webhook">
+    a referência do endpoint.
+  </Card>
+  <Card title="Gatilhos e webhooks" href="/concepts/triggers-and-webhooks">
+    o caminho inverso, da Niadra para os seus sistemas.
+  </Card>
+</CardGroup>

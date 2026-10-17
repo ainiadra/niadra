@@ -1,0 +1,228 @@
+---
+title: "Webhooks from your systems"
+description: "CRM, ERP and help desk come in through the generic webhook, with a versioned mapping and authentication."
+---
+
+Your CRM, ERP, help desk, billing and order systems already emit an event whenever something changes: an order is created, a bill is disputed, a ticket reopens, a payment fails. Niadra receives those events through one generic webhook, keeps the raw payload and applies a versioned mapping that pulls out the type, the object, the customer's id in that system, the fields and the time. No language model reads a system event, and you write no code in the system that sends it.
+
+This guide connects an ERP so that `invoice.credited` for invoice 0823 lands on Marina Souza's memory at 2:06 pm, next to the action the billing agent recorded.
+
+## How a system event becomes memory
+
+1. The ERP posts its own JSON to `POST /v1/ingest/webhook/{source_id}`.
+2. Niadra authenticates the request with the method declared for that source and stores the raw payload before answering.
+3. The versioned mapping of the source produces the event: `canonical_type`, the object, the `system_id` of the customer, the fields and `occurred_at`.
+4. The object gets its timeline and a derived state, with `as_of` and a reference to the source record. Open items tied to it may close.
+5. The live layer has it in under a second; the recompiled packs in under ten.
+
+The official value stays in the ERP. The memory keeps what the agents need to remember and points to the source.
+
+## Steps
+
+### 1. Create a source for the system
+
+Each system is a source, with its own purpose and audience. Create it in the Console or through the [control API](/en/api/control/sources-create). Note the `source_id`: it is the last segment of the webhook address.
+
+```text
+https://acme-prod.us-east-2.api.niadra.com/v1/ingest/webhook/0192f7b0-3c2d-7e41-9a55-6b1d0e8f2a13
+```
+
+### 2. Choose how the system authenticates
+
+Authentication is mandatory and declared per source in the mapping. Without it, anyone who learned the address could inject a fake history, an action that closes a promise or a paid invoice.
+
+| Method | How it works | When to use |
+|---|---|---|
+| `hmac` | The system signs the body; you declare the header, the algorithm, the signed text and the secret. With the timestamp in the signed text (`timestamp.body`), a timestamp older than 5 minutes is refused | The system supports signed webhooks |
+| `bearer` | A fixed token in `Authorization` | The system lets you set a header |
+| `url_token` | A secret token in the address | The system only takes a URL |
+| `mtls` | The system presents a TLS client certificate; its SHA-256 fingerprint is the mapping's secret | The system can do mTLS and cannot sign the body |
+
+The secret is written straight into the vault of your cell and never shown again. A request that fails authentication gets 401 and is counted in the coverage of the source, so a misconfigured system shows up before anyone misses its events. The verification some systems send by `GET` before the first delivery (Meta's `hub.challenge`) is answered only by a mapping with `url_token`, and only with the token in the query, since that `GET` carries no signature; under any other mode the answer is 404. With `mtls`, the system sends to the region's mTLS address, `https://mtls.<region>.api.niadra.com/v1/ingest/webhook/<source_id>`, which asks for the client certificate in the handshake (TLS 1.3, without chain verification, since the cell pins one fingerprint per source) and forwards it to the cell; the cell takes the first certificate, the client's own, and compares its fingerprint in constant time with the mapping's. A missing or other certificate gets 401 and counts as a refusal. Only that route receives the certificate: every other route of the edge drops any certificate header a client sends, and no header naming a fingerprint is read.
+
+### 3. Write the mapping
+
+A mapping turns the payload your system already sends into events, with JMESPath expressions. This is the ERP payload:
+
+```json ERP payload
+{
+  "id": "evt_77120",
+  "event": "invoice.credited",
+  "invoice": "0823",
+  "customer_id": "48213",
+  "amount": 40.00,
+  "currency": "USD",
+  "at": "2026-09-22T17:06:21Z"
+}
+```
+
+And this is a mapping for it:
+
+```json Mapping
+{
+  "source_id": "0192f7b0-3c2d-7e41-9a55-6b1d0e8f2a13",
+  "version": "3",
+  "auth": {
+    "mode": "hmac",
+    "header": "X-ERP-Signature",
+    "algorithm": "sha256",
+    "signed_payload": "timestamp.body",
+    "timestamp_header": "X-ERP-Timestamp",
+    "tolerance_seconds": 300,
+    "secret_ref": "spaces/0192f6e1-8b7a-7c20-b3d4-2a9e5f1c6d08/webhook/erp-inbound"
+  },
+  "rules": [
+    {
+      "match": "event == 'invoice.credited'",
+      "canonical_type": "invoice.credited",
+      "idempotency_key": "id",
+      "occurred_at": "at",
+      "channel": "erp",
+      "handles": [{ "type": "system_id", "scope": "crm", "value": "customer_id" }],
+      "object_refs": [{ "type": "invoice", "namespace": "erp", "id": "invoice" }],
+      "fields": { "amount": "amount", "currency": "currency" }
+    },
+    {
+      "match": "event == 'invoice.disputed'",
+      "canonical_type": "invoice.disputed",
+      "idempotency_key": "id",
+      "occurred_at": "at",
+      "channel": "erp",
+      "handles": [{ "type": "system_id", "scope": "crm", "value": "customer_id" }],
+      "object_refs": [{ "type": "invoice", "namespace": "erp", "id": "invoice" }]
+    }
+  ]
+}
+```
+
+Each rule whose `match` is true produces one event, and `idempotency_key` points to the id the system gives the event. The signature arrives in hex or base64, with an optional `sha256=` prefix, and the timestamp in the header named by `timestamp_header`. `secret_ref` points to the secret you wrote with [`PUT /v1/secrets/webhook/{id}`](/en/api/secrets), in the form `spaces/<space>/webhook/<id>`, always under your own space: a reference to another space's secret is refused in the document and on arrival. `anchor_terms` on a rule with a fixed `canonical_type` names the words the customer uses for that event (`vistoria`, `inspection`): a question such as "after the inspection" is then read against the customer's latest event of that type, adding to the [space's anchors](/en/concepts/events#anchors-on-the-systems-events). Only mapped types get in. That filter at the edge protects the memory from the volume of an ERP. The raw payload of an unmapped type is kept for 7 days, as it arrived, and never enters the memory.
+
+<Tip>
+The configuration assistant writes the first version for you. Ask for it with [`POST /v1/assist`](/en/api/assist) (`task: "webhook_mapping"` and the `source_id`, as a person with the `integration` role): it proposes the mapping, validates it against the sample events of your space and lists in `problems` what stayed unmapped. For a source that has not sent any event yet, pass `example_payload`, one example event as it will arrive (up to 64 KB): it is masked on arrival, keeping the keys and the codes that name the event's kind and replacing the values, and only the masked copy is stored, sent to the model and checked. The Console's Assistant tab has the same field. The proposal becomes a diff in the control API, and a person approves it. Follow the run with [`GET /v1/assist/{run_id}`](/en/api/assist-run) and list past runs with [`GET /v1/assist`](/en/api/assist-runs).
+</Tip>
+
+### 4. Propose the mapping as a versioned change
+
+Configuration is never written in place. A mapping change is a diff in the control API, with the whole new `document` of the type (the list of mappings of the space, one per source) and a `reason`, approved by a person; the cell receives it through a signed snapshot. [`GET /v1/config/types`](/en/api/control/config-types) lists the types and the roles that may change each one, and [`GET /v1/config/mappings`](/en/api/control/config-document) returns the current document to start from. Every version stays in the [history](/en/api/control/config-history) and can be [rolled back](/en/api/control/config-diff-rollback).
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://control.api.niadra.com/v1/config/diffs" \
+  -H "Authorization: Bearer $NIADRA_CONTROL_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d @- <<'EOF'
+{
+  "space_id": "0192f6e1-8b7a-7c20-b3d4-2a9e5f1c6d08",
+  "type": "mappings",
+  "document": [
+    {
+      "source_id": "0192f7b0-3c2d-7e41-9a55-6b1d0e8f2a13",
+      "version": "3",
+      "auth": {
+        "mode": "hmac",
+        "header": "X-ERP-Signature",
+        "algorithm": "sha256",
+        "signed_payload": "timestamp.body",
+        "timestamp_header": "X-ERP-Timestamp",
+        "tolerance_seconds": 300,
+        "secret_ref": "spaces/0192f6e1-8b7a-7c20-b3d4-2a9e5f1c6d08/webhook/erp-inbound"
+      },
+      "rules": [
+        {
+          "match": "event == 'invoice.credited'",
+          "canonical_type": "invoice.credited",
+          "idempotency_key": "id",
+          "occurred_at": "at",
+          "channel": "erp",
+          "handles": [{ "type": "system_id", "scope": "crm", "value": "customer_id" }],
+          "object_refs": [{ "type": "invoice", "namespace": "erp", "id": "invoice" }],
+          "fields": { "amount": "amount", "currency": "currency" }
+        },
+        {
+          "match": "event == 'invoice.disputed'",
+          "canonical_type": "invoice.disputed",
+          "idempotency_key": "id",
+          "occurred_at": "at",
+          "channel": "erp",
+          "handles": [{ "type": "system_id", "scope": "crm", "value": "customer_id" }],
+          "object_refs": [{ "type": "invoice", "namespace": "erp", "id": "invoice" }]
+        }
+      ]
+    }
+  ],
+  "reason": "Map ERP credits and disputes"
+}
+EOF
+```
+</CodeGroup>
+
+See [Propose a configuration change](/en/api/control/config-diffs) and [Approve a change](/en/api/control/config-diff-approve).
+
+### 5. Point the system at the address
+
+Configure the webhook in your ERP with the address from step 1 and the secret from step 2. From then on, every request answers with the same shape as a batch: `accepted`, `duplicates` and `errors` per event, with 200 when everything went in and 207 when something was rejected:
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/ingest/webhook/0192f7b0-3c2d-7e41-9a55-6b1d0e8f2a13" \
+  -H "X-ERP-Timestamp: 1790096781" \
+  -H "X-ERP-Signature: sha256=5f1c9e..." \
+  -H "Content-Type: application/json" \
+  -d '{ "id": "evt_77120", "event": "invoice.credited", "invoice": "0823", "customer_id": "48213", "amount": 40.00, "currency": "USD", "at": "2026-09-22T17:06:21Z" }'
+```
+</CodeGroup>
+
+```json Response
+{ "accepted": 1, "duplicates": 0, "errors": [] }
+```
+
+### 6. Check what arrived
+
+Read the object to see its derived state and timeline. The credit shows the ERP event and the billing agent's action as one record: the action was `declared` at 2:06 pm and became `confirmed` when `invoice.credited` arrived.
+
+<CodeGroup>
+```bash cURL
+curl "https://acme-prod.us-east-2.api.niadra.com/v1/objects/invoice/erp/0823/timeline" \
+  -H "Authorization: Bearer $NIADRA_API_KEY"
+```
+</CodeGroup>
+
+## Free text inside a system
+
+A ticket description or an e-mail body is not a structured event. Through the SDK or the batch, send it as a `message` on its own channel (`ticket`, `email`), with the ticket or thread id in `conversation_id`, and it goes through the normal extraction, like a conversation. Through the webhook, write a rule with `"kind": "message"` and the text expression in `text`:
+
+```json Free-text rule
+{
+  "match": "event == 'ticket.comment'",
+  "kind": "message",
+  "idempotency_key": "id",
+  "occurred_at": "at",
+  "channel": "ticket",
+  "text": "comment.body",
+  "handles": [{ "type": "system_id", "scope": "crm", "value": "customer_id" }],
+  "object_refs": [{ "type": "ticket", "namespace": "helpdesk", "id": "ticket_id" }]
+}
+```
+
+Without a `conversation_id` expression, the rule files the text under the object it names, such as `obj:ticket:helpdesk:4471`, so every text about one ticket forms one conversation; without an object, each text becomes a conversation of its own. The session closes by inactivity and goes through extraction like any conversation. Mapped system events are not billed.
+
+## Systems without webhooks
+
+For systems that only export files, turn the export into JSONL with one batch item per line and send it to [`POST /v1/ingest/files`](/en/api/ingest-files); each line is validated like an item of `POST /v1/batch`. To seed identity from a CRM export, send it as CSV. For systems your team already integrates in code, send system events through the SDK or [`POST /v1/batch`](/en/api/batch) with `kind: "system_event"` and `canonical_type`.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Systems, objects and actions" href="/en/concepts/systems">
+    objects, derived state and how actions close open items.
+  </Card>
+  <Card title="Internal agents" href="/en/guides/internal-agents">
+    the billing agent that recorded the credit.
+  </Card>
+  <Card title="Receive a system webhook" href="/en/api/ingest-webhook">
+    the endpoint reference.
+  </Card>
+  <Card title="Triggers and webhooks" href="/en/concepts/triggers-and-webhooks">
+    the other direction, from Niadra to your systems.
+  </Card>
+</CardGroup>

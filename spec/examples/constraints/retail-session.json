@@ -1,0 +1,24 @@
+{
+  "version": "cv_8f2c41d9a07b",
+  "subject": {"for": "self"},
+  "hard": [
+    {"id": "h1", "attr": "item_variant.color", "op": "not_in", "values": ["preto"], "source": "stated",
+     "scope": "session", "relax": "never", "origin": {"kind": "stated", "event_key": "msg-5521"}}
+  ],
+  "soft": [
+    {"id": "s1", "attr": "item_variant.color", "value": "bege", "weight": 0.8, "confidence": 0.7, "source": "inferred"}
+  ],
+  "attributes": [
+    {"id": "z1", "name": "size.pants", "system": "BR", "value": "38", "confidence": 0.9, "source": "kept",
+     "apply": "when_asked", "category": "calca"}
+  ],
+  "exclude": ["item_variant:loja:991"],
+  "already_presented": [{"ref": "item_variant:loja:123", "times": 2}],
+  "relaxation_order": ["soft", "z1"],
+  "precedence": ["current_utterance", "stated_persistent", "inferred"],
+  "rules": [
+    {"id": "r1", "origin": "policy:v12", "rank": 2, "attr": "item_variant.available", "op": "eq", "values": [true]}
+  ],
+  "ask": ["for_whom"],
+  "text": "<restrições>\n- exigido: color diferente de preto\n- prefere: color bege\n- pants: 38 (em calca)\n- não mostrar: item_variant:loja:991\n- perguntar antes de supor: for_whom\n</restrições>"
+}

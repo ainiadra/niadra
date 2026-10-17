@@ -1,0 +1,178 @@
+---
+title: "Receipts and audit"
+description: "Every read leaves a SHA-256 chained receipt: who read what, under which policy."
+---
+
+Every time an agent reads memory, Niadra leaves a receipt: which source read, about whom, for what purpose, at which verification level, under which policy version, which items were delivered and how many were withheld. A refused read leaves one too. The receipt leaves before the answer, it is never optional, and receipts are chained by SHA-256 so nobody can change the past without breaking the chain. It is how you answer, months later, why an agent said what it said.
+
+## What leaves a receipt
+
+| Kind | Produced by |
+|---|---|
+| `read` | Context reads (`POST` and `GET /v1/context`) and object reads; a context read's receipt keeps in `detail.server_ms` how long the server took to answer it, without the network; a turn's slots get a receipt of their own, on the `slots` surface, with the items' ids, the slots manifest and what the rules read of the turn (kinds, counts, the anchor's event type), and the turn only as a keyed hash, never the words; `detail.slots` is the manifest: the turn's budget and `budget_rule`, the rule that set it; `detail.weights` says the version of the learned fusion weights the read used, and `detail.why` keeps why each slot came in: the position in each channel, the weighted contribution of each, the fused score, whether the line was cut (`excerpt`) or entered as an atom (`atom`) and the rule of each derived line, as ids and numbers, never a line, a value or the question. See [The slots receipt](#the-slots-receipt) |
+| `history` | History navigation: search, timeline and open |
+| `analytics` | [Base-wide analysis](/en/api/insights-aggregate), pseudonymous by default; a reveal records its reason |
+| `admin` | Governance actions: assertions, merges and unmerges, erasures, exports and package downloads, secrets and credentials written, retracted patterns and objections to profiling, rule dry runs, delivery resends, source cutoffs, policy simulations, review verdicts and assistant requests. Also the governance reads that show memory to a person: a profile, its memory and its objects, lineage and the review queue |
+| `holdout` | The control group: the pack that would have been delivered, recorded and not delivered |
+| `denied` | Refused reads of an authenticated source: context, history, objects and MCP tools |
+| `agent_memory` | Reads of the [agent's own memory](/en/concepts/agent-memory): the block for the prompt (surface `agent_block`) and the search over the notes (`agent_search`), with the ids of the notes handed over. Writes, edits, retirements, distillations, approvals and erasures of notes come in as `admin` |
+
+Each block a context read adds with `include` ([constraints, state, coordination and budget](/en/concepts/context#blocks-by-include)) leaves a receipt of its own, beside the context's, with the block's version and counts, never a value; [typed state](/en/concepts/object-types) reads and [coordination](/en/concepts/coordination) checks and declarations land on the same trail, without the handle. Content releases, corrected or deleted inferences, review requests and legal holds come in as `admin`, with the action and the target.
+
+Identity changes, erasures, exports, source cutoffs, pattern retractions, simulations and review verdicts land on the same trail as the reads; control plane changes also reach each space's chain as `admin` receipts: every configuration applied (`config.applied`, with the snapshot version and the document digest; who proposed and who approved stays in the control plane's versioned history), every key issued, updated or revoked (`key.issued`, `key.updated`, `key.revoked`, with the target `key:<key id>:source:<source id>`, which says whose key it is) and every change to people's access and to SSO (invitations, roles, deactivations, second factor resets, SSO connections, people created and roles synced at an SSO sign-in), which the cell pulls from the control plane every 15 s through a signed feed and writes once in each of the tenant's spaces, by ids only. The actor of those receipts is the control plane. The receipt of a person's action keeps their id (`person_id`), and a read returns the e-mail beside it (`person_label`), which stays out of the chain, like the profile's pseudonym (`pseudonym`): any role that reads receipts reads the name.
+
+A `denied` receipt keeps who tried, on which surface (`pack`, `search`, `timeline`, `open` or `object`) and why, in `detail.reason`: `scope_missing` (the key lacks the route's scope), `forbidden` (the source's purpose does not cover that object type, navigation is off for the source, the MCP tool is not offered to it or the token belongs to another source), `verification_not_allowed` (the requested level is not valid for the source: above its ceiling, or `no_customer` outside an internal agent) or `about_without_link` (a read on behalf of an organization with no active link). What was asked never goes in: neither the customer nor the query. An unknown key never reaches a space's chain, so nobody outside can fill it. On an `admin` receipt, `detail` keeps the action (`action`), the target (`target`, when there is one) and the roles of the person or the id of the key that acted.
+
+## What a receipt holds
+
+```json
+{
+  "receipt_id": "0192f7a4-2b61-7c1e-8a3d-5f0e9c7b1d24",
+  "kind": "read",
+  "surface": "object",
+  "read_at": "2026-09-22T17:07:03Z",
+  "source_id": "0192f79e-11aa-7b20-9f3e-6c1d2e4f5a60",
+  "profile_id": "0192f7a0-3b2e-7d41-8c5a-2e9f4b7a1c03",
+  "conversation_id": "call-4471",
+  "audience": "customer_agent",
+  "purpose": "customer_service",
+  "verification": "V1",
+  "policy_version": "pol-14",
+  "item_ids": ["0192f7a2-5d10-7a8e-b1c4-3f6e8d9a0b10", "0192f7a2-9d52-7f4b-8a6e-3d5f7a9b1c24", "0192f7a2-8c41-7e3a-9b5d-2c4e6f8a0b13"],
+  "withheld": 2,
+  "manifest_hash": "sha256:5b1e0c",
+  "day": "2026-09-22",
+  "slice": 3,
+  "seq": 88213,
+  "prev_hash": "sha256:0d9f3a",
+  "hash": "sha256:7e21c8"
+}
+```
+
+Items are listed by id and content is never copied into the receipt. The `manifest_hash` points to the provenance manifest of that delivery, which records:
+
+- every item included, with the event it came from and, when memory recorded it, whose words it is (`spoken_by`: `customer`, `mixed` or `company`), whether it is the customer's own words about themselves for this reader (`own_words`) and the rule that released it above the category's minimum level (`rule: mirror`, the [mirror](/en/concepts/privacy#the-mirror-rule)); the recheck at delivery time decides on the same data as the compiler;
+- every exclusion, with its reason: `policy`, `verification` or `quarantine` when the policy held the item back, `budget` when it did not fit the budget (with the rule that decided: `budget` for a valuable item that did not fit, `low_value` for one below the minimum value, `skeleton` for a line waiting in the reserve for the turn's slots, `view` for a section the view does not carry and `duplicate` for an open item another one already says or a fact a conversation pinned in the skeleton already says) and `unused` when the source does not use that kind of item ([A leaner context per agent](/en/concepts/context-use#a-leaner-context-per-agent));
+- the versions of the compiler, template, policy and extractor;
+- tokens per section and the prompt-cache decision.
+
+### The slots receipt
+
+A read with `query` leaves a second `read` receipt, on the `slots` surface, with what the turn selected from memory. `detail.slots` is the slots manifest, as canonical JSON:
+
+- `budget`, the tokens the turn's slots could add up to, and `budget_rule`, the rule that set that budget: `question`, when the turn asked for a value (a number it names or a kind of value), a count or a day, or `turn`, on any other turn. In voice, `question` means 100 tokens and up to three lines, `turn` 60 and two; in the other views the rule is recorded and the budget is the view's own;
+- `tokens`, what the slots added up to, and `items`, each slot with `id`, `kind`, `channels`, `position`, `tokens` and, for a value, `value_type`;
+- `derived`, the kinds of the derived lines; `channels`, per channel, how many hits it had and whether it missed its deadline (`skipped`); and `guards`, when there were any, with `id`, `value_type` and the control group's `arm`.
+
+`detail.why` says why each slot came in. Every item carries `id`, the position and contribution of each channel, the fused score and, when they hold, `excerpt: true` (the line was cut to the sentences that answer the turn) and `atom: true` (the conversation entered as its [atom](/en/concepts/context#skeleton-and-per-turn-slots): the matter and the value that answer the turn, in one short line). Both appear only when true, and a line is never both. A derived line carries `rule`, the rule that wrote it, and what it counted: the count by the matter the extraction named writes `count_matter` or `count_matter_complaints`, with `units`, `matched`, `matters` (how many matter keys entered the count), `counted` and `window_days`; the count by words, `count_topic` or `count_topic_complaints`, with `units` and `matched`. A promise kept in the last 7 days, which the context keeps among the open items saying when it was kept, enters the manifest like any open item: an `open_item` entry of the `pending` section, with no field of its own; what sets it apart is the context line. None of it keeps the words or the number: the same turn over the same memory writes the same manifest. The `POST /v1/context` answer with `explain: true` carries in `pack.slots[].why` the same position, contribution and score and the `excerpt`; `budget_rule` and `atom` are in the receipt only.
+
+Navigation receipts also record the query, as an HMAC under the space's key, the ids of the returned items and how many were withheld. A search or a timeline read with filters also keeps an HMAC of the filters as sent, under the same key, in `detail.filters_hash`: the receipt proves which filters were asked without keeping what they say, and `detail` is chained like the rest.
+
+## The chain
+
+Receipts are append-only. Each one carries its position (`seq`) and the hash of the previous receipt (`prev_hash`), chained per space, per slice and per day. `detail` is hashed like the rest; a receipt without `detail` has the hash it always had, so older receipts still verify. A small space has one slice; a large one has up to 16, chosen by the profile, so the busiest space still writes without a single bottleneck.
+
+Once a day, when every receipt of that day is written, the heads of the slices are combined into a Merkle root. The root is kept in the cell's database and in a copy outside it, in write-once storage (S3 with Object Lock in compliance mode): the copy is written only if it does not exist yet and is retained for five years, and nobody, the cell included, can delete or replace it before then. Changing any past receipt breaks every hash after it and no longer matches the root, and rewriting receipts, heads and the root in the database at once still no longer matches the copy.
+
+### The audit export: the root in your own chain
+
+Niadra keeps no second audit chain for what the agents did: it hands its own to yours. The daily `audit.root` event, by webhook or through the [notifications feed](/en/concepts/triggers-and-webhooks#the-notifications-feed), carries the root of the day's receipts and, in a space that records [turn records](/en/concepts/turn-records), the root of the kept tier's index (`turns.root`, with `turns.count`): each turn kept on the day has a row (the turn id, the source, the agent, the kind, the time, the content mode and the build hash) with its SHA-256 digest, and the digests, in turn id order, fold into a Merkle root with the RFC 6962 prefixes, an odd node carried up on its own. Only digests and counts leave: never what a turn read or said.
+
+[`GET /v1/turns/index/{day}`](/en/api/turns-index) lists the rows of one UTC day with their digests, by cursor, so your company recomputes `turns.root`, and [`GET /v1/receipts/verify`](/en/api/receipts-verify) recomputes the receipts' root, to check both and anchor them wherever it wants. A row that expires or is erased later leaves the root anchored as it was: the root proves what the day had, not what still exists. The index needs a key with the `replay` scope or a person with the `integration` or `security` role, and the `turns` feature. The `receipt.recorded` webhook delivers the chain links (slice, day, `seq`, `prev_hash` and `hash`) as soon as the writer stores them, for those who prefer to keep their copy on their own clock. Neither carries what was read.
+
+No read leaves without a receipt. The queue confirms the receipt within 20 ms; when it does not, the receipt goes to the cell's database as a write task, which writes it to the chain at least once and never twice, because the receipt id is unique. Only when both paths fail does it wait in the process memory; once that backlog is full, sensitive categories stop going out, and at twice that size reads pause until the receipts are written.
+
+A quick continuity check over one page of a slice:
+
+<CodeGroup>
+```python Python
+import os
+import httpx
+
+response = httpx.get(
+    "https://acme-prod.us-east-2.api.niadra.com/v1/receipts",
+    params={"conversation_id": "call-4471"},
+    headers={"Authorization": f"Bearer {os.environ['NIADRA_API_KEY']}"},
+)
+items = sorted(response.json()["items"], key=lambda r: r["seq"])
+for previous, current in zip(items, items[1:]):
+    if current["seq"] == previous["seq"] + 1:
+        assert current["prev_hash"] == previous["hash"], current["receipt_id"]
+```
+```typescript TypeScript
+const url = new URL("https://acme-prod.us-east-2.api.niadra.com/v1/receipts");
+url.searchParams.set("conversation_id", "call-4471");
+
+const response = await fetch(url, {
+  headers: { Authorization: `Bearer ${process.env.NIADRA_API_KEY}` },
+});
+const items = (await response.json()).items.sort((a: { seq: number }, b: { seq: number }) => a.seq - b.seq);
+for (let i = 1; i < items.length; i++) {
+  if (items[i].seq === items[i - 1].seq + 1 && items[i].prev_hash !== items[i - 1].hash) {
+    throw new Error(`chain broken at ${items[i].receipt_id}`);
+  }
+}
+```
+```bash cURL
+curl "https://acme-prod.us-east-2.api.niadra.com/v1/receipts?conversation_id=call-4471" \
+  -H "Authorization: Bearer $NIADRA_API_KEY"
+```
+</CodeGroup>
+
+The full check is on the server: [`GET /v1/receipts/verify?day=2026-09-22`](/en/api/receipts-verify) walks every slice of that day and answers `valid`, the count of `receipts`, the `heads` of each slice, any `breaks` it found, whether the recomputed root matches the anchored one (`root_matches`), whether the copy outside the database holds the same root (`anchor_copy_matches`) and whether that copy sits in write-once storage (`anchor_locked`). `valid` is true only with no breaks and no mismatch of the root or the copy. While the day is not anchored, those three fields are null; `anchor_copy_matches` is also null when the copy cannot be read at that moment, and false when it is missing or holds another root.
+
+The receipt routes are governance routes: a Console person with the `security` role, or a key with the `admin` scope. Filter the list by `profile_id`, `conversation_id`, `source_id`, `kind` and a `since`/`until` window, and page with `cursor`, in the body of [`POST /v1/receipts/search`](/en/api/receipts-search): a conversation id may be a phone number or an e-mail, and it stays out of the URL. [`GET /v1/receipts`](/en/api/receipts) takes the same filters in the query and stays. Each receipt in the answer carries, next to `profile_id`, the profile's `pseudonym`, the name to show a person; it comes from the profile at read time and is not part of the chained receipt.
+
+## Three questions receipts answer
+
+**Why did the agent say X?** At 2:07 pm the voice agent told Marina the $40 credit was already applied. The receipt of `call-4471` lists, among the delivered items, the id of the billing agent's 2:06 pm action (`0192f7a2-9d52-7f4b-8a6e-3d5f7a9b1c24`); the manifest shows it came from the `credit` action on `invoice:erp:0823`, confirmed by the ERP event. Receipt, manifest, item, event: four steps from the sentence to its source, and [`GET /v1/lineage/receipt/{receipt_id}`](/en/api/lineage-receipt) walks them for you, returning the receipt, the delivered items with their origin and the exclusions.
+
+**Who saw fact F?** [`GET /v1/lineage/fact/{fact_id}`](/en/api/lineage-fact) returns every receipt whose delivery carried that fact: each source that received it, with purpose, level and time.
+
+**What was withheld, and why?** `withheld` says how many items the policy held back; the manifest says which reason applied to each (`policy`, `verification` or `quarantine`). The agent learns only the count, never the content, so it knows that verifying the customer releases more. The opposite question has an answer too: an item a reader at V1 saw in a category that asks for V2 carries `rule: mirror` in the manifest, the proof that it saw what the customer said themselves, not what the company holds about them.
+
+## Receipts in your SIEM
+
+Receipts reach your SIEM seconds after they enter the chain, through the same delivery mechanism as webhooks. The stream is an endpoint in the `webhook-endpoints` configuration document, changed by an [approved diff](/en/api/control/config-diffs), with a `format`:
+
+- `ocsf`: one OCSF 1.3 API Activity event (`class_uid` 6003) per receipt, one JSON per line (`application/x-ndjson`);
+- `hec`: the same event inside an HTTP Event Collector envelope (`time`, `source`, `sourcetype` `niadra:ocsf:api_activity` and `event`), also one per line.
+
+`event_types` takes receipt kinds (`read`, `history`, `analytics`, `admin`, `holdout`, `denied`, `agent_memory`) or `*` for all. The signing secret and, when the collector asks for one, the token sent in the `Authorization` header (such as `Splunk <token>`) are written to the cell's vault with [`PUT /v1/secrets/webhook/{id}`](/en/api/secrets), and the document points to them as `spaces/<space id>/webhook/<id>`, in `secret_refs` and in `authorization_ref`. Every secret reference (`secret_refs`, `authorization_ref`, an export's `credential_ref`, a mapping's `secret_ref`) must sit under `spaces/<your space>/`: the vault is the cell's, shared by the spaces it serves, and the cell refuses a reference to another space at use (the delivery fails as `secret_outside_space`, the webhook answers 403, the export and the credential write are refused), and the control plane refuses a new document that names one.
+
+```json
+{
+  "endpoint_id": "siem",
+  "url": "https://siem.acme.example/services/collector/event",
+  "source_id": "0192f79e-11aa-7b20-9f3e-6c1d2e4f5a60",
+  "format": "hec",
+  "event_types": ["*"],
+  "secret_refs": ["spaces/0192f700-1c2d-7e3f-8a4b-5c6d7e8f9a01/webhook/siem"],
+  "authorization_ref": "spaces/0192f700-1c2d-7e3f-8a4b-5c6d7e8f9a01/webhook/siem-token"
+}
+```
+
+Each delivery carries up to 200 receipts, is signed like every webhook (`webhook-id`, `webhook-timestamp` and `webhook-signature`, over the raw body) and has the same retries for 24 hours and the same dead-letter queue, with a resend in the Console. To check the stream before you rely on it, [a test delivery](/en/api/webhook-endpoint-test) sends one OCSF event marked with `unmapped.niadra.test`, outside the chain. A SIEM stream is never the target of a warning rule: the control plane refuses the rule. The event says who read (the source or the person), the surface or the action, the profile and the object by id, never by phone or email, the purpose, the level, the policy version, whether the read was refused (`status` `Failure`, with the reason in `status_detail`) and the position on the chain in `unmapped.niadra.chain` (slice, day, `seq`, `prev_hash` and `hash`), so your SIEM can check the chain on its own. Like the receipt, it never carries what was read.
+
+The continuous export also writes the `receipts` table to your bucket, at the frequency of its schedule.
+
+## Receipts and erasure
+
+When a data subject is forgotten, read receipts are not rewritten: they already hold only ids and hashes, so they prove a read happened without keeping what was read. The erasure itself leaves an `admin` receipt, the erasure receipt, which lists what was erased and the export runs that already contained it. Measurement rows follow the retention and policy of the receipt they belong to.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Privacy, erasure and export" href="/en/concepts/privacy">
+    the erasure receipt and the lineage it walks.
+  </Card>
+  <Card title="Context use" href="/en/concepts/context-use">
+    each measured delivery carries the manifest hash its read receipt records.
+  </Card>
+  <Card title="Context and views" href="/en/concepts/context">
+    withheld items and the verification levels.
+  </Card>
+  <Card title="Search receipts" href="/en/api/receipts-search">
+    the endpoint in detail.
+  </Card>
+</CardGroup>

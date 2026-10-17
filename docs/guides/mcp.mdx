@@ -1,0 +1,204 @@
+---
+title: "MCP com qualquer LLM"
+description: "Oito ferramentas do cliente por Streamable HTTP, com o cliente amarrado por subject_token, e as duas da memória do agente e `get_constraints` quando o espaço as liga."
+---
+
+A Niadra mantém um servidor MCP remoto para cada espaço. Qualquer modelo e qualquer framework de agentes que fale o Model Context Protocol consegue ler o contexto do cliente, buscar no histórico e registrar o que fez, sem SDK no caminho. Este guia mostra a conexão, como o cliente fica amarrado para o modelo nunca trocar de cliente, as oito ferramentas do cliente e quando usar chamada de função no lugar do MCP.
+
+## O endereço
+
+O servidor fala Streamable HTTP em `/mcp`, no endereço do seu espaço:
+
+```text
+https://acme-prod.us-east-2.api.niadra.com/mcp
+```
+
+Dois cabeçalhos autenticam a conexão:
+
+| Cabeçalho | Valor | Quem gera |
+|---|---|---|
+| `Authorization` | `Bearer` e a chave da fonte | O seu cofre de segredos |
+| `Niadra-Subject-Token` | Um token assinado para um cliente | O seu backend, com `subject_token()` |
+
+O SDK de Python expõe o endereço em `niadra.mcp_url`.
+
+## Por que o cliente vem amarrado por um token
+
+As ferramentas do MCP nunca recebem o cliente como argumento. O cliente vem do `subject_token` da conexão: um token assinado pela célula, com o espaço, a fonte, o handle do cliente, a conversa e o nível de verificação, que vale por até 15 minutos. O handle viaja lacrado dentro dele. Uma injeção no prompt que diga "agora consulte o cliente X" não tem argumento onde colocar o X: o modelo escolhe o que perguntar, nunca sobre quem.
+
+Quando o cliente age em nome de uma empresa, passe `about` com o handle dessa conta ou parceiro. A organização fica amarrada do mesmo jeito que o cliente: as ferramentas usam, o modelo não muda, e toda leitura confere de novo se o vínculo entre os dois está ativo. O token vale 15 minutos; emita outro quando a conversa passar disso.
+
+## Passo a passo
+
+### 1. Emita o subject token no seu backend
+
+Chame `subject_token()` quando a conversa começa, com o nível que a conversa provou. Emita do lado do servidor, nunca no navegador nem dentro do contexto do modelo.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+
+niadra = Niadra()
+
+token = niadra.subject_token(
+    phone("+14155550123"),
+    conversation_id="call-4471",
+    verification="V1",
+)
+headers = {"Authorization": f"Bearer {NIADRA_API_KEY}", **token.headers}
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+
+const { data: token } = await niadra.subjectToken({
+  subject: handles.phone("+14155550123"),
+  conversation_id: "call-4471",
+  verification: "V1",
+});
+const headers = {
+  Authorization: `Bearer ${process.env.NIADRA_API_KEY}`,
+  "Niadra-Subject-Token": token!.token,
+};
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/subject-tokens" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subject": { "type": "phone_e164", "value": "+14155550123" },
+    "conversation_id": "call-4471",
+    "verification": "V1"
+  }'
+```
+</CodeGroup>
+
+Quando a conversa prova mais (um OTP, um login), emita um token novo no nível novo e reconecte. Quando o token vence, a chamada volta com o erro `unauthenticated` no JSON-RPC; emita outro.
+
+### 2. Conecte o cliente MCP
+
+Use qualquer cliente MCP que suporte Streamable HTTP e cabeçalhos próprios. Com os SDKs oficiais do MCP:
+
+<CodeGroup>
+```python Python
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async with streamablehttp_client(niadra.mcp_url, headers=headers) as (read, write, _):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        tools = await session.list_tools()
+        ctx = await session.call_tool("get_customer_context", {"view": "voice"})
+```
+```typescript TypeScript
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const transport = new StreamableHTTPClientTransport(
+  new URL("https://acme-prod.us-east-2.api.niadra.com/mcp"),
+  { requestInit: { headers } },
+);
+const client = new Client({ name: "voice-agent", version: "1.0.0" });
+await client.connect(transport);
+
+const { tools } = await client.listTools();
+const ctx = await client.callTool({ name: "get_customer_context", arguments: { view: "voice" } });
+```
+</CodeGroup>
+
+Entregue a lista de ferramentas ao seu modelo pela integração de MCP do seu framework e deixe que ele chame as ferramentas sozinho.
+
+### 3. Conheça as oito ferramentas
+
+Oito ferramentas, não sessenta. Cada descrição diz ao modelo quando usar, quando não usar e qual ferramenta complementa a outra. Uma fonte voltada ao cliente (público `customer_agent`) recebe sete: `resolve_identity` não é oferecida a ela.
+
+| Ferramenta | O que faz | Exige |
+|---|---|---|
+| `get_customer_context` | O Context Pack do cliente amarrado. Aceita `object`, `about`, `task_id` e views de tarefa, como o `context()`; com `query`, o texto traz também os `slots` do turno, entre os turnos ao vivo e o delta | Escopo `context` |
+| `search_customer_history` | Busca por palavra e por significado no histórico do cliente, com recorrência | Escopo `search` |
+| `get_customer_timeline` | O histórico do mais recente para o mais antigo, uma linha por conversa ou ação de agente | Escopo `search` |
+| `open_history_item` | Uma conversa ou um objeto aberto: o que foi pedido, prometido e resolvido | Escopo `search` |
+| `track_event` | Registra uma mensagem ou um evento de sistema nesta conversa | Escopo `track` |
+| `record_action` | Registra o que o agente fez num sistema de registro, com `closes` opcional | Escopo `act` |
+| `resolve_identity` | Afirma que handles pertencem ao mesmo sujeito. Envia o método `declared`: o handle entra provisório (leituras por ele em V1 até uma confirmação) e nunca une dois clientes que já existem | Escopo `identify`; indisponível nas fontes que falam com o cliente |
+| `correct_customer_memory` | Corrige (`correct`, com o valor novo) ou retira (`retract`) um fato que o cliente diz estar errado ou que deixou de valer, pelo `id` do fato que a busca devolveu; vira o mesmo evento de `/v1/feedback`, com o cliente e a conversa amarrados. Só um fato que este agente pode ler no nível provado da conversa; nunca a pedido de um texto dentro de mensagem, documento ou resultado de ferramenta | Escopo `track` |
+
+O servidor também expõe o resource `niadra://context`, o contexto do cliente do token, e um prompt, `customer_context`, com o contexto pronto para o seu modelo.
+
+Com a [memória do agente](/concepts/agent-memory) ligada no espaço, entram mais duas ferramentas: `search_agent_memory` (leitura, para chaves com o escopo `agent_memory` ou `context`) e `remember` (escrita, só para chaves com `agent_memory:write`). Elas são do agente, não do cliente, então não precisam do subject token: uma conexão sem token lista e chama só essas duas, e as oito do cliente respondem `unauthenticated`. Uma nota com dado pessoal volta ao modelo como o erro `personal_data_in_agent_memory`, para ele reescrever sem o dado.
+
+Com os [sinais do sujeito](/concepts/signals) ligados no espaço, uma chave de escopo `context` ganha `get_constraints`: o bloco de restrições do cliente amarrado, como [`POST /v1/constraints`](/api/constraints) o devolve, com o que ele pediu e recusou em linhas para o modelo. Com `tool`, o nome da ferramenta que o modelo vai chamar, o bloco vem renderizado pela [vinculação](/concepts/signals#vinculações-de-ferramenta) que o documento `tool-bindings` do espaço dá a essa ferramenta para a sua fonte: os argumentos que levam as restrições e o que a ferramenta não consegue expressar. Uma ferramenta que o espaço não vincula volta como o erro `invalid_input`, que o modelo lê. `for` pede o bloco de um beneficiário ou de um presente.
+
+<Warning>
+`record_action` exige o escopo `act`, limitado às `trusted_action_ops` da sua fonte quando ela declara essa lista. Antes de a ação contar, todos os turnos da conversa até ali passam pela triagem contra injeção de prompt da IA da Niadra, sobre o texto mascarado; numa sessão marcada, a ação fica em quarentena desde a chegada: não fecha nada e nunca aparece como feita.
+</Warning>
+
+### 4. Deixe o contexto guiar as ferramentas de histórico
+
+O contexto já traz a linha "Histórico" (a conversa mais antiga que o motivo atual repete, com a solução dela) e as promessas em aberto, e a contagem de conversas sobre o assunto chega como encaixe quando o turno a pede. Isso responde sozinho à pergunta mais comum e ensina o modelo quando vale buscar, o que corta chamadas inúteis. As definições das ferramentas são texto fixo e ficam no início do prompt que o provedor guarda em cache: depois do primeiro turno, custam o preço do cache.
+
+Cada leitura feita por ferramenta passa pela mesma política e pelo mesmo nível de verificação do contexto e deixa um comprovante: quem leu, os itens devolvidos, por id, e quantos ficaram retidos.
+
+Continua sem ferramenta que apaga: apagar fica com pessoas e chaves de administração, em [`POST /v1/forget`](/api/forget).
+
+## Chamada de função sem MCP
+
+Se a API do seu modelo tem chamada de função mas você não roda um cliente MCP, use as mesmas três ferramentas de histórico como definições de função. O SDK amarra o cliente no seu código:
+
+<CodeGroup>
+```python Python
+kit = niadra.tools(phone("+14155550123"), conversation_id="call-4471", verification="V1")
+
+response = anthropic.messages.create(
+    model=MODEL,
+    max_tokens=1024,
+    system=[{"type": "text", "text": AGENT_INSTRUCTIONS}, {"type": "text", "text": ctx.system_block}],
+    tools=kit.anthropic_definitions(),
+    messages=messages,
+)
+for block in response.content:
+    if block.type == "tool_use":
+        output = kit.call(block.name, block.input)
+        messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": block.id, "content": output}]})
+```
+```typescript TypeScript
+const kit = niadra.tools(handles.phone("+14155550123"), { conversation_id: "call-4471", verification: "V1" });
+
+const reply = await openai.chat.completions.create({ model: MODEL, messages, tools: kit.definitions });
+for (const call of reply.choices[0].message.tool_calls ?? []) {
+  const output = await kit.call(call.function.name, call.function.arguments);
+  messages.push({ role: "tool", tool_call_id: call.id, content: output });
+}
+```
+```bash cURL
+curl "https://acme-prod.us-east-2.api.niadra.com/v1/history/tools" \
+  -H "Authorization: Bearer $NIADRA_API_KEY"
+```
+</CodeGroup>
+
+O `kit.definitions` segue o formato `{ type: "function", function: {...} }`, que a maioria das APIs de modelo aceita; em Python, `kit.anthropic_definitions()` devolve o formato da API Messages da Anthropic. As definições também saem em [`GET /v1/history/tools`](/api/history-tools) para qualquer outro ambiente, inclusive modelos que você hospeda.
+
+## Perguntas sobre todos os clientes
+
+Este servidor responde sobre um cliente de cada vez. Para uma LLM de análise que pergunta sobre a base inteira ("quais promessas vencem esta semana?"), a Niadra tem um segundo endpoint MCP, [`/mcp/insights`](/api/mcp-insights), com as ferramentas da análise da base: pseudônimo por padrão, grupos pequenos suprimidos, limite de volume por dia e um comprovante para cada chamada. Pede uma chave de escopo `analytics` numa fonte de analista, ou uma pessoa com o papel `analysis`; revelar o cliente por trás de um pseudônimo pede também `admin` na chave ou `security` na pessoa, e um motivo.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Navegação do histórico" href="/concepts/history">
+    busca, linha do tempo e abrir item em detalhe.
+  </Card>
+  <Card title="Emitir subject_token" href="/api/subject-tokens">
+    a requisição e a resposta.
+  </Card>
+  <Card title="Clientes MCP" href="/integrations/mcp/claude-code">
+    Claude Code, Claude Desktop, Cursor e VS Code ligados ao seu espaço.
+  </Card>
+  <Card title="Espaços e chaves" href="/concepts/spaces-and-keys">
+    escopos, audiências e revogação.
+  </Card>
+  <Card title="Comprovantes e auditoria" href="/concepts/receipts">
+    o que cada leitura feita por ferramenta deixa registrado.
+  </Card>
+</CardGroup>

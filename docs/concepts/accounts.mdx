@@ -1,0 +1,165 @@
+---
+title: "Contas e parceiros"
+description: "Organizações como sujeitos da memória, vínculos com papel e o contexto com about."
+---
+
+Em logística, seguros, saúde e B2B em geral, o cliente muitas vezes é uma empresa, e quem fala é uma pessoa que age em nome dela: o motorista da transportadora, o comprador da rede, o corretor. Há ainda organizações que participam do atendimento sem ser clientes: a transportadora que entrega, a clínica que atende, a assistência que conserta. A Niadra guarda memória para todos. O sujeito da memória é uma pessoa, uma conta ou um parceiro.
+
+## Três tipos de sujeito
+
+| Tipo | O que é | Exemplo |
+|---|---|---|
+| `person` | Uma pessoa, reconhecida por telefone, e-mail, id do WhatsApp, id do app ou id de sistema | Marina Souza |
+| `account` | Uma organização que é sua cliente | A rede varejista da conta `ACC-2201` no CRM |
+| `partner` | Uma organização que participa do atendimento sem ser cliente | A transportadora, a clínica, a corretora |
+
+O tipo vem dos handles, nunca de um parâmetro à parte. Todo handle tem `subject_kind`, que por padrão é `person`, exceto nos tipos de handle que só existem para organização.
+
+## Handles de organização
+
+| Tipo de handle | Força | Observação |
+|---|---|---|
+| `org_registry_hmac` | Forte | O registro da empresa no país dela, enviado como o próprio número (como `11.222.333/0001-81`), conferido e guardado como HMAC, igual ao documento de uma pessoa |
+| `system_id` com `subject_kind: account` ou `partner` | Forte dentro do namespace | A conta no seu CRM, o código do cliente no ERP, o id da transportadora no TMS |
+| `email_domain` | Pista fraca | Nunca une nada sozinho; domínios de webmail ficam bloqueados |
+| Telefone da empresa | Ambíguo por padrão | Um PABX liga muita gente ao mesmo número |
+
+Organizações nunca se unem automaticamente e nunca são deduplicadas por semelhança de nome. Só id liga organizações.
+
+## Pessoa e organização se ligam, nunca se unem
+
+Uma asserção entre handle de pessoa e handle de organização vira um **vínculo**, nunca uma união. O vínculo tem papel (`buyer`, `technical_contact`, `driver`, `broker`), validade, origem e confiança. Uma pessoa pode ter vários vínculos ao mesmo tempo: o motorista que roda para três transportadoras tem três vínculos.
+
+Vínculos nascem de quatro métodos: `system_import` (o registro de contato do CRM), `co_occurrence` (um `identify` ou uma linha de CSV que traz os dois ids, ou um evento cujo `subjects[]` cita uma pessoa e uma organização), `declared` ("ligo em nome da transportadora X", com confiança 0,5 no registro do vínculo) e `login` (portal B2B). Um evento com `subjects[]` que cita uma pessoa e uma organização gera o vínculo entre as duas, com o papel `contact`, e nunca une as identidades: cada sujeito é anexado à parte, e um vínculo já ativo fica como está.
+
+Uma pessoa tem quantos vínculos ativos o trabalho dela pedir. Nenhum vínculo é recusado por número, e nenhum acaba para abrir espaço a outro: um vínculo só acaba quando é encerrado ou chega ao próprio `valid_to`.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/identity/links" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "person": {"type": "phone_e164", "value": "+14155550123"},
+    "organization": {"type": "system_id", "value": "ACC-2201", "scope": "crm", "subject_kind": "account"},
+    "role": "buyer",
+    "can_see_contacts": true,
+    "method": "system_import"
+  }'
+```
+```python Python
+import os
+import uuid
+import httpx
+
+response = httpx.post(
+    "https://acme-prod.us-east-2.api.niadra.com/v1/identity/links",
+    headers={"Authorization": f"Bearer {os.environ['NIADRA_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+    json={
+        "person": {"type": "phone_e164", "value": "+14155550123"},
+        "organization": {"type": "system_id", "value": "ACC-2201", "scope": "crm", "subject_kind": "account"},
+        "role": "buyer",
+        "can_see_contacts": True,
+        "method": "system_import",
+    },
+)
+response.raise_for_status()
+```
+```typescript TypeScript
+const response = await fetch("https://acme-prod.us-east-2.api.niadra.com/v1/identity/links", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.NIADRA_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    person: { type: "phone_e164", value: "+14155550123" },
+    organization: { type: "system_id", value: "ACC-2201", scope: "crm", subject_kind: "account" },
+    role: "buyer",
+    can_see_contacts: true,
+    method: "system_import",
+  }),
+});
+```
+</CodeGroup>
+
+As rotas de vínculo são rotas de governança: uma pessoa do Console com o papel `security` ou `integration`, uma chave de escopo `admin`, ou a chave de um sistema de registro que sabe quem trabalha para quem (um CRM, um sistema de RH) com o escopo `identity:link`, que alcança as duas rotas de vínculo e mais nada da identidade; todas com o cabeçalho `Idempotency-Key`. Um vínculo com `can_see_contacts` pede uma pessoa ou o escopo `admin`, e `identity:link` nunca é dado a uma fonte voltada ao cliente. Os SDKs as chamam de `link()` e `end_link()` (`endLink()` em TypeScript). Um vínculo recebe `role`, os opcionais `valid_from` e `valid_to`, e `can_see_contacts`, que a política lê como atributo de contexto. O vínculo vale de `valid_from` (ou da criação, sem ele) até `valid_to`: um vínculo cujo `valid_from` ainda não chegou não está ativo. Quando o contato sai da empresa, [encerre o vínculo](/api/identity-link-end), se quiser com a data em `valid_to`. As conversas passadas continuam com o `about` que tinham; leituras novas com `about` para aquele par recebem a memória da própria pessoa, com `about_unlinked: true`.
+
+## A memória fica presa à origem
+
+Uma conversa da Marina com o seu agente sobre a rede varejista vira um episódio com sujeito Marina e `about` igual à conta. Quem decide de quem é a memória da conversa é o sujeito dela, nunca um `verify`: a verificação prova quem fala, em que nível, e não ancora nada. Então o agente que atende um contato abre a conversa com a pessoa como `subject` e a organização como `about`, e verifica a pessoa; uma conversa aberta na conta guarda a memória na conta, quem quer que tenha sido verificado nela. Objetos de negócio pertencem ao handle dono deles: o pedido feito pela rede fica na conta, e a Marina se liga a ele pelo vínculo. Como cada item aponta para a própria origem, uma separação de perfis ou um apagamento cai no sujeito certo sem reescrever nada.
+
+## Contexto por sujeito
+
+Duas chamadas cobrem as duas situações:
+
+- `context(subject=<handle da conta>)` para o agente que atende a própria empresa, com a view `account`.
+- `context(subject=<handle da pessoa>, about=<handle da conta>)` para o agente que atende o contato. O contexto ganha um bloco da conta com o que ela tem de relevante para a tarefa.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone, system_id
+
+niadra = Niadra()
+
+ctx = niadra.context(
+    subject=phone("+14155550123"),
+    about=system_id("crm", "ACC-2201", kind="account"),
+    view="chat",
+    verification="V1",
+    conversation_id="wa-8812",
+)
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+
+const ctx = await niadra.context({
+  subject: handles.phone("+14155550123"),
+  about: handles.systemId("ACC-2201", "crm", { subjectKind: "account" }),
+  view: "chat",
+  verification: "V1",
+  conversation_id: "wa-8812",
+});
+```
+</CodeGroup>
+
+O `about` só lê a organização por um vínculo ativo entre os dois sujeitos. Sem ele, a leitura segue com a memória da própria pessoa, sem o bloco da conta, e a resposta diz `about_unlinked: true`; diz o mesmo para uma organização que não existe, então nunca revela se ela existe. Os SDKs registram isso uma vez por conversa. O turno nunca roda sem memória nenhuma porque falta um vínculo.
+
+Um vínculo compila, quando é criado, o contexto da pessoa sobre a organização, então a primeira leitura de um contato com `about` já o encontra pronto em vez de compilá-lo. Cada mudança na memória da organização compila esse contexto de novo para os 20 contatos vistos por último. Uma leitura que o encontra uma compilação atrás da memória da organização o recebe enquanto ele é compilado de novo, como acontece com o contexto da própria pessoa até a compilação dela chegar, e pede essa compilação; um contexto compilado antes de uma mudança de privacidade da organização (um apagamento, uma oposição) nunca é servido. O próprio vínculo fica guardado no processo de leitura, então uma leitura aquecida com `about` não consulta o banco para encontrá-lo; um vínculo criado, encerrado ou alterado chega às leituras aquecidas em um ciclo do feed de mudanças, e um vínculo que termina na própria data deixa de valer nessa data. Encerrar o vínculo descarta o contexto.
+
+As ferramentas de histórico da pessoa alcançam o que o bloco da conta mostra, sob o mesmo vínculo: a [busca](/api/history-search), a [linha do tempo](/api/history-timeline) e a [abertura](/api/history-open) recebem o mesmo `about`, e as ferramentas amarradas dos SDKs e o servidor MCP (pelo token de sujeito) o passam. Sem `about`, elas leem só a pessoa. Uma correção com a conta como sujeito resolve uma pendência que um dos contatos vinculados a ela anotou, que a visão da conta mostra.
+
+A view `account` reúne o que a própria conta acumulou: os fatos da conta (contrato, SLA, condições), pendências e promessas no nível da conta, objetos, episódios da conta, padrões da conta e as ações que agentes internos fizeram sobre ela. A view `partner` funciona igual para parceiros.
+
+### Um contato não lê o que outro disse
+
+Dado pessoal de contato continua sendo dado pessoal em B2B, e a LGPD e o GDPR não abrem exceção para ele. O bloco da conta traz o que a própria conta acumulou e o que os contatos dela disseram: as pessoas com vínculo ativo com qualquer handle da conta, da vista mais recentemente para a mais antiga. As 20 vistas por último aparecem em detalhe, cada episódio recente nomeado por quem falou e em que papel, com as pendências de cada uma, e a conta diz quantos contatos tem. As linhas dos outros contatos ficam mascaradas para uma pessoa cujo vínculo não pode vê-los (`can_see_contacts`). Os padrões da conta somam o que os contatos dela disseram, dois contatos no mínimo, e passam pela política de cada categoria em que as conversas deles foram arquivadas. O vínculo guarda `can_see_contacts` e o papel, que a política lê como atributos de contexto, e uma leitura com `about` acha o vínculo em qualquer handle da pessoa e da organização: um vínculo feito pelo e-mail vale para uma ligação pelo telefone.
+
+## Política por sujeito
+
+A política decide, por tipo de sujeito, o que cada leitor recebe. Os itens de um perfil de parceiro só chegam a um agente cuja fonte serve as finalidades `partnership` ou `logistics`, as duas do catálogo com esse sentido; uma pessoa no Console continua lendo. E a política lista, fonte a fonte, em `competes_with`, os parceiros concorrentes que ela nunca lê, pelos ids dos handles ou pelo id do perfil do parceiro, que cobre os handles que ele ganhar depois.
+
+## Apagamento
+
+Esquecer uma pessoa não apaga a conta. Sai a memória pessoal dela, inclusive o que ela disse sobre a conta, e os vínculos dela são apagados. O que a conta sabe por evento de sistema fica, e a memória dos outros contatos também. Esquecer uma conta apaga os fatos, os episódios, os objetos e os padrões da conta e os vínculos dela. Cada contato fica com o que veio das conversas dele e perde o que veio de um evento que também citava a conta, porque o apagamento segue a linhagem do evento; o resto da memória pessoal só sai a pedido do titular. Os dois caminhos emitem comprovante. Veja [Privacidade, apagamento e exportação](/concepts/privacy).
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Identidade e verificação" href="/concepts/identity">
+    handles, asserções e os níveis V0 a V4.
+  </Card>
+  <Card title="O contexto e as views" href="/concepts/context">
+    as views de canal, de tarefa e de sujeito.
+  </Card>
+  <Card title="Criar vínculo" href="/api/identity-links">
+    a requisição e a resposta em detalhe.
+  </Card>
+  <Card title="Padrões" href="/concepts/patterns">
+    os sinais que se repetem, com evidência.
+  </Card>
+</CardGroup>

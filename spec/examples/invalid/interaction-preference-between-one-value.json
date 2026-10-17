@@ -1,0 +1,2 @@
+{"kind": "preference", "attr": "item_variant.price_sale", "op": "between", "values": [300], "strength": "must",
+ "scope": "turn"}

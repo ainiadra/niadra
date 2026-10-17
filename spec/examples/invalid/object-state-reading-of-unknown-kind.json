@@ -1,0 +1,85 @@
+{
+  "ref": {
+    "type": "intimacao_com_prazo",
+    "namespace": "banco_do_produto",
+    "id": "pub-20260921-0042"
+  },
+  "type_version": "1",
+  "as_of": "2026-09-29T08:00:00Z",
+  "state": "open",
+  "fields": {
+    "addressee_is_client": {
+      "v": true,
+      "logic": "yes",
+      "status": "fresh",
+      "age_s": 14400,
+      "observed_at": "2026-09-29T08:00:00Z",
+      "observer": "machine",
+      "known_at": "2026-09-29T08:00:02Z",
+      "claim_safe": true
+    },
+    "under_seal": {
+      "v": false,
+      "logic": "no",
+      "status": "fresh",
+      "observer": "human",
+      "observed_at": "2026-09-29T09:10:00Z",
+      "age_s": 10200,
+      "claim_safe": true
+    },
+    "content": {
+      "logic": "yes",
+      "status": "fresh",
+      "age_s": 187200,
+      "observed_at": "2026-09-27T12:00:00Z",
+      "src": "public_publications",
+      "valid_at": "2026-09-21T00:00:00Z",
+      "known_at": "2026-09-22T06:31:00Z",
+      "completeness": "full",
+      "claim_safe": true,
+      "content": {
+        "mode": "pointer",
+        "sha256": "4f1c000000000000000000000000000000000000000000000000000000000000",
+        "pointer": "cust://docs/pub-20260921-0042",
+        "scan": "clean"
+      }
+    }
+  },
+  "values": {
+    "due_date": {
+      "v": "2026-10-15",
+      "logic": "yes",
+      "version": 2,
+      "rule": "prazo_forense@v9",
+      "computed_at": "2026-09-28T22:00:00Z",
+      "status": "fresh",
+      "supersedes_version": 1,
+      "declared_gaps": [
+        "feriado_estadual_e_municipal",
+        "portaria_de_tribunal",
+        "prazo_em_dobro"
+      ],
+      "gap_effect": "errs_early",
+      "claim_safe": true
+    }
+  },
+  "timers": [
+    {
+      "name": "notice_48h",
+      "due_at": "2026-10-13T03:00:00Z",
+      "state": "armed"
+    }
+  ],
+  "readings": {
+    "portfolio": {
+      "logic": "yes",
+      "type": "interval",
+      "v": 1339200000
+    }
+  },
+  "declared_gaps": [
+    "feriado_estadual_e_municipal",
+    "portaria_de_tribunal",
+    "prazo_em_dobro"
+  ]
+}

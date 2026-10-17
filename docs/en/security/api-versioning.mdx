@@ -1,0 +1,62 @@
+---
+title: "API versioning policy"
+description: "The version in the path, what counts as a breaking change, how long versions run side by side, the notice by e-mail and the deprecation headers. In force from the first breaking change."
+---
+
+Niadra's data API and control API carry the version in the path: `/v1`. This page is the policy that says when that number changes, what your integration can count on not changing, and how and with how much notice Niadra tells you. It applies to the HTTP API, to the MCP server and to the two SDKs, which speak the same API.
+
+## What does not change the version
+
+Within `/v1`, Niadra may, without notice and at any time:
+
+- add a field to a response;
+- add a route, an optional parameter, an event type, a new value to an output enum or an MCP tool;
+- add a response header;
+- relax a limit (accept a larger batch, a higher rate);
+- fix a behaviour that contradicted the documentation, when the fix does not change the meaning of an existing field.
+
+That is why your code must ignore fields and values it does not know. Both SDKs do: the Python one drops unknown fields from responses (`extra="ignore"` on the response models, `niadra-sdk-python/src/niadra/models/_base.py`) and the TypeScript one reads responses as JSON, with no strict schema that would refuse an extra field. An output enum that gains a new value is a compatible change: treat a value your code does not know as "other".
+
+## What is a breaking change
+
+Anything that makes a correct client of today stop working or start reading a value wrongly:
+
+- removing a field, a route, a parameter or an MCP tool;
+- changing the meaning, the type or the format of an existing field;
+- making mandatory what was optional, or tightening a validation that accepted a previously accepted value;
+- changing an error code or a status code of an already documented situation;
+- lowering a documented limit.
+
+Such a change is born in `/v2`. `/v1` keeps answering as before.
+
+## Coexistence, notice and deprecation
+
+When `/v2` exists:
+
+1. **Twelve months side by side.** `/v1` keeps answering for at least 12 months after `/v2` is announced, with the same availability guarantees as the contract's. Security fixes go into both.
+2. **Notice by e-mail.** On the day of the announcement, each project's technical contact receives an e-mail with what changes, the migration guide and the date on which `/v1` stops answering. Reminders go out 90, 30 and 7 days before that date.
+3. **Deprecation headers.** From the announcement on, every response of a deprecated route, or of a route with a deprecated field, carries `Deprecation: @<instant>` (RFC 9745), which says since when it is deprecated, and `Sunset: <HTTP date>` (RFC 8594), which says when it stops; a `Link` header with `rel="deprecation"` points to that route's migration guide. All three are exposed through CORS, for the Console and for clients in the browser. The interval between `Deprecation` and `Sunset` is always at least 12 months. Both SDKs read these headers: on the first response of each deprecated route they log a warning with the two dates and the link (on the `niadra` logger in Python, on the client's `logger` in TypeScript), once per process and without the request path, which can carry an id.
+4. **The SDKs migrate together.** A major version of each SDK (`niadra` on PyPI, `@niadra/sdk` on npm) speaks `/v2`; the previous version keeps speaking `/v1` until the `Sunset` and receives security fixes until then.
+
+## What holds today
+
+On 30/09/2026 only `/v1` exists. The server sends the headers of the previous section on every response of a route that is in its deprecation registry, and that registry is empty: no route, field or tool has been deprecated, so today no response carries `Deprecation` or `Sunset`. A server test refuses a registry entry whose route does not exist, whose `Sunset` is less than 12 months after its `Deprecation` or whose link does not point to this documentation. This policy comes into force with the first breaking change.
+
+Before the public launch, while the platform has no customer in production, Niadra may change `/v1` without this rite, and that is how the change history of 2026 should be read. From the first contract on, the policy above is the commitment, and it goes into the contract.
+
+## How to learn of a change
+
+- The [API reference](/en/api) is generated from the server's OpenAPI contract on every published release, so it describes `/v1` as it is live; this documentation's `llms.txt` follows it.
+- A breaking change is announced by e-mail to each project's technical contact, as the previous section says; a compatible change generates no notice.
+- The SDKs carry their own version numbers (today `niadra` 0.9.0 and `@niadra/sdk` 0.9.0); a major version of each is the one that changes API version.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Limits and conventions" href="/en/conventions">
+    version, authentication, idempotency, limits and personal data out of URLs.
+  </Card>
+  <Card title="API reference" href="/en/api">
+    `/v1` as it is live.
+  </Card>
+</CardGroup>

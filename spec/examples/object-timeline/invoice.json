@@ -1,0 +1,30 @@
+{
+  "ref": {
+    "type": "invoice",
+    "namespace": "erp",
+    "id": "0823"
+  },
+  "items": [
+    {
+      "id": "act_0192b8a1",
+      "kind": "action",
+      "text": "Billing agent credited 40 BRL · declared, confirmed by the ERP at 14:06",
+      "at": "2026-09-22T14:06:12-03:00",
+      "channel": "billing",
+      "source_id": "billing-agent",
+      "outcome": "confirmed",
+      "origin_event_id": "0192b8a1-0c3d-7e4f-8a9b-1c2d3e4f5a6b"
+    },
+    {
+      "id": "sys_0192b89f",
+      "kind": "system_event",
+      "text": "invoice.disputed · amount 40 BRL",
+      "at": "2026-09-22T14:05:40-03:00",
+      "channel": "erp",
+      "source_id": "erp",
+      "origin_event_id": "0192b89f-4a5b-7c6d-8e9f-0a1b2c3d4e5f"
+    }
+  ],
+  "next_cursor": "c_0192b89f",
+  "as_of": "2026-09-22T14:06:12-03:00"
+}

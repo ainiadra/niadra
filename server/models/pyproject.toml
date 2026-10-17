@@ -1,0 +1,84 @@
+[project]
+name = "niadra-models"
+version = "0.1.0"
+description = "The small in-cell models of Niadra: embeddings, decisions, PII and guards."
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "numpy>=2.1",
+]
+
+[project.optional-dependencies]
+onnx = ["onnxruntime>=1.20", "tokenizers>=0.20"]
+# The document reader (10, D.1): text in images by RapidOCR on ONNX Runtime (its detection model inside
+# the wheel, the PP-OCRv6 small recognizer baked from onnx/pinned.py), PDF pages by pypdf and pypdfium2,
+# DOCX, XLSX and PPTX by python-docx, openpyxl and python-pptx (openpyxl parses through defusedxml when it
+# is installed). Nothing downloads at run time. OpenCV without its GUI: the slim image has no libGL.
+ocr = [
+  "onnxruntime>=1.20",
+  "rapidocr-onnxruntime==1.4.4",
+  "opencv-python-headless>=4.10",
+  "pillow>=10",
+  "pypdf>=6.19.0",
+  "pypdfium2>=5.13",
+  "python-docx>=1.2",
+  "openpyxl>=3.1.5",
+  "python-pptx>=1.0.2",
+  "defusedxml>=0.7.1",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "httpx>=0.28",
+  "onnx>=1.17",
+  "ruff>=0.8",
+  "mypy>=1.13",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/niadra_models"]
+
+[tool.uv]
+default-groups = ["dev"]
+# RapidOCR asks for the desktop OpenCV; the headless build is the same library without the GUI.
+override-dependencies = ["opencv-python; sys_platform == 'never'"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N", "S", "PT", "RET", "ARG"]
+ignore = ["S101", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S311", "ARG", "N802"]
+# One sentence a customer writes per line, so each case reads as it is.
+"tests/test_quality.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"
+packages = ["niadra_models"]
+
+[[tool.mypy.overrides]]
+module = [
+  "onnxruntime.*", "tokenizers.*", "rapidocr_onnxruntime.*", "PIL.*", "pypdfium2.*", "docx.*", "openpyxl.*",
+  "pptx.*",
+]
+ignore_missing_imports = true

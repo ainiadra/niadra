@@ -1,0 +1,18 @@
+# The share of requests outside each objective, per window, for the burn-rate alerts (files/alerts.yaml).
+# The objectives' edges are histogram buckets (server,
+# adapters/observability/metrics.py), so the counts are exact: 100 ms for the context read, 80 ms for the
+# batch's acknowledgement; and every 5xx for availability. Server time, without the network.
+{{- range $window := list "5m" "30m" "1h" "6h" }}
+- record: niadra:context_slow_ratio:rate{{ $window }}
+  expr: >-
+    1 - sum(rate(niadra_http_request_duration_seconds_bucket{route="/v1/context", le="0.1"}[{{ $window }}]))
+    / sum(rate(niadra_http_request_duration_seconds_count{route="/v1/context"}[{{ $window }}]))
+- record: niadra:batch_slow_ratio:rate{{ $window }}
+  expr: >-
+    1 - sum(rate(niadra_http_request_duration_seconds_bucket{route="/v1/batch", le="0.08"}[{{ $window }}]))
+    / sum(rate(niadra_http_request_duration_seconds_count{route="/v1/batch"}[{{ $window }}]))
+- record: niadra:error_ratio:rate{{ $window }}
+  expr: >-
+    sum(rate(niadra_http_requests_total{status=~"5.."}[{{ $window }}]))
+    / sum(rate(niadra_http_requests_total[{{ $window }}]))
+{{- end }}

@@ -1,0 +1,117 @@
+---
+title: "OpenAI Agents SDK"
+description: "The customer's memory in Runner.run, through the SDK's own extension points: the model input filter, hooks and function tools, in Python and in JavaScript."
+---
+
+In Python, `NiadraAgentsMemory` gives you `run_config()` (the filter that injects the context before each model call), `hooks` (which record the turns) and `tools`. In JavaScript, `@niadra/sdk/openai-agents` brings `NiadraSession`, `niadraInstructions()`, `niadraTools()` and `niadraRunHooks()`.
+
+## Install
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[openai-agents]'   # openai-agents 0.22.3 or newer, below 1
+```
+```sh TypeScript
+npm install @niadra/sdk @openai/agents   # @openai/agents 0.18, as an optional peer dependency
+```
+</CodeGroup>
+
+The TypeScript integration is in `@niadra/sdk` on npm.
+
+## The five primitives
+
+| Primitive | Python | JavaScript |
+|---|---|---|
+| Context | `run_config()` sets `call_model_input_filter`, which runs right before every model call: the pack goes after the agent's instructions and the `turn_block` after the input, as a system message. A filter you already had runs first | `niadraInstructions(base, conversation)` makes the instructions dynamic: your text, then the agent's notes and the pack, then the suffix |
+| Turns | `hooks` (a `RunHooks`) records the customer's new messages when the model is first called for them, and the agent's answer with the usage reported. Customer turns are keyed by position, so the history a `Session` replays on the next run is never recorded twice | `NiadraSession` is a `Session` for `run(agent, input, { session })`: it keeps the run's items in the session you give it (a `MemorySession` by default) and records what the customer said and what the agent answered |
+| Tools | `tools`: the three history tools as `FunctionTool`s with the kit's names, descriptions and schemas, bound to the customer | `niadraTools(conversation)` |
+| Verification | What your app proved (a login, an OTP) goes to `conversation.verify()` before the run | The same, through `conv.verify()` |
+| Handoff | An SDK handoff between agents records `handoff("agent")`; give every agent of the run the same `memory` | `niadraRunHooks(runner, conversation)` records the handoffs between agents |
+
+## Minimal example
+
+<CodeGroup>
+```python Python
+"""An OpenAI Agents SDK agent with the customer's memory."""
+
+import asyncio
+
+from agents import Agent, Runner
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.openai_agents import NiadraAgentsMemory
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    async with niadra.conversation("thread-81", subject=phone("+5511912345678")) as conversation:
+        memory = NiadraAgentsMemory(conversation, agent_memory=True)
+        agent = Agent(
+            name="Support", instructions="You are Acme's agent.", model="gpt-4.1", tools=memory.tools
+        )
+        result = await Runner.run(
+            agent, "Where is my replacement lid?", hooks=memory.hooks, run_config=memory.run_config()
+        )
+        print(result.final_output)
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+```typescript TypeScript
+import { Agent, Runner } from "@openai/agents";
+import { Niadra, handles } from "@niadra/sdk";
+import { NiadraSession, niadraInstructions, niadraRunHooks, niadraTools } from "@niadra/sdk/openai-agents";
+
+const niadra = new Niadra();
+const runner = new Runner();
+
+/** One customer message in; `userId` comes from your session, never from the model. */
+export async function reply(userId: string, chatId: string, text: string): Promise<string> {
+  const convo = niadra.conversation({ subject: handles.appUserId(userId), channel: "web_chat", conversation_id: chatId });
+  const billing = new Agent({ name: "Billing", instructions: niadraInstructions("You handle invoices and credits.", convo), tools: niadraTools(convo) });
+  const support = new Agent({
+    name: "Support",
+    instructions: niadraInstructions("You are Acme's support agent. Hand billing questions to Billing.", convo),
+    tools: niadraTools(convo),
+    handoffs: [billing],
+  });
+  const stop = niadraRunHooks(runner, convo);
+  try {
+    const result = await runner.run(support, text, { session: new NiadraSession(convo) });
+    return String(result.finalOutput ?? "");
+  } finally {
+    stop();
+  }
+}
+```
+</CodeGroup>
+
+The same code is in `examples/openai_agents_run.py` and `examples/openai-agents.ts`.
+
+## Agent memory
+
+In Python, `agent_memory=True` (or `{"write": True, "max_tokens": 300, "tags": [...]}`) puts the agent's own notes after the instructions and before the customer's context, and `search_agent_memory` (and `remember`, with `write`) join `tools`. In JavaScript, `agentMemory` in the options. See [Agent memory](/en/concepts/agent-memory).
+
+## Turn records
+
+With the `turns` feature on in the space (it ships on), the Python `RunHooks` with `turns=True` and the JavaScript hooks with `turns: true` record each run as a [turn record](/en/concepts/turn-records), with each tool call by the provider's id and each model call with its tokens; a handoff opens a sub-turn. The OpenAI Agents JS hooks cannot stop a tool, so wrap the tools with `Niadra.tool()` for a [replay](/en/guides/replay-in-ci) to answer them from the record; in Python, the `FunctionTool`s answer from the record. A turn never waits for Niadra and never repeats the conversation's text.
+
+## Limits
+
+- The Python adapter does not implement the SDK's `Session`: a `Session` stores the agent's own items, and Niadra keeps derived memory, not a copy of each item. Use any `Session` next to it. In JavaScript, `NiadraSession` wraps the session you choose.
+- Nothing here fails a run: Niadra slow or down leaves the instructions yours alone.
+- In Python, the `openai-agents` extra pins versions incompatible with `livekit`, `crewai` and `litellm`; install one per environment.
+- Tested against `openai-agents` 0.22.3 and `@openai/agents` 0.18.0 with the model replaced by a fake and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="History navigation" href="/en/concepts/history">
+    the three tools the agent receives.
+  </Card>
+  <Card title="OpenAI and Azure OpenAI" href="/en/integrations/openai">
+    the client `wrap()`, for those not on the Agents SDK.
+  </Card>
+</CardGroup>

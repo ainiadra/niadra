@@ -1,0 +1,116 @@
+---
+title: "Só metadado"
+description: "Grave turnos e conteúdo com os valores no seu próprio armazenamento: a Niadra guarda o ponteiro e o hash, e o replay, a conferência de afirmações e o conteúdo de terceiros continuam funcionando dentro da sua empresa."
+---
+
+Algumas empresas não podem deixar os argumentos das ferramentas, os resultados ou os documentos que um agente escreveu saírem da própria infraestrutura: o texto de um processo, uma cotação com dados de saúde, um contrato. O modo `pointer` atende a isso sem perder o que o registro dá: o SDK escreve cada valor no **seu bucket**, com as suas credenciais, e manda à Niadra só o ponteiro e o digest. A Niadra guarda o quadro do turno (o que foi lido, chamado, afirmado e decidido, com os pinos) e nunca um valor; o replay e a conferência de afirmações leem os valores de volta dentro da sua empresa, pelo digest.
+
+## Os três modos
+
+| Modo | O que sai da sua empresa | O que a Niadra guarda | Replay |
+|---|---|---|---|
+| `stored` | Os valores, cifrados; as folhas de texto passam pelas regras de mascaramento dos eventos e, com `pii_model`, pelo modelo de dado pessoal | O registro inteiro | Sim |
+| `pointer` | O ponteiro (`s3://...`) e o SHA-256 de cada valor | O quadro, os ponteiros e os digests | Sim, dentro da sua empresa |
+| `hash_only` | Só o SHA-256 | O quadro e os digests | Não; estatística e asserções estruturais |
+
+O modo é configuração do espaço, no documento `recording` (papel `integration`): um modo padrão e, se quiser, um por fonte. Uma fonte pode sempre guardar menos do que o espaço permite, nunca mais: um turno enviado num modo que guarda mais é recusado com `content_mode_refused`, e o SDK o manda de novo só com digests. Mudar o modo para um que guarda mais pede também o papel `security`. Um registro bronze, vindo de [OpenTelemetry](/guides/opentelemetry), é `hash_only` por padrão.
+
+## Ligar o modo `pointer` no SDK
+
+O SDK escolhe o modo nesta ordem: `content_mode` das opções de turno, quando você o fixa; `pointer` assim que um armazenamento é configurado; o modo que a gravação do espaço nomeia para a fonte; `stored`. O upload roda no envio, em segundo plano, nunca no caminho do agente.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra
+
+niadra = Niadra()
+niadra.turns.store(s3_bucket="s3://acme-agent-turns/prod")  # boto3, with your credentials from the environment
+# or any callable put(key, data) -> pointer
+niadra.turns.store(put=lambda key, data: my_store.write(key, data))
+```
+```typescript TypeScript
+import { Niadra } from "@niadra/sdk";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+
+const niadra = new Niadra();
+const s3 = new S3Client({});
+niadra.turns.store(async (key, data) => {
+  await s3.send(new PutObjectCommand({ Bucket: "acme-agent-turns", Key: `prod/${key}`, Body: data, ContentType: "application/json" }));
+  return `s3://acme-agent-turns/prod/${key}`;
+});
+```
+</CodeGroup>
+
+Cada valor vai para `<turn_id>/<blob>.json`, como JSON canônico (RFC 8785), e o ponteiro devolvido entra no registro ao lado do digest. Um registro cujos blobs não puderam ser todos escritos sai como `hash_only`, `partial`, em vez de esperar. O digest é o SHA-256 do JSON canônico do valor, então o mesmo valor tem o mesmo digest em qualquer produtor; antes de calcular, o SDK pode aplicar os normalizadores que a gravação do espaço declara, para tirar um id de pedido ou um carimbo de tempo que muda a cada chamada, e assim o `args_hash` de uma chamada bate entre replays.
+
+## O que a Niadra ainda vê
+
+O quadro: o turno, o agente, o tipo, os horários, a build e os pinos, o que foi lido pela versão, as chamadas com o nome, o `args_hash`, a latência e o estado, as observações de estado tipado com a proveniência (os valores dos campos observados fazem parte do quadro, porque são estado dos seus objetos, não conteúdo), as interações, os vereditos de afirmação, as decisões de coordenação e os efeitos, os ids dos eventos da conversa e as marcas. O que a Niadra não vê: os argumentos, os resultados, o texto das leituras, os documentos escritos. Um registro em `pointer` ou `hash_only` é aceito mesmo com o armazenamento da Niadra indisponível, porque o quadro é tudo o que ele tem; a deduplicação pelo `turn_id` acontece quando o armazenamento volta.
+
+## Replay dentro da sua empresa
+
+No [replay](/guides/replay-in-ci), o caso traz o registro com os ponteiros e os digests, e o executor lê cada ponteiro com o **resolvedor de conteúdo** do SDK, com as suas credenciais, e confere o digest antes de usar: um valor que não pode ser lido ou não bate é um erro de infraestrutura, nunca uma asserção falhando.
+
+<CodeGroup>
+```python Python
+import boto3
+
+s3 = boto3.client("s3")
+
+
+def fetch(pointer: str) -> bytes:
+    bucket, key = pointer.removeprefix("s3://").split("/", 1)
+    return s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+
+
+niadra.content.register(fetch)  # the Replayer reads pointers through it
+```
+```typescript TypeScript
+import { GetObjectCommand } from "@aws-sdk/client-s3";
+
+niadra.content.register(async (pointer) => {
+  const [bucket, key] = pointer.replace("s3://", "").split(/\/(.+)/);
+  const object = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  return await object.Body!.transformToString();
+});
+```
+</CodeGroup>
+
+O contexto da época é o blob da leitura `pack` do registro, lido do mesmo jeito. O caso traz também o histórico da conversa mascarado, então o executor tem tudo o que precisa sem que nenhum valor gravado passe pela Niadra no caminho de volta.
+
+## Conteúdo de terceiros por ponteiro
+
+O mesmo vale para os [campos de conteúdo](/concepts/object-types#conteúdo-de-terceiros) dos tipos declarados: com `content.mode: pointer`, o texto de um tribunal ou de um documento fica no seu armazenamento, e uma leitura de estado traz só o marcador `content` (`mode`, `sha256`, `pointer`, `scan`). `niadra.content.fill(context)` preenche a view de estado com os textos, conferindo cada digest, e o texto entra no prompt dentro do envelope `<niadra-data>`, como qualquer conteúdo de terceiro. Um conteúdo por ponteiro fica `pending` quando o tipo exige triagem (`scan: required`), porque a Niadra não consegue lê-lo: a triagem, nesse caso, é sua, ou o tipo usa `scan: rules` sobre o que chega em claro.
+
+## Contrafactual e âncoras
+
+O [contrafactual de ferramenta](/concepts/outcomes#o-contrafactual-de-ferramenta) roda as chamadas gravadas ao vivo dentro da sua empresa e reporta só posições e sobreposições, então funciona igual em qualquer modo. A âncora de texto do [contrato de afirmação](/concepts/claims#a-âncora-de-texto) compara a citação com o documento que o executor tem em mãos, recomposto pelo ponteiro.
+
+## O que fica com a Niadra em cada modo
+
+| | `stored` | `pointer` | `hash_only` |
+|---|---|---|---|
+| Quadro do turno, pinos, marcas | sim | sim | sim |
+| Argumentos e resultados das ferramentas | cifrados e mascarados | ponteiro e digest | digest |
+| Texto do contexto lido | cifrado | ponteiro e digest | digest |
+| Observações de estado tipado | sim | sim | sim |
+| Vereditos de afirmação, decisões, efeitos, interações | sim | sim | sim |
+| Índice do dia para a sua cadeia de auditoria | sim | sim | sim |
+| Retenção | a da camada; o apagamento de uma pessoa apaga os turnos dela pelo prefixo da conversa | a da camada na Niadra; no seu bucket, a sua | a da camada |
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Registros de turno" href="/concepts/turn-records">
+    os modos de conteúdo e a fila do SDK.
+  </Card>
+  <Card title="Replay no seu CI" href="/guides/replay-in-ci">
+    o executor que lê os ponteiros de volta.
+  </Card>
+  <Card title="O worker de resolução" href="/guides/resolver-worker">
+    o resolvedor de conteúdo e o de estado.
+  </Card>
+  <Card title="Privacidade" href="/concepts/privacy">
+    onde cada cópia mora e por quanto tempo.
+  </Card>
+</CardGroup>

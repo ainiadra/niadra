@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/verification-assertion.v0.json",
+  "title": "Niadra Verification Assertion v0",
+  "description": "A statement that one conversation or task reached a verification level by a named method. See spec/verification-assertion.md.",
+  "$defs": {
+    "Handle": {
+      "additionalProperties": false,
+      "description": "An identifier of a subject in some channel or system: a phone, an e-mail, a CRM id.",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/HandleType"
+        },
+        "value": {
+          "maxLength": 320,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Namespace for scoped identifiers: the WhatsApp Business account for `wa_bsuid`, the system for `system_id`, the country for `gov_id_hmac`.",
+          "title": "Scope"
+        },
+        "subject_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubjectKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Defaults to `person`, except for organization-only handle types."
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "title": "Handle",
+      "type": "object"
+    },
+    "HandleType": {
+      "enum": [
+        "phone_e164",
+        "wa_id",
+        "wa_jid",
+        "wa_lid",
+        "wa_bsuid",
+        "email",
+        "gov_id_hmac",
+        "app_user_id",
+        "system_id",
+        "org_registry_hmac",
+        "email_domain",
+        "anon_id"
+      ],
+      "title": "HandleType",
+      "type": "string"
+    },
+    "SubjectKind": {
+      "enum": [
+        "person",
+        "account",
+        "partner",
+        "staff"
+      ],
+      "title": "SubjectKind",
+      "type": "string"
+    },
+    "Verification": {
+      "description": "Session verification levels. `no_customer` sits outside the V0-V4 scale.",
+      "enum": [
+        "V0",
+        "V1",
+        "V2",
+        "V3",
+        "V4",
+        "no_customer"
+      ],
+      "title": "Verification",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "verify",
+      "default": "verify",
+      "title": "Type",
+      "type": "string"
+    },
+    "idempotency_key": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "method": {
+      "enum": [
+        "otp_whatsapp",
+        "otp_sms",
+        "login",
+        "kba",
+        "network_attestation",
+        "human_agent"
+      ],
+      "title": "Method",
+      "type": "string"
+    },
+    "level": {
+      "$ref": "#/$defs/Verification"
+    },
+    "conversation_id": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Conversation Id"
+    },
+    "task_id": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Id"
+    },
+    "handle": {
+      "$ref": "#/$defs/Handle"
+    },
+    "valid_until": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Valid Until"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "idempotency_key",
+    "method",
+    "level",
+    "handle",
+    "occurred_at"
+  ],
+  "type": "object"
+}

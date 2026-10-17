@@ -1,0 +1,84 @@
+---
+title: "Mastra"
+description: "A processor for the Mastra agent's model call and the history kit as Mastra tools."
+---
+
+`niadraProcessor()` is an input and output processor for the Mastra agent: it rewrites the prompt of each model call without touching the message list and records the final answer. `niadraTools(session)` returns the history kit as Mastra tools. TypeScript only.
+
+## Install
+
+```sh
+npm install @niadra/sdk @mastra/core   # @mastra/core 1.x, as an optional peer dependency
+```
+
+The integration is in `@niadra/sdk` on npm.
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | `processLLMRequest` rewrites the prompt of each model call without touching the message list: the pack goes after the system messages and the suffix at the end of the last user message, so none of it lands in Mastra's memory |
+| Turns | The customer's newest message is recorded once; `processOutputResult` records the final answer with the usage Mastra summed for the run |
+| Tools | `niadraTools(session)`: the kit as Mastra tools, bound to the customer |
+| Verification | `conv.verify()` before `generate()` |
+| Handoff | `conv.handoff()` where your flow transfers |
+
+The session comes from the request context (`requestContext.set("niadra", convo)`), or is fixed when the processor is built for one conversation.
+
+## Minimal example
+
+```typescript
+// A Mastra agent with the customer's context in every model call and the history tools.
+import { openai } from "@ai-sdk/openai";
+import { Agent } from "@mastra/core/agent";
+import { RequestContext } from "@mastra/core/request-context";
+import { Niadra, handles } from "@niadra/sdk";
+import { niadraProcessor, niadraTools } from "@niadra/sdk/mastra";
+
+const niadra = new Niadra();
+const niadraContext = niadraProcessor();
+
+export const support = new Agent({
+  id: "support",
+  name: "Acme support",
+  model: openai("gpt-4.1"),
+  instructions: "You are Acme's support agent. Be brief.",
+  tools: ({ requestContext }) => niadraTools(requestContext.get("niadra")),
+  inputProcessors: [niadraContext],
+  outputProcessors: [niadraContext],
+});
+
+/** One customer message in; `userId` comes from your session, never from the model. */
+export async function reply(userId: string, chatId: string, text: string): Promise<string> {
+  const convo = niadra.conversation({ subject: handles.appUserId(userId), channel: "web_chat", conversation_id: chatId });
+  const result = await support.generate(text, { requestContext: new RequestContext([["niadra", convo]]), maxSteps: 4 });
+  return result.text;
+}
+```
+
+The same code is in `examples/mastra.ts`.
+
+## Agent memory
+
+`niadraProcessor({ agentMemory: true })` puts the agent's own notes before the customer's context, and `niadraTools(convo, { agentMemory: { write: true } })` adds the two tools. See [Agent memory](/en/concepts/agent-memory).
+
+## Turn records
+
+With the `turns` feature on in the space (it ships on), `niadraProcessor({ turns: true })` records each request as a [turn record](/en/concepts/turn-records), with the tool and model calls. A run inside a turn in progress records into it, and in a [replay](/en/guides/replay-in-ci) Mastra tools answer from the record. A turn never waits for Niadra and never repeats the conversation's text.
+
+## Limits
+
+- Mastra's `Memory` (threads, working memory) stays Mastra's; Niadra is the customer's memory shared with the company's other agents.
+- Nothing here fails the call: without a pack, the prompt goes as Mastra built it.
+- Tested against `@mastra/core` 1.71 with a fake model and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Vercel AI SDK" href="/en/integrations/ai-sdk">
+    the middleware for `wrapLanguageModel`.
+  </Card>
+  <Card title="TypeScript SDK" href="/en/sdk/typescript">
+    the conversation, the `suffix` and `markInjected()`.
+  </Card>
+</CardGroup>

@@ -1,0 +1,708 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/interaction.v0.json",
+  "title": "Niadra Interaction v0",
+  "description": "What a subject was shown, looked at, engaged with, said they want or refuse, or is: one interaction, by `kind`. See spec/interaction.md.",
+  "$defs": {
+    "Attribute": {
+      "additionalProperties": false,
+      "description": "What the person is: a size, a preferred network, a diet. Said here; the lifecycle's outcomes (bought, kept, returned for size) derive the rest on the server, never an agent.",
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "attribute",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}(?:\\.[a-z0-9_]{1,64}){0,3}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "system": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The measuring system: `BR`, `EU`, `US`.",
+          "title": "System"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "maxLength": 256,
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        },
+        "source": {
+          "default": "stated",
+          "enum": [
+            "stated",
+            "correction"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "value"
+      ],
+      "title": "Attribute",
+      "type": "object"
+    },
+    "Engaged": {
+      "additionalProperties": false,
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "engaged",
+          "title": "Kind",
+          "type": "string"
+        },
+        "exposure_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absent for an item of no list.",
+          "title": "Exposure Id"
+        },
+        "ref": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+          "title": "Ref",
+          "type": "string"
+        },
+        "how": {
+          "enum": [
+            "click",
+            "detail",
+            "mention",
+            "add_to_cart",
+            "compare",
+            "share",
+            "other"
+          ],
+          "title": "How",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "ref",
+        "how"
+      ],
+      "title": "Engaged",
+      "type": "object"
+    },
+    "Feedback": {
+      "additionalProperties": false,
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "feedback",
+          "title": "Kind",
+          "type": "string"
+        },
+        "ref": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+          "title": "Ref",
+          "type": "string"
+        },
+        "polarity": {
+          "enum": [
+            "positive",
+            "negative"
+          ],
+          "title": "Polarity",
+          "type": "string"
+        },
+        "reason_attrs": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,39}\\.[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Reason Attrs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "ref",
+        "polarity"
+      ],
+      "title": "Feedback",
+      "type": "object"
+    },
+    "Preference": {
+      "additionalProperties": false,
+      "description": "What the person wants or refuses, said or captured from a tool's arguments; only these become hard.",
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "preference",
+          "title": "Kind",
+          "type": "string"
+        },
+        "attr": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}\\.[a-z][a-z0-9_]{0,63}$",
+          "title": "Attr",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "in",
+            "not_in",
+            "eq",
+            "ne",
+            "lt",
+            "lte",
+            "gt",
+            "gte",
+            "between"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "maxLength": 256,
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Values",
+          "type": "array"
+        },
+        "strength": {
+          "enum": [
+            "must",
+            "must_not",
+            "prefer",
+            "avoid"
+          ],
+          "title": "Strength",
+          "type": "string"
+        },
+        "scope": {
+          "default": "session",
+          "enum": [
+            "turn",
+            "session",
+            "persistent"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Holds only in this category of the type.",
+          "title": "Category"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "source": {
+          "default": "stated",
+          "enum": [
+            "stated",
+            "tool_args",
+            "correction"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "attr",
+        "op",
+        "values",
+        "strength"
+      ],
+      "title": "Preference",
+      "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "enum": [
+                  "eq",
+                  "ne",
+                  "lt",
+                  "lte",
+                  "gt",
+                  "gte"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "values": {
+                "maxItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "const": "between"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "values": {
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Presented": {
+      "additionalProperties": false,
+      "description": "A list delivered to the person: the exposure. Its canonical moment is `delivered_at`, when the interface bridge handed the list to the client, never when a tool returned it or the model named it.",
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "presented",
+          "title": "Kind",
+          "type": "string"
+        },
+        "exposure_id": {
+          "format": "uuid",
+          "title": "Exposure Id",
+          "type": "string"
+        },
+        "list_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "List Id",
+          "type": "string"
+        },
+        "list_kind": {
+          "default": "results",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "List Kind",
+          "type": "string"
+        },
+        "page": {
+          "default": 1,
+          "description": "\"See more\" is the same list with `page + 1`.",
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "parent_list_id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent List Id"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/PresentedItem"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Items",
+          "type": "array"
+        },
+        "visible_k": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How many of the first items were visible on delivery.",
+          "title": "Visible K"
+        },
+        "delivered_at": {
+          "format": "date-time",
+          "title": "Delivered At",
+          "type": "string"
+        },
+        "method": {
+          "default": "bridge",
+          "description": "`bridge` from the interface bridge, `otel` from a `niadra.exposure` span, `tool_result` inferred from what a tool returned: labeled, because it counts more than was shown.",
+          "enum": [
+            "bridge",
+            "otel",
+            "tool_result"
+          ],
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "exposure_id",
+        "list_id",
+        "items",
+        "delivered_at"
+      ],
+      "title": "Presented",
+      "type": "object"
+    },
+    "PresentedItem": {
+      "additionalProperties": false,
+      "properties": {
+        "pos": {
+          "description": "1-based position in the whole list, across pages.",
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Pos",
+          "type": "integer"
+        },
+        "ref": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+          "title": "Ref",
+          "type": "string"
+        },
+        "shown": {
+          "description": "The values the item showed, for the fields its type tracks or lets be claimed; what `changes_since_seen` later compares against.",
+          "maxProperties": 32,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,63}$": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "Shown",
+          "type": "object",
+          "additionalProperties": false
+        },
+        "team": {
+          "anyOf": [
+            {
+              "enum": [
+                "a",
+                "b"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Which of two interleaved lists contributed the item.",
+          "title": "Team"
+        }
+      },
+      "required": [
+        "pos",
+        "ref"
+      ],
+      "title": "PresentedItem",
+      "type": "object"
+    },
+    "Seen": {
+      "additionalProperties": false,
+      "description": "A ping of the list component: how far the person saw.",
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "seen",
+          "title": "Kind",
+          "type": "string"
+        },
+        "exposure_id": {
+          "format": "uuid",
+          "title": "Exposure Id",
+          "type": "string"
+        },
+        "max_index_seen": {
+          "description": "The highest `pos` the component showed.",
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Max Index Seen",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "exposure_id",
+        "max_index_seen"
+      ],
+      "title": "Seen",
+      "type": "object"
+    },
+    "Unwatch": {
+      "additionalProperties": false,
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "unwatch",
+          "title": "Kind",
+          "type": "string"
+        },
+        "ref": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+          "title": "Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "title": "Unwatch",
+      "type": "object"
+    },
+    "Watch": {
+      "additionalProperties": false,
+      "description": "An explicit \"let me know when\": the only way an interest raises a notice.",
+      "properties": {
+        "for": {
+          "default": "self",
+          "pattern": "^(?:self|gift|beneficiary:[A-Za-z0-9_-]{1,64})$",
+          "title": "For",
+          "type": "string"
+        },
+        "kind": {
+          "const": "watch",
+          "title": "Kind",
+          "type": "string"
+        },
+        "ref": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}:[^:\\s]{1,256}:\\S{1,512}$",
+          "title": "Ref",
+          "type": "string"
+        },
+        "condition": {
+          "description": "A `niadra-expr` expression over the object's fields.",
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Condition",
+          "type": "string"
+        },
+        "consent_event_key": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Consent Event Key",
+          "type": "string"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        }
+      },
+      "required": [
+        "kind",
+        "ref",
+        "condition",
+        "consent_event_key"
+      ],
+      "title": "Watch",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "attribute": "#/$defs/Attribute",
+      "engaged": "#/$defs/Engaged",
+      "feedback": "#/$defs/Feedback",
+      "preference": "#/$defs/Preference",
+      "presented": "#/$defs/Presented",
+      "seen": "#/$defs/Seen",
+      "unwatch": "#/$defs/Unwatch",
+      "watch": "#/$defs/Watch"
+    },
+    "propertyName": "kind"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Presented"
+    },
+    {
+      "$ref": "#/$defs/Seen"
+    },
+    {
+      "$ref": "#/$defs/Engaged"
+    },
+    {
+      "$ref": "#/$defs/Feedback"
+    },
+    {
+      "$ref": "#/$defs/Preference"
+    },
+    {
+      "$ref": "#/$defs/Attribute"
+    },
+    {
+      "$ref": "#/$defs/Watch"
+    },
+    {
+      "$ref": "#/$defs/Unwatch"
+    }
+  ]
+}

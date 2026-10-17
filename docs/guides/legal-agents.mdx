@@ -1,0 +1,191 @@
+---
+title: "Agentes jurídicos"
+description: "Um escritório com um agente que lê intimações e prepara minutas: prazos computados pela regra do escritório com as lacunas declaradas, citações ancoradas, documentos imutáveis, uma trava por tarefa e o conteúdo dos tribunais fora da Niadra."
+---
+
+Este guia monta, com exemplos sintéticos, o que um escritório de advocacia liga na Niadra para um agente que triagem intimações, conta prazos e prepara minutas para um advogado revisar. Em direito, o erro mais caro é um número: um prazo três dias fora, um artigo citado que diz outra coisa. Cada parte abaixo é uma funcionalidade do espaço, ligada por si.
+
+## O que o setor pede
+
+- Um prazo é computado por uma regra do escritório, sobre eixos de tempo diferentes (a data do ato, a da disponibilização, a da publicação), e a regra não conhece tudo: um feriado municipal, uma portaria do tribunal, um prazo em dobro. O agente precisa dizer a lacuna quando afirma o prazo.
+- "Não conferido" nunca vira "não": se ninguém conferiu que o destinatário é o cliente, o prazo não conta e a minuta não sai.
+- O texto de um tribunal é conteúdo de terceiro, nunca instrução, e em muitos escritórios não pode sair da infraestrutura própria.
+- Uma minuta protocolada é imutável: nada a reescreve em silêncio.
+- Dois agentes, ou um agente e um advogado, não fazem a mesma tarefa sobre o mesmo processo ao mesmo tempo.
+
+## 1. O tipo: intimação com prazo
+
+A intimação é um tipo do **cliente** (o processo pertence a ele), espelhado por introspecção do banco do sistema jurídico do escritório. Os pontos que importam:
+
+```json
+{
+  "type": "court_notice",
+  "ownership": "subject",
+  "mirror_of": { "system": "case_system", "derived_by": "introspection", "fingerprint": "sha256:...", "drift": "alert" },
+  "time": {
+    "occurred_on": { "origin": "source" },
+    "made_available_on": { "origin": "source" },
+    "published_on": { "origin": "derived", "rule": "first_business_day_publication@v3" },
+    "known_at": { "origin": "platform", "immutable": true },
+    "timers_on": "published_on"
+  },
+  "content": { "mode": "pointer", "scan": "rules", "fields": ["content"] },
+  "fields": {
+    "addressee_is_client": {
+      "type": "bool", "logic": "tri",
+      "observers": [{ "who": "machine", "rule": "name_or_registry_match@v7", "validity": "24h" }, { "who": "human", "validity": "never", "overrides": ["machine"] }],
+      "unobserved_blocks": ["count_deadline", "draft", "notify"]
+    },
+    "content": { "type": "text", "completeness": { "levels": ["dispositive", "full"] } },
+    "under_seal": { "type": "bool", "logic": "tri", "observers": [{ "who": "machine", "validity": "24h" }, { "who": "human", "validity": "never", "overrides": ["machine"] }], "unobserved_blocks": ["model_read", "derive"] }
+  },
+  "values": {
+    "due_date": {
+      "rule": "procedural_deadline@v9",
+      "inputs": ["published_on", "days_in_text", "counting", "calendar@2026"],
+      "validity": "until_input_or_rule_change",
+      "declared_gaps": ["state_and_municipal_holiday", "court_ordinance", "double_deadline"],
+      "gap_effect": "errs_early",
+      "absent_as": "no_deadline"
+    }
+  },
+  "lifecycle": {
+    "transitions": [
+      { "from": "observed", "to": "open", "by": ["source"], "when": "addressee_is_client == yes and due_date != no_deadline" },
+      { "from": "open", "to": "fulfilled", "by": ["source", "human"], "evidence": "required" },
+      { "from": "open", "to": "expired_without_act", "by": ["clock"] },
+      { "from": "*", "to": "sealed", "by": ["source", "human"], "erase_derived": ["parties", "subjects"] }
+    ],
+    "forbidden": [{ "from": "fulfilled", "to": "open" }],
+    "latches": ["fulfilled"],
+    "outcome": { "final": ["fulfilled"], "expired_without_outcome": { "after": "due_date" } }
+  },
+  "timers": { "notice_48h": { "due": "due_date - 48h", "once_per": "publication", "on_fire": ["notify"] } },
+  "purposes": {
+    "display": { "on_stale": "serve_with_age" },
+    "claim": { "on_stale": "serve_with_prohibitions", "prohibitions": ["affirm_no_new_activity", "affirm_deadline_as_final"] },
+    "decide": { "on_stale": "serve_with_age" }
+  }
+}
+```
+
+O escritório computa `due_date` pela regra dele (`procedural_deadline@v9`; a Niadra guarda o nome, nunca a lógica) e envia o valor por [`POST /v1/objects/push`](/api/objects-push); o valor entra como fato versionado, com as lacunas e para que lado elas erram, e uma revisão da regra ou de um insumo cria uma versão nova e rearma o temporizador de 48 horas, que dispara de novo nomeando o disparo que substitui. `addressee_is_client` é um campo de três valores: uma máquina o observa por 24 horas pela regra de casamento de nome ou registro, uma pessoa o observa para sempre e vence a máquina, e enquanto ninguém o observou ele **bloqueia** contar o prazo, minutar e avisar. Uma intimação sob segredo (`under_seal`) bloqueia a leitura por modelo e a derivação, e a transição para `sealed` lacra o objeto, tirando as partes. O conteúdo fica por ponteiro no armazenamento do escritório ([Só metadado](/guides/metadata-only)).
+
+## 2. O turno do agente
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, system_id
+from niadra.turns import tool
+
+niadra = Niadra(channel="case_system")
+BUILD = Niadra.build(prompts={"triage": "v12", "draft": "v4"}, model="claude-sonnet-4-5", corpus_digest=CORPUS_DIGEST)
+
+
+@tool("read_notice", provenance=lambda r: [{"ref": f"court_notice:case_system:{r['id']}", "fields": {"due_date": r["due_date"]},
+                                            "provenance": {"source": "live", "source_observed_at": r["observed_at"], "scope": "customer"}}])
+def read_notice(notice_id: str) -> dict:
+    return case_system.notice(notice_id)
+
+
+with niadra.task("triage-88213", object="court_notice:case_system:88213", view="task:triage", verification="no_customer", channel="case_system") as task:
+    locked = task.claim(object="court_notice:case_system:88213", task="draft", lease_s=900)
+    if not locked.held:
+        raise SystemExit(f"someone else is drafting: {locked.error}")
+    with task.turn(kind="event", build=BUILD):
+        context = task.context(include=["state"])
+        notice = read_notice("88213")
+        state = context.state.objects[0] if context.state and context.state.objects else None
+        if state and "count_deadline" in (state.blocked or {}):
+            task.action("triage.hold", result="addressee not verified by a person")
+        else:
+            draft = task.claims.guard_text(model(prompt_with(context, notice)), context="contestation", immutable=True)
+            task.action("draft.prepared", object="court_notice:case_system:88213", result="draft ready for review")
+```
+```typescript TypeScript
+import { Niadra } from "@niadra/sdk";
+
+const niadra = new Niadra();
+const BUILD = Niadra.build({ prompts: { triage: "v12", draft: "v4" }, model: "claude-sonnet-4-5", corpus_digest: CORPUS_DIGEST });
+const readNotice = Niadra.tool("read_notice", (id: string) => caseSystem.notice(id), {
+  provenance: (r) => [{ ref: `court_notice:case_system:${r.id}`, fields: { due_date: r.due_date }, provenance: { source: "live", source_observed_at: r.observed_at, scope: "customer" } }],
+});
+
+const task = niadra.task({ task_id: "triage-88213", channel: "case_system", object: "court_notice:case_system:88213", view: "task:triage", verification: "no_customer" });
+const locked = await task.claim({ object: "court_notice:case_system:88213", task: "draft", leaseS: 900 });
+if (!locked.held) throw new Error(`someone else is drafting: ${locked.error}`);
+await task.turn({ kind: "event", build: BUILD }, async () => {
+  const ctx = await task.context({ include: ["state"] });
+  const notice = await readNotice("88213");
+  const state = ctx.state?.objects[0];
+  if (state && "count_deadline" in (state.blocked ?? {})) {
+    task.action({ operation: "triage.hold", result: "addressee not verified by a person" });
+  } else {
+    const draft = await task.claims.guardText(await model(promptWith(ctx, notice)), { context: "contestation", immutable: true });
+    task.action({ operation: "draft.prepared", object_refs: ["court_notice:case_system:88213"], result: "draft ready for review" });
+  }
+});
+await task.end();
+```
+</CodeGroup>
+
+A trava de tarefa (`draft` sobre a intimação) faz o segundo agente, ou o advogado que abriu o mesmo processo no painel, ver `task_locked` em vez de duplicar o trabalho. `blocked` na leitura diz, pela declaração do tipo, o que um valor que ninguém observou bloqueia; a Niadra aplica `claim` e `decide` sozinha, e `count_deadline` e `draft` são para o código do agente honrar. Uma minuta protocolada é um contexto **imutável** do contrato: um bloqueio manda a minuta inteira a uma pessoa, intocada, nunca a reescreve.
+
+## 3. O contrato de afirmação
+
+```json
+{
+  "version": "2026-09-29.1",
+  "languages": ["pt"],
+  "categories": [
+    {
+      "id": "deadline",
+      "detect": { "classes": ["date", "duration"], "terms": ["prazo", "vence", "até o dia", "dias úteis", "dias corridos"] },
+      "evidence": { "value": { "type": "court_notice", "value": "due_date", "must_state_gaps": true, "gap_terms": { "state_and_municipal_holiday": ["feriado estadual", "feriado municipal", "feriado local"], "court_ordinance": ["portaria", "suspensão de prazo"], "double_deadline": ["prazo em dobro"] } } },
+      "natures": { "computed": "check", "quoted": "verbatim", "model": "block" },
+      "actions": { "default": "warn", "contexts": { "contestation": "block" } }
+    },
+    {
+      "id": "legal_citation",
+      "detect": { "patterns": ["article_citation", "precedent_citation"] },
+      "evidence": { "anchor": { "min_match": 0.9, "coverage": "law" } },
+      "actions": { "default": "discard_anchor_and_count", "contexts": { "contestation": "block" } }
+    },
+    {
+      "id": "fact_in_document",
+      "detect": { "document_sections": ["dos_fatos"] },
+      "evidence": { "anchor": { "min_match": 0.9, "coverage": "fact" } },
+      "actions": { "default": "warn" }
+    }
+  ],
+  "negative_corpus": { "version": "2026-09-29", "phrases": ["Não temos certeza do prazo até a conferência.", "O prazo para contestação é de 15 dias úteis, em regra.", "Processo nº 0001234-56.2026.8.26.0100."] },
+  "outputs": { "immutable": ["contestation", "petition"], "mutable": ["chat", "internal_note"] }
+}
+```
+
+"O prazo vence em 5 de outubro" é conferido contra `due_date` da intimação do turno; a data bate, mas o valor declara lacunas, então a minuta precisa dizê-las pelas palavras de `gap_terms` ("ressalvado feriado local ou portaria do tribunal"), ou o veredito é `gap_not_stated` e, numa contestação, a minuta inteira vai ao advogado. Um prazo que o modelo disse sem valor no turno (`unsupported`) é bloqueado em qualquer contexto. Uma citação de artigo ou de precedente é uma **âncora**: o texto citado é comparado com o documento que o turno tem em mãos (recomposto pelo ponteiro, dentro do escritório), e vale a 0,90 ou mais; abaixo disso é descartada e contada, nunca consertada. "O prazo para contestação é de 15 dias úteis, em regra" é frase do ofício e está no corpus negativo. Um número entre aspas, numa alegação da parte contrária, é citado: reproduzido como está, mesmo falso, e conferido só por estar num documento do turno. Veja [Afirmações](/concepts/claims).
+
+## 4. Registro, replay e retenção
+
+Cada turno do agente fica gravado com a build (os prompts de triagem e de minuta, o modelo, o digest do corpus de modelos de peça), e um turno que bloqueou uma minuta é marcado `guard_acted` e guardado. Quando o escritório troca o prompt de minuta, o [replay](/guides/replay-in-ci) roda os turnos das intimações que importaram com a memória da época, dentro do escritório (os valores estão no armazenamento dele, por ponteiro), e as asserções `claims_match_state`, `claims_traced` e `tool_called: read_notice` dizem se o agente ainda conta o prazo a partir do valor computado. Um processo em disputa recebe uma [retenção legal](/concepts/privacy#retenções-legais), que mantém os turnos e o estado dele fora do expurgo até a liberação. O índice diário dos turnos guardados entra na cadeia de auditoria do escritório pelo evento `audit.root`.
+
+## O que fica desligado
+
+Tudo acima vem ligado: `state` traz o tipo e as leituras com `blocked` e as lacunas; `claims` e `turns`, o contrato e o registro; `coordination`, a trava de tarefa; `legal_holds`, a retenção. O contrato começa contando, sem bloquear: um escritório vê quantas vezes o agente afirma um prazo sem valor no turno antes de decidir bloquear qualquer coisa.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Tipos de objeto e estado" href="/concepts/object-types">
+    valores computados, lacunas declaradas, observadores e o que um valor não observado bloqueia.
+  </Card>
+  <Card title="Afirmações" href="/concepts/claims">
+    as âncoras, as naturezas e a saída imutável.
+  </Card>
+  <Card title="Só metadado" href="/guides/metadata-only">
+    o texto dos tribunais fora da Niadra.
+  </Card>
+  <Card title="Agentes internos" href="/guides/internal-agents">
+    tarefas, views de tarefa e o nível `no_customer`.
+  </Card>
+</CardGroup>

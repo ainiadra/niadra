@@ -1,0 +1,19 @@
+{
+  "name": "developer-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsx tooling/build.ts",
+    "sync": "node tooling/sync-openapi.mjs --strict && node tooling/sync-pack.mjs --strict && tsx tooling/build.ts",
+    "test": "vitest run",
+    "check": "tsx tooling/build.ts && vitest run && mint validate && mint broken-links",
+    "dev": "mint dev"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "mint": "^4.2.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.7"
+  }
+}

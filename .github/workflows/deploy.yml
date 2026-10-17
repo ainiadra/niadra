@@ -1,0 +1,63 @@
+# Checks every push and pull request. It never deploys: the machine deploys what the `release` branch
+# names (deploy/scripts/cd.sh), and a person moves `release`, after reading the change and its
+# end-to-end check. No credential leaves GitHub or AWS for that.
+name: deploy
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/**"
+      - "!deploy/**.md"
+      - ".github/workflows/deploy.yml"
+  pull_request:
+    paths:
+      - "deploy/**"
+      - "!deploy/**.md"
+      - ".github/workflows/deploy.yml"
+permissions:
+  contents: read
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    working-directory: deploy
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.0
+      - name: cfn-lint
+        run: pipx install cfn-lint
+      # helmfile renders the monitoring values and every release as the machine does (the version of
+      # aws/cluster.yaml's UserData), for the alert routes and the memory requests; amtool is the one
+      # of the Alertmanager kube-prometheus-stack 91.5.0 runs (v0.34.1). kubectl comes with the runner.
+      - name: helmfile and amtool
+        run: |
+          curl -fsSL https://github.com/helmfile/helmfile/releases/download/v1.8.0/helmfile_1.8.0_linux_amd64.tar.gz |
+            sudo tar -xz -C /usr/local/bin helmfile
+          curl -fsSL -o /tmp/alertmanager.tar.gz \
+            https://github.com/prometheus/alertmanager/releases/download/v0.34.1/alertmanager-0.34.1.linux-amd64.tar.gz
+          echo "265b9d1e55ef0d5306a436018af6d2b686c2ce051f03d968f7464ecb1372a7e8  /tmp/alertmanager.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/alertmanager.tar.gz -C /usr/local/bin --strip-components=1 alertmanager-0.34.1.linux-amd64/amtool
+          python3 -c 'import yaml' 2>/dev/null || sudo apt-get install -y -q python3-yaml
+      # promtool of the Prometheus kube-prometheus-stack 91.5.0 runs (v3.14.0), for the alert rules.
+      - name: promtool
+        run: |
+          curl -fsSL -o /tmp/prometheus.tar.gz \
+            https://github.com/prometheus/prometheus/releases/download/v3.14.0/prometheus-3.14.0.linux-amd64.tar.gz
+          echo "f665c6da19eb7ba399c915d30c7d9793c9b417bf8a749b504bc470678631478d  /tmp/prometheus.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/prometheus.tar.gz -C /usr/local/bin --strip-components=1 prometheus-3.14.0.linux-amd64/promtool
+      - name: Scripts, chart and stack
+        run: scripts/check.sh
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: server/uv.lock
+      - name: Ingress routes and database grants against the server
+        run: uv run --frozen --directory ../server --with pyyaml pytest -q ../deploy/tests

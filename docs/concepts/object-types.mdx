@@ -1,0 +1,268 @@
+---
+title: "Tipos de objeto e estado"
+description: "Tipos declarados ou derivados do seu banco, frescor por campo, quatro valores lógicos, finalidade da leitura, valores computados, temporizadores e objetos compartilhados."
+---
+
+Os agentes da sua empresa trabalham sobre o estado dela: uma venda, um processo, uma proposta, uma internação, um pedido, um item na prateleira. Um **tipo de objeto** descreve uma dessas coisas uma vez só, para que a memória e todo agente a leiam do mesmo jeito: quais campos ela tem e quão certo é cada valor, de onde cada valor vem e qual fonte vence, quão velho um valor pode ficar antes de não poder mais ser afirmado, qual é o ciclo de vida, quando os temporizadores disparam e o que quem lê pode perguntar dela.
+
+Um tipo é inferido pela Niadra do que os seus sistemas mandam, sem configuração, ou declarado pela sua empresa, ou derivado do esquema do seu próprio banco e confirmado por uma pessoa. Uma declaração sempre vale por cima do que foi inferido. Ele sempre espelha um sistema seu: a memória reflete esse sistema e aponta a deriva, e nunca é a barreira que impõe as regras da empresa. O valor oficial continua no seu sistema.
+
+Esta página cobre o registro de tipos e as leituras de estado tipado. Os [objetos de negócio](/concepts/systems#objetos-de-negócio) que nenhum sistema mandou ainda continuam como sempre: estado derivado dos eventos de sistema, com `as_of` e a linha do tempo.
+
+## Ligar e desligar
+
+O estado tipado é a funcionalidade `state` do espaço. Todas as funcionalidades vêm ligadas: um espaço que não mudou nada usa todas. O documento de configuração `features` lista o que fica ligado, e um espaço desliga alguma por um diff aprovado no Console ou pela [API de controle](/api/control/config-diffs), pelo papel `security`. Num espaço sem a funcionalidade, as rotas desta página respondem 404, como se não existissem, e uma leitura de contexto que pede o bloco `state` recebe o contexto sem ele. `GET /v1/sdk/profile` anuncia ao SDK o que está ligado.
+
+Os tipos ficam no documento `object-types`, do papel `integration`. Uma mudança de sensibilidade, acesso ou dado pessoal de um campo, da licença de uma fonte ou das finalidades de um tipo é uma decisão de privacidade: além de `integration`, ela pede a aprovação do papel `security`.
+
+## O formato de um tipo
+
+Um tipo é um documento JSON no documento `object-types` do espaço. Os membros principais:
+
+| Membro | O que diz |
+|---|---|
+| `type`, `version` | O nome, em ASCII minúsculo (até 40 caracteres), e a versão da declaração. Todo objeto guarda a versão sob a qual foi escrito |
+| `ownership` | `subject` (de um cliente: um pedido, um processo, uma proposta), `shared` (encontrado por muitos clientes: um item, um tribunal, um hospital da rede) ou `agent` (o estado de trabalho de um agente, veja [Memória de trabalho](/concepts/agent-state)) |
+| `nature` | `observed` (o padrão) ou `derived`: uma função de `inputs`, como uma cotação é função dos dados do lead |
+| `mirror_of` | O sistema seu que o tipo espelha: `system`, `derived_by` (`declaration`, `introspection` ou `observation`), a `fingerprint` do esquema que uma introspecção leu e `drift` (`alert` ou `ignore`) |
+| `key` | A chave natural nos payloads das fontes, uma expressão de `fingerprint` que identifica uma observação entre fontes, se houver, a `variant`, e, opcional, em `match` o formato de uma chave que uma conversa escreve: a [memória do objeto](/concepts/object-memory) já encontra o objeto do cliente pelo valor escrito sem ele |
+| `fields` | Os campos, por nome: tipo, lógica, observadores, papel, política de afirmação, atributo, frescor, completude, sensibilidade, acesso, dado pessoal, `track_changes` e `label`, o nome do campo em palavras, que o texto do [bloco de restrições](/concepts/signals#o-bloco-de-restrições) usa |
+| `values` | Os valores que a sua empresa computa (um prazo, um preço, uma carência) e a Niadra guarda como fatos versionados |
+| `sources` e `union` | As fontes, com precedência, autoridade, escopo, defeitos conhecidos e licença, e como elas se combinam por campo |
+| `states`, `lifecycle` | Os estados e as transições, as proibidas, as travas e o desfecho |
+| `timers` | Quando cada temporizador vence e o que ele faz |
+| `refetch` | Os motivos para ler o objeto de novo, com prioridade e orçamento |
+| `purposes` | O que uma leitura de cada finalidade faz com dado velho |
+| `readings` | Leituras nomeadas, para quando dois leitores perguntam coisas diferentes com a mesma palavra |
+| `relations`, `derived_fields` | Objetos relacionados por papel e campos calculados sobre eles |
+| `working_set` | Num tipo compartilhado, o que traz um objeto para o conjunto de trabalho e quanto tempo ele fica |
+| `retention` | Por classe de dado, quanto tempo fica |
+
+A [referência dos tipos de objeto](/concepts/object-type-reference) traz o resto do formato: como cada tipo de campo viaja, cada membro de um campo, o que o servidor recusa num tipo e a linguagem de expressões. Um exemplo curto, um item de loja compartilhado:
+
+```json
+{
+  "type": "item_variant",
+  "ownership": "shared",
+  "mirror_of": { "system": "ecommerce", "derived_by": "declaration", "drift": "alert" },
+  "key": { "natural": ["variant_id"] },
+  "working_set": { "enter_on": ["presented", "engaged", "watched"], "leave_after": "30d" },
+  "fields": {
+    "available": {
+      "type": "bool", "logic": "tri",
+      "freshness": { "class": "volatile", "max_age": "30s", "claim_max_age": "5s" },
+      "claim": { "allowed": true, "class": "quantity", "nature": "observed" },
+      "track_changes": true
+    },
+    "price_sale": {
+      "type": "money", "role": "price_sale",
+      "freshness": { "class": "price", "max_age": "60s", "claim_max_age": "15s" },
+      "claim": { "allowed": true, "class": "money", "nature": "observed" }
+    }
+  },
+  "sources": {
+    "platform_live": { "kind": "pull", "precedence": 1, "authoritative_for": ["available", "price_sale"] },
+    "search_snapshot": { "kind": "tool_observation", "precedence": 2 }
+  },
+  "purposes": {
+    "display": { "on_stale": "serve_with_age" },
+    "claim": { "on_stale": "serve_with_prohibitions", "prohibitions": ["affirm_availability", "affirm_price"] },
+    "decide": { "on_stale": "serve_with_age" }
+  }
+}
+```
+
+## Declarado ou derivado
+
+Uma empresa que guarda o estado dela em PostgreSQL já escreveu boa parte de um tipo: as colunas, os valores que um `CHECK` permite, as enumerações, as chaves estrangeiras. O comando `niadra types derive` dos SDKs lê esse catálogo dentro da sua empresa, propõe o tipo e lista o que uma pessoa precisa olhar antes de enviar (colunas que não viraram campo, `CHECK`s que não são uma lista, gatilhos, chaves estrangeiras sem relação). O catálogo, a proposta e a revisão nunca saem da sua empresa pela ferramenta; só a impressão digital do esquema, um SHA-256 sobre o catálogo normalizado, e as contagens do que mudou. Veja [Derivar tipos do seu banco](/guides/derive-types).
+
+Um tipo derivado guarda em `mirror_of.fingerprint` a impressão digital do catálogo que leu. O mesmo comando, com `--check`, lê o catálogo de novo e diz se ele **derivou**: campos acrescentados, removidos ou retipados, estados e relações que mudaram, a chave que mudou. Sem `--no-send`, ele reporta a impressão digital e as contagens a [`POST /v1/types/fingerprint`](/api/types-fingerprint): num tipo com `drift: alert`, a Niadra abre um [problema de dados](#problemas-de-dados) do tipo `drift`, ou conta mais uma ocorrência no que já está aberto, e envia o webhook `type.drift` uma vez por problema, quando ele abre; num tipo com `drift: ignore`, ela responde `drift: true` e não abre nada. A Niadra também aponta deriva sem a ferramenta, **por observação**: um campo, uma transição vista nas fontes que o tipo não declara, ou um valor fora do vocabulário, abre o mesmo problema de dados, e nunca recusa o que o seu sistema fez; um campo novo já chega aos agentes, veja [Campos que o tipo não declara](#campos-que-o-tipo-não-declara). A observação cobre todo caminho que escreve um objeto: um evento, um push, um snapshot ou o que uma ferramenta mostrou dele, nos objetos do cliente e nos compartilhados. O push de um objeto compartilhado por [`POST /v1/objects/push`](/api/objects-push) continua decidido na cópia quente do conjunto de trabalho, sem comando no banco: um campo ou um estado que o tipo não declara é notado ali, e o problema `drift` dele abre com a consolidação seguinte, cerca de um segundo depois. O mesmo achado conta uma vez por hora em cada processo do servidor enquanto o problema está aberto, e de novo na hora depois que o problema é reconhecido. A conferência da impressão digital de `niadra types derive --check` acrescenta o que o tráfego não mostra, como um campo removido; rode o comando no seu CI ou numa rotina, como em [Derivar tipos do seu banco](/guides/derive-types).
+
+## Tipos inferidos do tráfego
+
+Num espaço que não declarou nada, a Niadra lê os tipos do que os seus sistemas de registro mandam, em eventos e em [`POST /v1/objects/push`](/api/objects-push), e os serve aos agentes em até um minuto. Nada do que um agente que fala com o cliente escreve, e nenhum registro da própria Niadra (uma transferência, um compromisso), vira tipo.
+
+- **O tipo** nasce no primeiro objeto, espelhando o sistema que o mandou.
+- **Os estados** são os valores do campo `state`, na ordem em que aparecem; um estado é final quando pelo menos 5 objetos ficaram nele por 14 dias.
+- **A relação** com outro tipo nasce quando os valores de um campo bateram 3 vezes com a chave de objetos desse tipo, e nunca com um terceiro.
+- **O vencimento** é um campo de data com nome de prazo (`due`, `deadline`, `vence`, `prazo` e parecidos), com pelo menos 3 valores, a maioria depois da data do evento; ele ganha o aviso de 48 horas antes.
+- **O identificador** é um campo de texto com pelo menos 3 valores, todos específicos o bastante para nomear um objeto e nenhum retido; um cliente que o escreve na conversa nomeia o objeto.
+- **Os nomes** dos campos e dos códigos ganham palavras no idioma do espaço ("Valor da causa", "situação em andamento"), escritas pela IA da Niadra a partir do nome e dos tipos de registro em que ele aparece (o estado `held` de uma audiência vira "realizada", não "retido"), nunca de um valor; uma palavra escrita antes de os tipos serem conhecidos é pedida de novo com eles, e um rótulo declarado vale por cima.
+
+O tipo de cada campo segue a maioria dos valores, e um valor malformado não muda um tipo. Os limites por espaço são 50 tipos, 100 campos por tipo e 50 estados por tipo; o que passa deles continua guardado e servido como chegou, e cada limite atingido ou nome que não pode virar identificador aparece como nota. O que a Niadra inferiu fica registrado como mudança de configuração do autor `niadra:observed`, que o Console mostra como "Inferido pela Niadra", sem nada para aprovar. Um tipo que a sua empresa declara deixa de ser inferido: vale a declaração.
+
+## Campos que o tipo não declara
+
+Um campo que o seu sistema manda e o tipo não declara chega aos agentes do mesmo jeito que um campo declarado, sem configuração: a linha do objeto o diz pelo nome do campo nas palavras do espaço (`held_on` vira "Realizado em"), uma data no formato de datas do espaço e um sim ou não nas palavras do espaço. Declarar o campo continua possível, e é opcional: para dar um rótulo, marcá-lo como pessoal ou sensível, regular o acesso ou acompanhar mudanças. Um campo declarado sempre vale pela declaração.
+
+Até ser declarado, um campo novo fica **retido** dos agentes quando pode ser dado pessoal ou texto livre de terceiros:
+
+- **Dado pessoal.** O valor tem forma de contato ou documento de pessoa (um e-mail, um telefone, o número de um documento pessoal), seja qual for o nome do campo; ou o nome diz que guarda contato, documento, endereço ou nascimento de uma pessoa (`telefone_cliente`, `endereco`) e o valor é um texto; ou o nome diz que guarda um nome e diz de quem é, quando é de um cliente ou de um terceiro (`cliente_nome`, `nome_paciente`), ou o valor parece o nome completo de uma pessoa (`"name": "Maria da Silva"`). O nome de um produto (`"product_name": "Dipirona 500 mg"`) é servido, e o nome de um profissional da sua empresa no assunto também (`responsible_lawyer_name`, `gerente_nome`). Um número ou uma data nunca é retido só pelo nome do campo, e o número de registro de uma empresa não é dado de pessoa.
+- **Texto livre.** Um texto com mais de 200 caracteres, ou de várias linhas, é palavra de terceiros (a ordem de um juiz, o corpo de um chamado). Ele só chega a um modelo como um campo de conteúdo declarado chega, no envelope e depois da triagem, então fica retido até ser declarado em `content.fields`.
+
+O campo retido continua guardado no estado do objeto, e as leituras da sua empresa o veem como veio; uma leitura de agente o traz em `withheld`, com `access` para dado pessoal e `scan` para texto livre. Cada campo novo abre um [problema de dados](#problemas-de-dados): `drift` para o que já chega aos agentes, que é só um registro, e `field_held` para o que ficou retido, que pede a declaração.
+
+## Quatro valores lógicos
+
+Todo valor carrega um de quatro valores lógicos, e "não conferido" nunca vira "não":
+
+| Valor lógico | O que quer dizer |
+|---|---|
+| `yes` | Presente: uma fonte ou um observador o afirmou (num booleano, verdadeiro) |
+| `no` | Conhecido e negativo: falso num booleano; em qualquer outro campo, **ausente** (a fonte afirmou que não há), possivelmente com o nome da ausência, como `sem_prazo` |
+| `unobserved` | Ninguém observou, ou a observação válida acabou |
+| `known_defect` | A fonte respondeu, e o tipo declara que esse campo dessa fonte vem errado |
+
+`unobserved` e `known_defect` são **desconhecidos**. Uma comparação com um valor desconhecido é desconhecida, e a negação dela também. Um campo `logic: "tri"` declara quem pode observá-lo (`machine`, `human` ou `source:<nome>`), sob qual regra, por quanto tempo a observação vale e quem sobrepõe quem: a conferência de uma pessoa vale para sempre e vence a da máquina, quando o tipo diz isso. O mesmo campo declara o que um valor que ninguém observou **bloqueia**: `model_read`, `derive`, `claim` ou uma tarefa sua, como `decide:close`. A Niadra aplica dois desses bloqueios sozinha, `claim` e `decide`; os outros chegam em `blocked` na leitura, para o seu código agir.
+
+## Frescor e a finalidade da leitura
+
+Cada campo tem uma classe de frescor e, se quiser, uma idade máxima e uma idade máxima para afirmar. Sem `max_age`, um campo `volatile` fica velho depois de 30 segundos, `price` depois de 60 segundos, `semi` depois de 1 hora e `stable` depois de 7 dias; um campo `none` nunca envelhece. O frescor nunca é guardado: cada leitura o calcula contra a declaração em vigor, então uma declaração nova vale para todos os objetos de uma vez.
+
+Toda leitura diz a **finalidade**: `display` (o padrão), `claim` ou `decide`. Uma leitura nunca recusa um valor velho: ele vem com a idade, e o que muda é o que vem junto.
+
+| Finalidade | Com dado velho |
+|---|---|
+| `display` | Serve com a idade (`status: stale`, `age_s`) |
+| `claim` | Serve com as **proibições** do tipo: o que não pode ser afirmado com esse dado, como `affirm_price` ou `affirm_no_new_activity`. É o que o [contrato de afirmação](/concepts/claims) confere |
+| `decide` | Serve com a idade, ou com uma **recusa estruturada** (`refusal`, com `reason` e `action`, como "a cotação venceu: cote de novo"), para a ferramenta da sua empresa responder. A Niadra nunca decide por você |
+
+Um valor só é **seguro para afirmar** (`claim_safe`) quando o tipo permite afirmá-lo, o valor lógico é `yes` ou `no`, o status é `fresh` dentro de `claim_max_age`, ele veio de uma observação `live` ou do próprio sistema de registro (nunca de um snapshot ou de um cache), não está mascarado, o conteúdo dele está limpo, o objeto derivado não venceu por insumo e nenhum campo desconhecido bloqueia `claim`. As proibições chegam em toda leitura em que um valor afirmável servido não é seguro, e `claim_safe` diz qual.
+
+## O que uma leitura devolve
+
+[`POST /v1/state/read`](/api/state-read) recebe as referências dos objetos (`type`, `namespace`, `id`, e a `variant` quando a chave tem uma), os campos e as leituras nomeadas que quer, e a finalidade. Cada objeto volta com `state`, `latches`, `outcome`, `axes`, `fields`, `values`, `timers`, `readings`, `prohibitions`, `declared_gaps`, `withheld`, `refetch`, `refusal` e `blocked` (e, numa leitura de contexto, `memory`: o que os participantes disseram sobre ele, veja [Memória do objeto](/concepts/object-memory)); cada campo, com `v`, `logic`, `status`, `age_s`, `observed_at`, `src`, `observer`, `valid_at`, `known_at`, `claim_safe`, e `was` quando o tipo acompanha mudanças. O esquema da resposta está [na página da rota](/api/state-read). Uma leitura com o estado aquecido não consulta o banco.
+
+`known_at` é quando a Niadra soube do valor pela primeira vez e nunca se move, mesmo quando uma revisão muda o valor: o que é novo continua novo. `valid_at` é quando o valor passou a valer no mundo, no eixo de tempo que o tipo declara para ele. Um valor atrasado só move um campo quando o `valid_at` dele é mais novo que o do campo, e entra na história do objeto mesmo assim.
+
+Nos SDKs, o caminho mais curto é o bloco `state` do contexto, lido na mesma ida e volta que o pacote:
+
+<CodeGroup>
+```python Python
+context = conversation.context(include=["state"])
+for obj in (context.state.objects if context.state else []):
+    price = obj.fields.get("price_sale")
+    if price and not price.claim_safe:
+        print(obj.prohibitions)  # what the agent may not affirm with this data
+```
+```typescript TypeScript
+const ctx = await convo.context({ include: ["state"] });
+for (const obj of ctx.state?.objects ?? []) {
+  const price = obj.fields.price_sale;
+  if (price && !price.claim_safe) console.log(obj.prohibitions); // what the agent may not affirm with this data
+}
+```
+</CodeGroup>
+
+O bloco `state` do contexto usa a finalidade `display`: os objetos do cliente nos tipos declarados, os objetos compartilhados em que ele mostrou interesse, o que mudou desde que ele os viu (`changes_since_seen`, contra os valores que a interface mostrou) e `text`, a view em linhas curtas para o bloco do turno (uma linha nomeia a que o objeto dela pertence pelas relações de um para um do tipo, então uma audiência diz o processo: `- hearing cases:h-1 (de legal_case cases:case-9): ...`; a linha do próprio objeto diz, depois do estado e do desfecho, as datas de que os timers contam, depois os campos que o tipo acompanha com `track_changes`, pelo `label`, e só então o próximo timer, como lembrete: `- deadline cases:d-1: situação aberto; due_on 13/10/2026; lembrete notice_48h 11/10/2026 00:00`), depois de `slots` e nunca dentro do corpo fixado do contexto, então o prefixo em cache mantém os bytes. Veja [O contexto e as views](/concepts/context#blocos-por-include). [`POST /v1/state/view`](/api/state-view) devolve a mesma view sozinha, para a finalidade que você pedir.
+
+O bloco `state` passa pelo mesmo **portão de verificação** do contexto que o acompanha: um objeto do cliente só entra onde a linha de sistema dele entraria, pela mesma política, e os interesses e o que mudou desde que ele os viu só entram quando o contexto não reteve nada até a identidade ser mais verificada, porque um bloco não sabe dizer de que conversa uma linha veio. Numa conversa em V0, ou numa que ainda não provou o nível que a política pede, o bloco volta sem nada do cliente. [`POST /v1/state/view`](/api/state-view) e [`POST /v1/state/read`](/api/state-read) são leituras de programa, com comprovante próprio e sem contexto ao lado, e não passam por esse portão. Veja [Blocos por `include`](/concepts/context#blocos-por-include).
+
+`degraded: true` diz que o estado veio de uma alternativa (o banco quando a cópia quente não respondeu, a cópia local do SDK quando a Niadra está fora), com as idades reais. Uma falha nunca vira `unobserved`.
+
+O mesmo código, com o worker e a conferência de uma afirmação, está em [`examples/object_state.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/object_state.py) e [`examples/object-state.ts`](https://github.com/ainiadra/niadra-sdk-ts/blob/main/examples/object-state.ts).
+
+## Valores computados e objetos derivados
+
+Um prazo, um preço ou uma carência é computado pela regra da sua empresa, nomeada por referência (`prazo_forense@v9`): a Niadra guarda o nome da regra, nunca a lógica dela. O valor entra como um **fato com versões**: uma versão nova nasce quando o valor, a regra ou o hash dos insumos muda, nomeia a versão que substitui e sai como o evento `object.value_revised`, com a referência do objeto, o nome do valor e as versões, nunca o valor. Cada valor declara as lacunas da regra (`declared_gaps`, como um feriado municipal ou uma portaria de tribunal), que um agente precisa dizer quando o afirma, e para que lado elas erram (`gap_effect`). Uma ausência tem nome (`absent_as`, como `sem_prazo`): nunca zero, nunca nulo.
+
+Um tipo `derived` nomeia os insumos dele, campos de outros objetos ou parâmetros do turno (`lead.city`, `turn.product_type`). Quando um campo que é insumo de um objeto derivado muda, todo objeto que depende dele passa a `expired_by_input` num passo só, `expired_by` nomeia os insumos e o evento `object.expired_by_input` avisa. Um objeto vencido nunca tem valor seguro para afirmar, e uma leitura `decide` dele leva a recusa. Uma cotação vence no instante em que um dado dela muda, não quando o prazo passa. Uma nova leitura do objeto derivado depois do vencimento o traz de volta a `current`, preso aos insumos que nomeia.
+
+## Ciclo de vida e temporizadores
+
+O estado é o `state` mais novo reportado no mundo, traduzido pelo vocabulário da fonte (`lifecycle.outcome.vocabularies`). Num tipo que declara os estados, um estado fora da lista não é servido; num tipo inferido do tráfego, todo estado que o sistema manda é servido e entra na inferência. As **travas** (`latches`) guardam a primeira vez que o objeto chegou a um estado, mesmo quando ele sai dele: "já foi pago" e "está pago agora" são duas leituras do mesmo objeto. O **desfecho** é o estado quando ele é final, `expired_without_outcome` quando o prazo do tipo passou sem estado final, ou o estado provisório; é o que a [medição de desfechos](/concepts/outcomes) lê. Uma transição com `erase_derived` lacra o objeto: os campos nomeados saem quando ele entra no estado, e toda leitura leva `blocked` para `model_read` e `derive`.
+
+A Niadra não impõe o ciclo de vida: a declaração de um agente de uma transição que ele não pode fazer fica registrada como recusada, e uma transição de uma fonte fora da declaração é deriva, apontada e nunca recusada.
+
+Um **temporizador** é armado no momento que a expressão `due` dele dá, a partir da regra e dos valores do momento, e se move quando esse momento se move; o vencimento é recalculado em toda leitura. Ele dispara uma vez por disparo, com até 5 minutos de atraso (antes quando vence dentro da hora), e um disparo atrasado diz quanto. Um temporizador que notifica manda o webhook `object.timer_due`, com o objeto, o temporizador, o id do disparo, o que ele substitui, quando venceu e quando disparou. Quando um valor que armou um temporizador já disparado é revisado para outro vencimento, o temporizador dispara de novo, e o disparo novo nomeia o que substitui: um aviso por fato e por versão. Um temporizador também pode pedir a releitura de um campo (`refresh(<campo>)`) ou fazer uma transição que o relógio pode fazer.
+
+## Objetos compartilhados
+
+Um tipo `shared` (um item, um hospital da rede, uma vara) existe na Niadra só enquanto algo o referencia. Um objeto entra no **conjunto de trabalho** quando um turno o apresenta, o cliente interage com ele, o observa ou se compromete com ele, conforme `working_set.enter_on`, e sai depois de `leave_after` sem referência, a menos que um **watch** o segure. Um watch é o pedido explícito de um cliente para ser avisado quando um objeto compartilhado atende a uma condição (uma interação `watch`, com o evento de consentimento dela e uma expressão sobre os campos, como `available == yes`); quando uma escrita move o objeto e a condição vale sobre um valor que veio ao vivo da fonte, sai `object.watch_fired`, com o objeto, o watch e `revalidated`, nunca um valor, no máximo uma vez por hora por watch. Um interesse inferido nunca gera aviso.
+
+Quando a condição vale sobre um valor que **não** veio ao vivo da fonte (um snapshot, um cache, a observação de uma ferramenta), a Niadra não avisa ainda: ela pede ao seu [worker de resolução](/guides/resolver-worker#revalidação-de-watch) uma releitura do objeto, com o motivo `watch_revalidation`, e o push do worker com o `request_id` do pedido decide, mesmo quando os valores não são mais novos que os guardados: `object.watch_fired` sai com `revalidated: true` só quando a condição continua valendo sobre os valores ao vivo. Sem valor fresco (nenhum worker tomou pedidos nos últimos dez minutos, o orçamento recusou, o worker liberou o pedido ou ele foi abandonado), `refetch.unconfirmed_watch` do tipo decide: `fire`, o padrão, avisa com `revalidated: false`; `drop` não avisa. Um tipo sem `refetch`, ou que lista `watch_revalidation` em `never`, não pede nada, e `fire` vale na hora.
+
+O sistema de registro envia o estado por [`POST /v1/objects/push`](/api/objects-push): até 1.000 itens, cada um com a referência, a **versão** da fonte, os campos e a proveniência (`live`, `snapshot` ou `cache`, com `source_observed_at`). Cada campo guarda, por fonte, a última observação; um campo só avança quando a versão do item é maior que a que o escreveu por último, então um pedido repetido é `stale_version`, e uma fonte nunca reusa uma versão para outro conteúdo. Um item de objeto compartilhado é decidido contra a cópia quente do conjunto de trabalho, sem comando no banco (`applied`), e gravado em até um segundo com a mesma regra; um objeto fora do conjunto é `out_of_set`, e um push nunca o traz para dentro. Quando a cópia quente não responde, o push responde 503 com `Retry-After`: nada foi guardado, e repetir é inofensivo pela regra da versão. Um item de objeto de cliente é `recorded`: aceito como evento de sistema num comando só. [`POST /v1/objects/snapshot`](/api/objects-snapshot) reconcilia um tipo compartilhado inteiro, em NDJSON, com a proveniência `snapshot`, que pode ser mostrada e nunca afirmada. A leitura serve o valor que a `union` do tipo escolhe (`first_authoritative_live`, `first_by_precedence`, `union`, `min`, `max`, `latest` ou `divergence`, que avisa quando duas implementações de uma regra discordam).
+
+O que o resultado de uma ferramenta mostrou também é estado, quando o [registro do turno](/concepts/turn-records) traz a proveniência: a ferramenta é a fonte, e a hora em que a fonte dela observou o valor é a versão. Uma observação sem proveniência é só para exibição; uma de escopo `customer` ou `context` nunca alimenta um objeto compartilhado; um acerto de cache dentro da ferramenta não é observação nova; um objeto que faltou num resultado não é um estado, porque a ausência não prova nada.
+
+### Valores, temporizadores e derivados num objeto compartilhado
+
+Um tipo compartilhado pode declarar `values`, `timers` e um ciclo de vida, como um tipo do cliente: a promoção de um plano que termina numa data que a regra da operadora calcula, o lançamento de um item que vira `active` sozinho. Depois do segundo em que grava o que os pushes moveram, a Niadra planeja, em até cinco segundos, os objetos desses tipos que mudaram, pela mesma regra do objeto do cliente:
+
+- um valor ganha versão nova quando o valor ou a regra muda, com `object.value_revised`; o mesmo valor empurrado de novo com versão maior não é revisão;
+- os temporizadores são armados pela regra e disparam com `object.timer_due`; um já disparado dispara de novo, nomeando o disparo que substitui, quando o valor que o armou é revisado para outro vencimento, e `transition(<de>-><para>)` entra como observação da fonte `clock`, pela regra da versão;
+- a leitura de um objeto compartilhado traz as versões dos valores, as travas e os temporizadores, da mesma cópia quente dos campos, sem comando no banco;
+- um objeto que sai do conjunto de trabalho leva junto os temporizadores armados.
+
+Um objeto derivado do cliente pode ter como insumo um campo de um objeto compartilhado: a cotação de um lead que usa a tabela de preço de um plano. O push da cotação nomeia o plano em `inputs` (`{"plan": "health_plan:operator:p-12"}`), e o plano entra no conjunto de trabalho como `related` quando o tipo dele aceita esse motivo; sem isso, os pushes do plano ficam fora do conjunto e a cotação nunca vence por ele. Quando a tabela do plano muda de valor (não só de versão), toda cotação ligada a ela vence num comando só, com `expired_by: ["plan.price_table"]` e `object.expired_by_input`, alguns segundos depois do push. Um valor que a Niadra nunca tinha visto para esse campo conta como mudança: a cotação pode ter sido calculada com outro, e vencer cedo é o lado seguro.
+
+Um tipo compartilhado também pode ser `derived`: a melhor oferta de um produto, função da tabela de preço de um plano. O push dele nomeia os insumos em `inputs`, como a cotação do cliente, mas só objetos compartilhados valem como insumo (um objeto de cliente nunca é insumo de um compartilhado). Ele guarda o `derived_status` como o derivado do cliente: vence com `expired_by_input` e `object.expired_by_input` quando um insumo muda de valor, e volta a `current` com um push observado depois da mudança.
+
+### Campos derivados de um objeto composto
+
+Um objeto composto (o look, um kit) declara `relations` com o caminho (`via`) até os ids das peças e `derived_fields` sobre elas: `all` e `any` dizem se uma condição (`where`, nos termos do tipo da peça) vale para todas ou para alguma, `count` conta as peças para as quais ela vale, e `min` e `max` comparam o `field` que nomeiam. Por exemplo, `{"all_pieces_available": {"agg": "all", "over": "pieces", "where": "available == yes"}}`.
+
+Um composto que não nomeia as peças declara uma **relação reversa**: `match` nomeia o campo dos objetos relacionados que guarda o valor de `via`. Um processo acha as intimações pelo número dele, `{"notices": {"type": "notice", "via": "case_number", "match": "case_number", "many": true}}`, e `{"open_deadlines": {"agg": "count", "over": "notices", "where": "state == 'open'"}}` conta as abertas. O tipo relacionado é um tipo do cliente que declara esse campo; cada escrita de um objeto dele guarda um resumo com chave do valor do campo (nunca o valor), e a leitura acha os objetos relacionados por ele: um comando no banco da primeira vez, nenhum com a cópia quente, no máximo 50. Um objeto relacionado que não guarda mais o valor, ou que sumiu, sai da relação na leitura seguinte. Um composto sem valor em `via` não sabe quais são os relacionados, então os campos derivados sobre eles ficam de fora da leitura.
+
+- São calculados em toda leitura, das cópias quentes das peças, sem comando no banco, e nunca gravados: a peça que muda muda a próxima leitura.
+- Cada um sai em `derived` com `v`, `logic` (`yes`, `no` ou `unobserved`), `over` (as peças contadas), `unknown` (as que não se sabe) e, quando não é `yes`, `pieces_out`: as 10 primeiras peças que o impediram de ser `yes`, como `type:namespace:id` (em `all` e `any`, as peças para as quais a condição não vale ou que não se sabe; em `count`, `min` e `max`, as que não se sabe). Uma relação lê até 50 objetos relacionados por leitura; quando cita mais, os primeiros são lidos, o resto conta como não sabido, e o campo sai com `partial: true`: `over` e `unknown` são no mínimo o que dizem, e uma resposta que os lidos já decidem (`any` com um que vale, `all` com um que falha) é dada assim mesmo.
+- Uma peça fora do conjunto de trabalho, uma substituta (`status_field` diferente de `exact`) ou uma cujo dado a condição lê não foi observado não é conhecida, e deixa o resultado `unobserved`, a não ser que as conhecidas já decidam: um `no` decide `all`, um `yes` decide `any`. Uma peça que o `required_field` marca como opcional fica de fora.
+- O look traz as peças para o conjunto de trabalho como `related`, quando entra e quando as peças mudam, se o tipo delas aceita esse motivo.
+- Um campo derivado que lê um campo da peça que o leitor não pode ler sai em `withheld` com `access`; campos derivados nunca são evidência de afirmação.
+- As linhas do bloco de estado só os dizem quando o documento `object-types` do espaço liga `derived_fields_in_text` (desligado por padrão), e nomeiam as peças de fora: `- look loja:l-1: all_pieces_available não (fora: item_variant loja:v-2); pieces_count 3`. A leitura em JSON os traz sempre.
+
+### Releitura pelo seu worker
+
+A Niadra nunca chama um sistema seu. Quando um valor precisa ser lido de novo (uma afirmação espera por ele, um temporizador venceu, alguém observa o objeto), ela avalia os `refetch.reasons` do tipo, admite o pedido dentro do orçamento (um por objeto e motivo no período, o `min_interval` do tipo, o orçamento pago da unidade da empresa, reservado antes) e o deixa em [`GET /v1/state/refresh-requests`](/api/state-refresh-requests). O seu **worker de resolução** toma os pedidos, lê cada objeto com a função sua daquele tipo e envia o que leu por `POST /v1/objects/push`, o que encerra o pedido. O orçamento é na unidade da sua empresa (uma chamada paga), nunca em dinheiro. Veja [O worker de resolução](/guides/resolver-worker).
+
+## Conteúdo de terceiros
+
+Um campo de conteúdo (`content.fields`) guarda o texto de um terceiro: o despacho de um tribunal, um documento, um campo livre de um sistema. Nenhum conteúdo é instrução. Regras determinísticas triam o texto na chegada: um texto que fala com um modelo (pede que ele ignore o que lhe disseram, fala como o sistema ou o assistente, escreve os marcadores do envelope) fica `flagged`; o que passa fica `clean`, a menos que o tipo peça `scan: required`, e então fica `pending` até a IA da Niadra liberá-lo ou marcá-lo, num lote a cada 30 segundos. Conteúdo guardado só por ponteiro ou digest fica `pending` quando a triagem é exigida, porque a Niadra não consegue lê-lo.
+
+Conteúdo marcado nunca chega a uma leitura, nem o pendente sob triagem exigida: o campo sai e `withheld` o nomeia com `scan`, e um campo cujo conteúdo não está limpo nunca é seguro para afirmar. Onde um conteúdo limpo entra num texto que um modelo lê, ele vai dentro de um envelope `<niadra-data n="...">` com um nonce de 16 caracteres hexadecimais, derivado por HMAC com uma chave do espaço, e escapado, então ninguém de fora do espaço prevê o marcador de fechamento. O evento `content.flagged` nomeia o objeto, o campo e a referência, nunca o texto, e uma pessoa do papel `security` libera um conteúdo por [`POST /v1/content/{ref}/release`](/api/content-release), com motivo e comprovante.
+
+Num espaço que guarda conteúdo por ponteiro (`content.mode: pointer`), o texto fica no seu armazenamento, e o SDK o recompõe dentro da sua empresa com o resolvedor de conteúdo (`niadra.content` em Python, `ContentResolver` em TypeScript). Veja [Só metadado](/guides/metadata-only).
+
+## Acesso por campo
+
+Cada campo pode declarar `sensitivity` (as categorias sensíveis fixadas pelo produto, as mesmas da [política](/concepts/privacy#acesso-negado-por-padrão-liberado-por-finalidade)), `pii` e regras de `access`: quem lê (fontes, agentes ou `public`), para quais finalidades e com que efeito (`allow`, `mask`, `deny`). Um campo mascarado para quem lê vem com `masked: true` e sem `v`; um negado fica em `withheld` com o motivo `access`.
+
+Um campo declarado `pii`, com `sensitivity` ou com regras de `access` é **privado**: ele nunca entra nas linhas de sistema do contexto, nas linhas de evento de sistema do histórico, no vetor pelo qual um objeto é buscado nem no `text` do bloco `state`. Um agente que precisa dele o lê por [`POST /v1/state/read`](/api/state-read), com a finalidade da leitura, sob o acesso por campo.
+
+Numa ferramenta sua, `mask_output` (`@Niadra.tool(mask_output=True)` em Python, `niadra.tool(name, fn, { maskOutput: true })` em TypeScript) tira do que chega ao modelo os campos que a chave não pode ler: `deny` remove, `mask` mascara, pelo `field_access` do perfil do SDK. O último perfil lido continua valendo com a Niadra fora do alcance, e `on_unknown="block"` (`onUnknown: "block"`) retém a saída inteira quando nenhum perfil foi lido. Sem `mask_output` no código, vale `capabilities.mask_output` da [vinculação da ferramenta](/concepts/signals#vinculações-de-ferramenta) servida no perfil. O exemplo está em [`examples/masked_tool.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/masked_tool.py) e [`examples/masked-tool.ts`](https://github.com/ainiadra/niadra-sdk-ts/blob/main/examples/masked-tool.ts).
+
+Uma fonte pode declarar `licence`: uso comercial permitido ou proibido e as finalidades de que um valor dela fica excluído. O registro lista em `commercial_purposes` as finalidades que contam como uso comercial, e um valor excluído fica em `withheld` com `licence`. Uma mudança de licença ou de `commercial_purposes` é uma decisão de privacidade, e pede também o papel `security`.
+
+## Cobertura
+
+[`GET /v1/objects/coverage`](/api/objects-coverage) diz, por tipo declarado, a fração dos objetos que traz cada campo e a idade mediana da observação mais nova dele, medida sobre os objetos do tipo que mudaram por último e só pelos carimbos, nunca um valor. É o que a tela Tipos do Console mostra, com os tipos declarados e derivados, a deriva e a cobertura; pede o papel `integration`.
+
+## Problemas de dados
+
+Quando um replay atribui uma falha ao dado, quando duas fontes de um valor discordam, quando um tipo derivou ou quando uma ferramenta mostra objetos de um tipo que o espaço nunca declarou, a Niadra abre um **problema de dados** para o dono do dado: um por classe, tipo, campo e fonte, contado cada vez que é achado de novo, com até 50 referências de objeto e nenhum valor. Os tipos são `null_field`, `out_of_vocabulary`, `stale_source` e `invalid_value` (um valor que a ferramenta de um agente mostrou), `coverage_drop` (um campo preenchido menos do que antes), `divergence` (duas fontes de um valor discordam), `drift` (o esquema que um tipo espelha mudou, pela conferência da ferramenta ou por observação; um campo novo já chega aos agentes, então é só um registro), `field_held` (um campo novo que pode ser dado pessoal ou texto livre ficou retido dos agentes até o tipo declará-lo, veja [Campos que o tipo não declara](#campos-que-o-tipo-não-declara)), `rule_conflict` (duas regras decidem uma coisa de jeitos diferentes), `type_undeclared` (a ferramenta de um agente de atendimento mostrou objetos de um tipo que o espaço nunca declarou nem a Niadra inferiu; o que a ferramenta de um agente interno mostra entra na inferência como um evento de sistema), `budget_reached` (o espaço gastou o teto de IA do dia de uma finalidade, nomeada em `source`, e a memória das conversas espera o dia seguinte UTC; contado uma vez por dia enquanto durar) `row_failed` (um lote de dados da empresa falhou em todas as tentativas de entrar e ficou guardado de lado, veja abaixo; `source` diz de onde ele veio) e `inference_limit` (o que os sistemas do espaço mandam passou de um limite do que a Niadra infere sozinha, em tipos, campos ou estados de um tipo, ou operações, ou um nome não era seguro para usar; o que passou continua guardado e servido como chegou, e `field` diz qual limite). [`GET /v1/data-issues`](/api/data-issues) lista do mais novo para o mais antigo, com `occurrences`, `opened_at`, `last_seen_at`, o tipo, o campo e a fonte; [`POST /v1/data-issues/{issue_id}/ack`](/api/data-issue-ack) reconhece, e a próxima ocorrência abre um problema novo. Os webhooks `data_issue.opened` e, na deriva conferida pela ferramenta, `type.drift` avisam quando um abre, e o [feed de avisos](/concepts/triggers-and-webhooks#o-feed-de-avisos) traz os mesmos eventos para quem puxa. Os problemas de dados pedem o papel `integration` e a funcionalidade `turns` ou `state`.
+
+**Lotes guardados.** Um lote de eventos ou de registros de turno que falha em todas as tentativas de entrar nunca é apagado e não segura os que chegaram depois: sai da fila, fica guardado como chegou, cifrado com a chave do espaço, e abre o problema `row_failed`. [`GET /v1/intake/failed`](/api/intake-failed) lista os lotes guardados, do mais antigo para o mais novo, com o tipo (`events` ou `turns`), a fonte, quando chegou, quando foi guardado e quantas tentativas teve, nunca o conteúdo; a lista mostra até 500 de cada tipo, e `kept` conta todos. [`POST /v1/intake/failed/retry`](/api/intake-failed-retry) devolve à fila os lotes nomeados em `intake_ids`, ou todos quando nenhum é nomeado, com as tentativas zeradas; um lote que falhar de novo volta a ser guardado. A tela Sistemas do Console mostra os mesmos lotes, com **Tentar de novo**. As duas rotas pedem o papel `integration` (ou uma chave `admin`) e respondem em todo espaço, com qualquer funcionalidade. O apagamento de um titular alcança os lotes guardados (os eventos e turnos dele saem, os dos outros ficam), e a retenção dos eventos do espaço vale para eles como para os eventos.
+
+## O que fica no registro
+
+A declaração de um tipo vale para o que já foi gravado: a qual fonte declarada uma observação pertence é decidido na leitura, então uma declaração que nomeia uma fonte depois se aplica ao que foi guardado antes dela. Um objeto de um tipo que o registro não declara continua legível pelas [rotas de objeto](/api/object), com a `union` `latest`.
+
+Toda leitura de estado deixa um [comprovante](/concepts/receipts), com a versão e as contagens, nunca um valor. Apagar um cliente apaga os objetos dele, as observações e as inferências; um objeto compartilhado é de ninguém e fica enquanto estiver no conjunto de trabalho.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Derivar tipos do seu banco" href="/guides/derive-types">
+    `niadra types derive`, a revisão e a conferência de deriva.
+  </Card>
+  <Card title="O worker de resolução" href="/guides/resolver-worker">
+    as releituras que a Niadra pede e o seu código faz.
+  </Card>
+  <Card title="Afirmações" href="/concepts/claims">
+    o contrato que confere o que o agente diz contra o estado.
+  </Card>
+  <Card title="Ler objetos tipados" href="/api/state-read">
+    a referência de `POST /v1/state/read`.
+  </Card>
+</CardGroup>

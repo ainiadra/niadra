@@ -1,0 +1,55 @@
+{
+  "ref": {
+    "type": "cotacao_plano_saude",
+    "id": "q-77"
+  },
+  "type_version": "1",
+  "as_of": "2026-09-29T11:40:00Z",
+  "derived_status": "expired_by_input",
+  "expired_by": [
+    "lead.ages"
+  ],
+  "fields": {
+    "price_full": {
+      "v": 511.06,
+      "logic": "yes",
+      "status": "expired",
+      "age_s": 1200,
+      "observed_at": "2026-09-29T11:40:00Z",
+      "src": "quote_api",
+      "role": "price_full",
+      "claim_safe": false
+    },
+    "price_discounted": {
+      "v": 459.95,
+      "logic": "yes",
+      "status": "expired",
+      "age_s": 1200,
+      "observed_at": "2026-09-29T11:40:00Z",
+      "src": "quote_api",
+      "role": "price_discounted",
+      "claim_safe": false
+    },
+    "enrollment_fee": {
+      "logic": "known_defect",
+      "status": "fresh",
+      "age_s": 1200,
+      "observed_at": "2026-09-29T11:40:00Z",
+      "src": "quote_api",
+      "role": "enrollment_fee",
+      "claim_safe": false
+    }
+  },
+  "prohibitions": [
+    "affirm_price"
+  ],
+  "refetch": {
+    "reason": "input_changed",
+    "priority": "high",
+    "admitted": true
+  },
+  "refusal": {
+    "reason": "stale_quote",
+    "action": "requote"
+  }
+}

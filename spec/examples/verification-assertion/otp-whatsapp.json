@@ -1,0 +1,10 @@
+{
+  "type": "verify",
+  "idempotency_key": "otp/wa-8812/1",
+  "method": "otp_whatsapp",
+  "level": "V3",
+  "conversation_id": "wa-8812",
+  "handle": {"type": "phone_e164", "value": "+5511987654321"},
+  "valid_until": "2026-09-22T15:02:00-03:00",
+  "occurred_at": "2026-09-22T14:03:20-03:00"
+}

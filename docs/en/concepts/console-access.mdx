@@ -1,0 +1,129 @@
+---
+title: "Console people, roles and SSO"
+description: "Who enters the Console, with what role and how: invitation, second factor, SSO over OIDC or SAML 2.0, and what happens when someone leaves."
+---
+
+The Console is where your company's team governs the memory: sources and keys, identity, receipts, privacy, rules and measurement. Every person signs in with a 15-minute token issued by the control plane, which names one space and the roles they hold there. This page covers who enters, with what role and by which path: e-mail and password with a second factor, or the company's single sign-on (SSO), over OIDC or SAML 2.0.
+
+## Roles
+
+Roles combine, and each one holds on the whole tenant or on one space.
+
+| Role | What it reaches |
+|---|---|
+| `admin` | Sources, keys, people, roles and SSO; passes every role check |
+| `security` | Receipts, policy and simulation, access cuts, erasure and export |
+| `integration` | Mappings, task views, pattern and trigger rules, webhooks and the configuration assistant |
+| `review` | The sampled review queue, masked by the purpose of each session |
+| `analysis` | Measurement, patterns and usage, aggregated or by pseudonym |
+| `vendor` | Only the vendor's own sources and their measurement; the role binding names the sources |
+
+The tenant always keeps at least one person with `admin` on the whole tenant: a role change or a deactivation that would leave the tenant without one answers 409.
+
+## How a person arrives
+
+**By invitation.** In **Pessoas e papéis** (people and roles), an admin enters the e-mail and the roles ([`POST /v1/users`](/en/api/control/users-create), without a password). The answer carries a single-use link, valid for seven days and shown once; Niadra keeps only a keyed hash of it. The person opens the link, chooses a password (12 characters or more) and, at the first sign-in, sets up the authenticator app from the QR code and keeps ten recovery codes, shown once.
+
+**Through SSO.** When the e-mail domain belongs to the company's SSO, there is no invitation: at the first sign-in through the identity provider, the person is created on the spot, without a password, with the roles of their groups.
+
+**Forgotten password.** The admin issues a [new link](/en/api/control/user-invitation); earlier links stop working, and the current password keeps working until the new link is used.
+
+## Second factor
+
+With a password, the second factor is required by default: the six-digit code of an authenticator app (TOTP). Each code works once: Niadra keeps the 30-second step of the last code it accepted for each person and refuses the same code, or an older one, even within its own minute. A person who loses the phone signs in with one of the ten recovery codes, each working once. In **Sua conta** (your account), the person generates new codes and changes the app after confirming the password again; someone who lost both the app and the codes asks an admin to [reset the second factor](/en/api/control/second-factor-reset), with the reason recorded.
+
+## Deactivate and reactivate
+
+A [deactivated](/en/api/control/user-deactivate) person can no longer sign in, and the control plane refuses their session at the next call. Cells verify tokens without calling the control plane, so a token already issued keeps working on the data API until it expires, 15 minutes at most. Open invitations stop working. Nobody deactivates themselves or the tenant's last admin. [Reactivation](/en/api/control/user-reactivate) brings back the same roles, password and second factor.
+
+Every change to a person's access is kept in [their history](/en/api/control/user-history), with who did it and why: invitations, roles, deactivation, second factor resets and what SSO did at a sign-in.
+
+## Single sign-on (SSO)
+
+Each tenant has one connection, over OpenID Connect or SAML 2.0, that answers for a list of e-mail domains. Whoever types an e-mail of those domains at the Console sign-in sees **Entrar com SSO** (sign in with SSO).
+
+### What Niadra checks
+
+| Protocol | How |
+|---|---|
+| OIDC | Authorization code flow with PKCE (S256), and a fresh `state` and `nonce` at every sign-in. The ID token must be signed by a key the provider publishes, with an asymmetric algorithm, and match the issuer, the audience (`aud` and `azp`), the validity and the `nonce`. The `email` claim is required; `email_verified` false is refused. |
+| SAML 2.0 | Sign-in started by Niadra, with the AuthnRequest in the HTTP-Redirect binding and the response in the HTTP-POST binding. The assertion must be signed by the certificate you configured, answer the request Niadra sent (its `InResponseTo` sits inside the signed part), and match the issuer, audience, recipient and validity window. Niadra reads only the signed copy of the assertion. Encrypted assertions and provider-initiated sign-ins are not accepted. |
+
+Either way, the e-mail must be in one of the connection's domains, and an e-mail that belongs to another tenant is refused.
+
+### Set up
+
+1. In the Console, with the admin role, open **Login único (SSO)** and choose the protocol.
+2. Paste into the identity provider what the screen shows:
+   - OIDC: the redirect URI, `https://control.api.niadra.com/v1/auth/sso/oidc/callback`;
+   - SAML: the entity id, `urn:niadra:sso:<tenant_id>`, the assertion consumer service URL, `https://control.api.niadra.com/v1/auth/sso/saml/<tenant_id>/acs`, or the [metadata](/en/api/control/sso-saml-metadata) in one go.
+3. Bring from the provider into the Console:
+   - OIDC: the issuer, the client id and the client secret. The secret is kept encrypted with AES-256-GCM in the control plane and never comes back in an answer;
+   - SAML: the provider's entity id, its sign-in URL and the signing certificate.
+4. Enter the e-mail domains, where the groups come from (the `groups` claim or attribute, for example) and which groups give which roles.
+5. Save it off, use **Testar o login** (test the sign-in) and, with the right result, turn it on.
+
+Through the API, it is [`PUT /v1/sso`](/en/api/control/sso-save).
+
+### Roles from groups
+
+Each mapped group gives its role on the whole tenant, compared without case. A person in no mapped group gets the default role; without a default role, the sign-in is refused. Roles are computed again at every SSO sign-in: the identity provider is where access is managed, and a change made in the Console lasts until the next SSO sign-in. Groups never take `admin` away from the last person who holds it. The `vendor` role never comes from a group: it names sources, and arrives by invitation.
+
+### The sign-in, step by step
+
+1. The Console asks for the e-mail, and [`POST /v1/auth/sso/discover`](/en/api/control/sso-discover) answers by domain, without saying whether the person exists.
+2. On **Entrar com SSO**, the Console draws a random value, sends only its SHA-256 to [`POST /v1/auth/sso/start`](/en/api/control/sso-start) and keeps the value in this browser tab. The browser goes to the provider.
+3. The provider answers the control plane, which checks the answer and sends the browser back to the Console with a sign-in code in the fragment of the address, the part after `#`, which never reaches a server. The code lasts ten minutes and works once.
+4. The Console exchanges the code, with the kept value, for the token at [`POST /v1/auth/sso/exchange`](/en/api/control/sso-exchange), and deletes the value. A code without the kept value opens nothing.
+
+A refused sign-in comes back to the Console with the reason: the provider refused, time ran out, an invalid answer, a domain outside the connection, no role, an e-mail of another company, a deactivated person, the provider down or SSO turned off.
+
+### How MFA works with SSO
+
+People who sign in through SSO go through the MFA of the company's identity provider, under the rules the company already set there. Niadra checks the provider's signed answer, but cannot see which factor the person used. If your policy asks for more, turn on **Pedir também o código da Niadra** (also ask for the Niadra code): after the provider, the Console asks for the authenticator app code, with recovery codes, and the person sets up the app at the first sign-in ([`POST /v1/auth/sso/second-factor`](/en/api/control/sso-second-factor)). A person SSO created has no password at Niadra: in **Sua conta**, the app code takes the password's place.
+
+Sign-in with e-mail and password keeps Niadra's required second factor.
+
+### SSO only
+
+With **Só pelo SSO** (SSO only) on, people of the connection's domains cannot sign in with a password (401 "single sign-on required"). People with `admin` on the whole tenant keep the password and the second factor, as the way in when the provider fails.
+
+### Test
+
+[`POST /v1/sso/test`](/en/api/control/sso-test) returns the address of a test sign-in, to open in another tab. When the provider answers, [`GET /v1/sso/tests/{test_id}`](/en/api/control/sso-test-result) shows the e-mail, the groups and the roles the sign-in would give, and whether the person exists. Nobody is created and no role changes, and the test works while the connection is still off.
+
+### Limits
+
+| Item | Limit |
+|---|---|
+| Connections per tenant | 1, OIDC or SAML |
+| Domains per connection | 20; each domain belongs to one tenant, and public mailboxes (gmail.com and the like) are refused |
+| Mapped groups | 100 |
+| Time for the sign-in at the provider | 10 minutes; then the sign-in code lasts 10 minutes |
+| Wrong Niadra second factor codes after SSO | 5 per sign-in |
+
+Domains are not checked through DNS: they are unique across tenants, and only Niadra creates tenants, under contract. There is no SCIM provisioning: people arrive by invitation or at their first SSO sign-in. With Microsoft Entra ID, groups arrive as object ids, and an account in too many groups (more than 200 over OIDC, more than 150 over SAML) does not carry them in the token; assign to the application only the groups that give roles.
+
+## Screens per feature
+
+The Console shows a screen only when what it shows exists in the space. The screens of the [features](/en/concepts/spaces-and-keys#space-features), all on by default, leave the menu when the space's `features` document turns their feature off.
+
+| Screen | What it shows | Shown with |
+|---|---|---|
+| Agent turns | The kept [turn records](/en/concepts/turn-records), each with what it read, called, claimed and said, the flags, the pins and why it cannot be replayed | `turns` |
+| Types | The [declared and derived types](/en/concepts/object-types), drift and the coverage of each field | `state` |
+| Working memory, on a customer's tab | The metadata of each agent's [working state](/en/concepts/agent-state) about the customer, never the content | `agent_state` |
+| Inferences, on a customer's tab | The [inferences](/en/concepts/signals#inferences-and-the-reviewable-profile) about the customer, with what supports them, and the review requests | `signals` |
+| Coordination | The [coordination overview](/en/concepts/coordination): ownership, effects, conflicts, budgets and contacts, in counts | `coordination` |
+| Outcomes and experiments | The [outcomes, attribution, experiments and the counterfactual](/en/concepts/outcomes) | `measurement` |
+
+A space that never turned a feature on never sees its screen, and nothing changes for those who did not ask.
+
+<CardGroup cols={2}>
+  <Card title="Spaces and keys" href="/en/concepts/spaces-and-keys">
+    Sources, scoped keys and cutting a vendor at once.
+  </Card>
+  <Card title="Set up SSO" href="/en/api/control/sso-save">
+    The `PUT /v1/sso` reference, with an example.
+  </Card>
+</CardGroup>

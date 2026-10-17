@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-ssr
+dist-server
+.git
+.env
+.env.*
+*.tsbuildinfo
+.DS_Store
+dist-admin

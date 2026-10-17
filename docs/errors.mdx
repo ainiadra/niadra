@@ -1,0 +1,130 @@
+---
+title: "Erros"
+description: "Respostas application/problem+json, o catálogo de códigos e o que fazer com cada um."
+---
+
+Toda rota da API da Niadra responde erro no mesmo formato, com um código estável. O seu código decide pelo `code`, nunca pelo texto de `detail`, que pode mudar. Os códigos são versionados junto do OpenAPI da `/v1`: dentro de uma versão, um código nunca muda de sentido.
+
+## O documento de problema
+
+Os erros das rotas respondem com `Content-Type: application/problem+json`, o formato da RFC 9457.
+
+```json
+{
+  "type": "https://docs.niadra.com/errors/scope_missing",
+  "title": "scope missing",
+  "status": 403,
+  "detail": "this key lacks the `act` scope",
+  "code": "scope_missing",
+  "request_id": "f9ef9a07fd25477fa737ce940979dc06"
+}
+```
+
+| Campo | Descrição |
+|---|---|
+| `type` | Uma URI do tipo de problema: `https://docs.niadra.com/errors/<code>`. |
+| `title` | O código por extenso, como `scope missing`. |
+| `status` | O status HTTP, repetido no corpo. |
+| `detail` | O que aconteceu nesta requisição. Nunca traz dado pessoal: handle, texto de mensagem e documento ficam fora das mensagens de erro. |
+| `code` | O código estável do catálogo abaixo. |
+| `request_id` | O id da requisição. Informe quando falar com o suporte. Toda resposta traz esse id, com sucesso ou não. |
+
+## O catálogo
+
+| Código | Status | SDK de Python | SDK de TypeScript | O que fazer |
+|---|---|---|---|---|
+| `invalid_input` | 422 | `UnprocessableEntityError` | `NiadraAPIError` | O corpo não bate com o contrato: campo desconhecido, campo obrigatório faltando, valor fora do limite, uma correção sem os campos que a ação dela pede, um lote acima de 2,5 MB ou de 500 itens. `detail` lista o caminho do campo e o tipo do erro, nunca o valor enviado. Corrija a requisição; repetir o mesmo corpo dá a mesma resposta. |
+| `invalid_handle` | 422 | `UnprocessableEntityError` | `NiadraAPIError` | Um valor que não é um identificador válido do tipo que você declarou: um telefone fora do formato E.164, um e-mail sem domínio. `detail` diz o tipo, nunca o valor. Corrija o valor; repetir dá a mesma resposta. |
+| `unsupported_type` | 422 | `UnprocessableEntityError` | `NiadraAPIError` | A lista de supressão só aceita destinos por onde se fala com uma pessoa: telefone, WhatsApp ou e-mail. Outro tipo de identificador não pode ser suprimido; use o identificador do canal. |
+| `no_fingerprint` | 422 | `UnprocessableEntityError` | `NiadraAPIError` | A conferência de desvio de um tipo declarado sem impressão do esquema que ele espelha. Declare a `fingerprint` do tipo, ou deixe a Niadra acompanhar o tipo pelo tráfego, sem conferência. |
+| `unknown_object` | 422 | `UnprocessableEntityError` | `NiadraAPIError` | Um agente que fala com o cliente, ou uma pessoa, citou numa ação um objeto de um tipo que os seus sistemas enviam (`mirror_of`), e nenhum sistema enviou esse objeto ainda, nem antes nem mais cedo no mesmo lote. Agentes citam os objetos que receberam e nunca criam um. Só aparece por item: volta dentro do 207 do lote, e `detail` diz o objeto e o sistema dele. Envie antes o evento do sistema, ou corrija a referência do objeto. |
+| `verification_not_allowed` | 422 | `UnprocessableEntityError` | `NiadraAPIError` | Um `verify` declarou nível acima do teto da sua fonte. Uma fonte de agente de atendimento nasce com teto V2 e pode ir até V3, o nível do OTP que ela mesma roda; V4 é só para fontes `human` e `internal_agent`. Crie no Console uma fonte com o teto certo, emita a chave dela e corte a antiga; a requisição não sobe o teto. |
+| `about_without_link` | 422 | `UnprocessableEntityError` | `NiadraAPIError` | Nenhuma rota responde mais com ele: uma leitura cujo `about` cita uma conta ou parceiro sem vínculo ativo com a pessoa serve a memória da própria pessoa e diz `about_unlinked: true`, existindo a organização ou não. Crie o vínculo com [`POST /v1/identity/links`](/api/identity-links) para ler a organização. |
+| `personal_data_in_agent_memory` | 422 | `UnprocessableEntityError` | `NiadraAPIError` | Uma nota da [memória do agente](/concepts/agent-memory) trazia dado pessoal (telefone, e-mail, documento, nome ou id de cliente) no título, no corpo ou nas tags. A nota foi recusada, não mascarada: reescreva sem o dado. `detail` diz os tipos encontrados, nunca os valores. Pelo kit e pelo MCP, o modelo recebe o mesmo código como resultado da ferramenta `remember`. |
+| `unauthenticated` | 401 | `AuthenticationError` | `NiadraAuthenticationError` | Chave ausente, mal formada, girada ou revogada. Não tente de novo. Os SDKs descartam o contexto guardado daquela chave num 401. |
+| `forbidden` | 403 | `PermissionDeniedError` | `NiadraPermissionError` | A chave é válida mas não pode fazer isso, ou o acesso da fonte dela foi cortado; ou a pessoa do Console não tem um papel da rota; ou uma pessoa `vendor` perguntou por uma fonte fora do vínculo dela. |
+| `scope_missing` | 403 | `PermissionDeniedError` | `NiadraPermissionError` | A chave não tem o escopo da rota: `track`, `act`, `context`, `search`, `identify`, `admin`, `analytics`, `agent_memory`, `agent_memory:write`, `replay`, `coordinate`, `state:push` ou `agent_state`. Crie uma chave com o escopo. |
+| `operation_not_allowed` | 403 | `PermissionDeniedError` | `NiadraPermissionError` | Uma ação usou uma operação fora das `trusted_action_ops` desta fonte. |
+| `not_found` | 404 | `NotFoundError` | `NiadraAPIError` | O item, objeto ou recurso não existe neste espaço, ou a política da sua fonte não deixa ver. Um caminho sem rota também responde assim, e uma rota de uma [funcionalidade](/concepts/spaces-and-keys#funcionalidades-do-espaço) que o espaço não ligou também: `turns`, `state`, `agent_state`, `signals`, `claims`, `coordination`, `measurement`, `notifications` e `legal_holds` começam desligadas. |
+| `method_not_allowed` | 405 | `APIError` | `NiadraAPIError` | A rota existe, mas não com esse método. O cabeçalho `Allow` diz quais métodos ela aceita. |
+| `conflict` | 409 | `ConflictError` | `NiadraAPIError` | A mesma `Idempotency-Key` foi enviada com outro corpo nas últimas 24 horas. Use uma chave nova para uma requisição nova. |
+| `lease_held` | 409 | `ConflictError` | `NiadraAPIError` | Outro detentor tem uma [reivindicação](/concepts/coordination#posse) ao menos tão restritiva sobre o cliente; a resposta diz quem e até quando. Espere, ou transfira. O mesmo detentor renova a própria. |
+| `task_locked` | 409 | `ConflictError` | `NiadraAPIError` | Outro detentor tem a trava dessa tarefa sobre esse objeto. Espere ela acabar. |
+| `effect_in_flight` | 409 | `ConflictError` | `NiadraAPIError` | Outra tentativa segura a chave do [efeito](/concepts/coordination#efeitos-que-acontecem-uma-vez-só). Não aja; a tentativa em voo termina em `done`, `failed` ou `unknown_outcome`. |
+| `replay_expired` | 410 | `APIError` | `NiadraAPIError` | O turno do cenário saiu do armazenamento: um apagamento o levou, ou passou o `scenario_days` que você definiu depois da última execução. Grave o cenário de novo a partir de turnos que ainda existem. |
+| `agent_state_conflict` | 412 | `APIError` | `NiadraAPIError` | Um compare-and-swap da [memória de trabalho](/concepts/agent-state) encontrou outra versão em vez de `if_version`. Leia de novo e escreva a partir da versão atual, ou use `merge_by_key`. |
+| `turn_too_large` | 413 | `APIError` | `NiadraAPIError` | O lote de turnos passa de 4 MB comprimido ou de 16 MB descomprimido. Os SDKs mandam um turno grande demais com os blobs reduzidos a hashes, então isso não entra em laço. |
+| `pin_mismatch` | 422 | `UnprocessableEntityError` | `NiadraAPIError` | Um pino exigido da build em execução não bate com o gravado: `pins` lista `name`, `recorded` e `running`. Rode com a mesma build, ou nomeie o pino em `vary` quando a mudança é de propósito. |
+| `not_replayable` | 422 | `UnprocessableEntityError` | `NiadraAPIError` | O turno não pode ser rodado de novo: `reasons` lista `content_mode` (`hash_only`), `fidelity` (`bronze`, `silver`), `completeness` (`partial`, `incomplete`, `unknown`) ou `missing_pin`. Grave turnos `gold`, completos, em `stored` ou `pointer`, com os pinos exigidos. |
+| `object_type_unknown` | 422 | `UnprocessableEntityError` | `NiadraAPIError` | Um instantâneo ([`POST /v1/objects/snapshot`](/api/objects-snapshot)) nomeou um tipo que o espaço não declara e que a Niadra ainda não inferiu de nenhum evento ou push. Mande antes os eventos ou os pushes do tipo, ou corrija o nome. Push, leitura e escrita de um tipo não declarado não são recusados: o tipo é inferido do tráfego. |
+| `invalid_handle`, `unsupported_type` | 422 | `UnprocessableEntityError` | `NiadraAPIError` | Um destino da [lista de supressão](/concepts/coordination#a-lista-de-supressão) ou de um token de contato não é um telefone ou um e-mail válido, ou é de um tipo de handle que a lista não cobre. |
+| `wrong_cell` | 421 | `WrongCellError` | `NiadraAPIError` | O espaço mudou de célula, e a célula antiga responde assim por 30 dias depois da mudança. Tente de novo na hora, numa conexão nova; os dois SDKs fazem isso por você. |
+| `rate_limited` | 429 | `RateLimitError` | `NiadraRateLimitError` | Passou do limite do espaço ou da chave. Espere os segundos de `Retry-After`. A leitura é a última coisa a ser limitada. Também quando um processo de escrita já segura o máximo de corpos grandes (acima de 1 MB, enviados ou descomprimidos) ao mesmo tempo: o lote de turnos ou de eventos volta com `Retry-After`, e o SDK o manda de novo. |
+| `internal_error` | 500 | `ServerError` | `NiadraAPIError` | Algo falhou do nosso lado. Tente de novo com recuo e mande o `request_id` se continuar. |
+| `unavailable` | 503 | `ServerError` | `NiadraAPIError` | Uma dependência está fora por um momento, ou o banco de um espaço recém-criado ainda está sendo preparado. Tente de novo depois do `Retry-After`; as escritas esperam na fila do SDK até lá. Um [push de objeto compartilhado](/concepts/object-types#objetos-compartilhados) cuja cópia quente não respondeu volta assim, com `Retry-After: 1`, e nada foi guardado. |
+| `coordination_unavailable` | 503 | `ServerError` | `NiadraAPIError` | Uma escrita da [coordenação](/concepts/coordination) não pôde ser registrada de forma durável: nada novo foi gravado. Mande de novo; o SDK o faz sozinho. Uma pergunta nunca responde assim: com uma dependência fora, ela decide pela direção da finalidade, com `unavailable` ou `unchecked` nos motivos. |
+
+
+Uma rota que pede pessoa, como os vereditos de revisão, responde 403 `forbidden` a uma chave de fonte. Os tamanhos estão em [Limites e convenções](/conventions).
+
+Nas rotas das funcionalidades de agente, alguns erros nunca são erros: uma escrita da memória de trabalho acima do teto responde 200 com `stored: false` e `reason: over_cap` (ou `not_declared_field`), uma leitura de estado tipado serve um valor velho com a idade em vez de recusá-lo, e uma pergunta de coordenação sem resposta a tempo decide pela direção da finalidade. Os SDKs nunca lançam por eles.
+
+No SDK de Python, `code` e `request_id` são propriedades de `APIError`, e `problem` traz o corpo já lido. No SDK de TypeScript, `NiadraAPIError` tem `status`, `code`, `requestId` e `problem`.
+
+## Erros dentro de um lote
+
+[`POST /v1/batch`](/api/batch) responde 200 quando todos os itens entraram e 207 quando algum foi recusado; [`POST /v1/feedback`](/api/feedback) e o [webhook de sistema](/api/ingest-webhook) respondem do mesmo jeito. Os códigos de item são os do catálogo, mais `too_large`, para um item acima de 1 MB. Um item ruim nunca derruba o lote: os itens válidos são gravados e cada item recusado volta com a posição dele.
+
+```json
+{
+  "accepted": 41,
+  "duplicates": 2,
+  "errors": [
+    { "index": 7, "code": "invalid_input", "detail": "a system event needs `canonical_type`" },
+    { "index": 19, "code": "verification_not_allowed", "detail": "level V4 is above the ceiling of this source" }
+  ]
+}
+```
+
+| Campo | Descrição |
+|---|---|
+| `accepted` | Itens gravados. |
+| `duplicates` | Itens cuja `idempotency_key` já estava gravada. Contados, nunca gravados duas vezes. |
+| `errors` | Uma entrada por item recusado: `index` (a posição dele em `items`), `code` e `detail`. |
+
+Duplicata não é erro: reenviar um lote depois de um tempo esgotado é seguro. Os SDKs registram no log os itens recusados, com o código, e os descartam, porque o mesmo item seria recusado de novo.
+
+[`POST /v1/turns`](/api/turns) responde do mesmo jeito: 200 quando todo registro entrou, 207 com um erro por registro recusado, pelo índice, e `duplicates` para os turnos já gravados. Os códigos de item são os do catálogo mais `content_mode_refused`, quando a fonte mandou um modo de conteúdo que guarda mais do que a gravação do espaço permite: o SDK manda o registro de novo só com digests.
+
+## Novas tentativas
+
+| Resposta | Leituras (`context`, navegação) | Escritas (lote, identify, verify) |
+|---|---|---|
+| 421 | Repetida na hora, dentro do tempo máximo | Repetida na hora |
+| 429 | Python: repetida quando o `Retry-After` cabe no tempo. TypeScript: não repete | Repetida depois do `Retry-After` |
+| 500, 502, 503, 504, erro de rede | Python: repetida com recuo, dentro do tempo. TypeScript: não repete | Repetida com recuo exponencial e variação aleatória, 3 tentativas |
+| 408 | Não repete | TypeScript: repetida como um 5xx. Python: final |
+| Qualquer outro 4xx | Final | Final |
+
+Os dois SDKs dão às leituras um tempo total curto e próprio, então uma nova tentativa nunca faz o agente esperar além dele. No modo padrão, uma leitura que falha resolve com um valor vazio ou com o último valor bom, e o agente segue sem a memória naquele turno.
+
+## Rastrear uma requisição
+
+Mande um cabeçalho `traceparent` do W3C, e a Niadra o devolve na resposta; toda resposta traz `request_id`. Informe o `request_id` quando falar com a gente. Os erros dos SDKs expõem esse id como `request_id` em Python e `requestId` em TypeScript.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Limites e convenções" href="/conventions">
+    idempotência, paginação, limites de taxa e tamanhos.
+  </Card>
+  <Card title="SDK de Python" href="/sdk/python">
+    as classes de exceção e o modo estrito.
+  </Card>
+  <Card title="SDK de TypeScript" href="/sdk/typescript">
+    as classes de erro e o `Result`.
+  </Card>
+  <Card title="Enviar um lote" href="/api/batch">
+    as respostas 200 e 207 na referência da API.
+  </Card>
+</CardGroup>

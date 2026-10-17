@@ -1,0 +1,944 @@
+---
+title: "Python SDK"
+description: "Every method of the niadra package, with parameters, return value and an example."
+---
+
+The `niadra` package is the Python SDK: a synchronous client, `Niadra`, and an asynchronous twin, `AsyncNiadra`, with the same methods. It is open source under Apache 2.0, needs Python 3.10 or later, and depends only on `httpx` and `pydantic`. Every method on this page maps to a route of the [API reference](/en/api).
+
+## Install
+
+```sh
+pip install niadra                # 0.11.7
+pip install 'niadra[otel]'        # the turn on your OpenTelemetry spans
+pip install 'niadra[gateway]'     # the contact token check at your gateway
+```
+
+Each framework's extra is in [Integrations](#integrations). The `niadra` command ships with the library.
+
+## The client
+
+```python
+from niadra import Niadra
+
+niadra = Niadra()  # reads NIADRA_API_KEY
+```
+
+```python
+Niadra(
+    api_key: str | None = None,
+    *,
+    base_url: str | None = None,
+    channel: str | None = None,
+    strict: bool = False,
+    timeouts: Timeouts | None = None,
+    cache: CacheOptions | None = None,
+    queue: QueueOptions | None = None,
+    http_client: httpx.Client | None = None,
+)
+```
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `api_key` | `str` | `NIADRA_API_KEY` | A source key, `nia_sk_<live\|test>_<region>_<space>_<key_id>_<secret>`. |
+| `base_url` | `str` | `NIADRA_BASE_URL`, then derived from the key | The key names its region and space, so the address is `https://<space>.<region>.api.niadra.com`. Override it for the local emulator. |
+| `channel` | `str` | `None` | The default `channel` for events that do not name one, such as `"whatsapp"`. |
+| `strict` | `bool` | `False` | Raise exceptions instead of logging and returning a safe value. Use it in tests. |
+| `timeouts` | `Timeouts` | see below | Per-method time budgets. |
+| `cache` | `CacheOptions` | see below | The per-conversation context cache. |
+| `queue` | `QueueOptions` | see below | Batching of `track()`. |
+| `http_client` | `httpx.Client` | `None` | Your own client, for proxies or custom transports. |
+| `keep_warm` | `bool` | `True` | Keeps the connection to the region open while a conversation is open and in use; see below. |
+
+`AsyncNiadra` takes the same arguments, with `http_client: httpx.AsyncClient`. One instance per process is enough, and it is thread-safe. The client also works as a context manager: leaving the block calls `close()`, and an exit hook flushes the queue for up to two seconds.
+
+### Properties
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `enabled` | `bool` | `False` when there is no usable key; every call is then a no-op. |
+| `base_url` | `str` | The address the client talks to. |
+| `mcp_url` | `str` | The MCP endpoint of the space, `<base_url>/mcp`. |
+| `pending` | `int` | Items waiting in the local queue. |
+| `dropped` | `int` | Items dropped so far: queue full, not serializable, or refused by the API, the whole batch or the item alone in a 207 (`unknown_object`, say). |
+| `dropped_by_reason` | `dict[str, int]` | `dropped` by reason: `queue_full`, `unserializable` or the code the API refused the item with. |
+
+### Safe by default, strict on request
+
+Without a key the client warns once and does nothing. Every public method catches and logs its own failures and returns a safe value: an empty `Context` (check `context.error`), an empty result, `False` or `None`. Logs carry method names, status codes, error codes and request ids, never handles or text. With `strict=True` the same failures raise the exceptions listed under [Errors](#errors).
+
+### Time budgets
+
+The SDK keeps its own time budget per method, whatever the platform around it allows.
+
+```python
+from niadra import Timeouts
+
+Timeouts(
+    context=0.30,           # context(), every view except voice
+    context_first=1.0,      # the first read of a conversation, task or object: the API compiles its pack
+    context_voice=0.20,     # context() with view="voice": the wait for the read of the turn's words, already in flight
+    context_voice_start=1.5,  # the call's first read, started by begin() while the phone rings
+    navigation=0.60,        # search(), timeline(), open(), object reads
+    navigation_voice=0.30,  # the same, with voice=True
+    write=5.0,              # each attempt of a write sent at once
+    upload=60.0,            # each attempt of sending media bytes to storage
+    prefetch=1.0,           # the read prefetch() starts
+    connect=1.0,            # added once when no connection is likely open
+)
+```
+
+A connection stays open between calls for 120 s, one for each call that was in flight at once. When no idle connection is likely left for a call (every open one is busy, or none answered in that time), it gets `connect` on top of its budget, for TCP and TLS, which take a few round trips that a 0.3 s read cannot hold from another continent. A turn that reads its context, notes and state at once, with only the connection `keep_warm` holds, opens two more, and both get it. The calls that start while the first one opens a connection get it too, and then none does until an answer comes, so an outage spends it once. A call that finds an idle connection keeps its budget exact. A voice read never grows past its own budget: on a cold connection it answers empty in time instead of holding the turn. `connect=0` never adds it.
+
+`context` and `navigation` left at their defaults are the API's time: the client measures the round trip to the region once when it starts (`VoiceOptions.probe`) and adds it to those two, so an agent far from the region (Sao Paulo is 170 ms from us-east-2) does not lose its read to the network. The measurement also opens the connection the first read uses. A value you set is a ceiling the SDK keeps; when the round trip plus 50 ms exceeds it, the client logs one warning, because every such read would run out of time. While the measurement is on its way and a connection is open, those two get `connect` on top of the default, so the first read does not run out for want of it; with no connection open, `connect` already comes with the new connection, never twice. A measurement that failed, or `probe` off, leaves the defaults as they are. Voice budgets do not change.
+
+While a conversation or task is open (created and not ended) and the client was used in the last 10 minutes, it sends `GET /healthz` every 100 s in which nothing else went out for 90 s, one attempt with a 2 s budget: the connection stays open, and a turn after a long pause does not pay TCP, TLS and often DNS again (from Sao Paulo, a read after 150 s idle took 550 ms instead of 200, and about 900 ms when the DNS entry had also expired). These calls are not the client's use, and a conversation nobody holds any more stops them. `keep_warm=False` never sends them.
+
+In voice, `context_voice` (200 ms) is not a round trip to the region: the pinned body comes from the SDK's memory, and the budget only covers the wait for the read of the turn's words that a `prefetch()` already started; past it, the turn goes out with the body and no slots, and the read goes on in the background, within `prefetch` (1 s). `context_voice_start` bounds the call's first read, made by `begin()` while the phone rings: a cold connection costs three round trips (TCP, TLS and the request) plus the server's first compile. Outside voice, the first read of a conversation, task or object in a client, and its first `agent_memory()`, get `context_first` instead of `context` while `context` is at its default: the API compiles the pack on that read (0.41 s measured on the server), and the next reads of it find the pack compiled.
+
+```python
+from niadra import VoiceOptions
+
+VoiceOptions(enabled=True, settle=0.2, min_coverage=0.75, probe=True)
+```
+
+`settle` is how long the partial transcript must stay the same before the SDK reads the turn with it; `min_coverage` is the share of the final turn's words the partial must carry for that read's slots to answer it; `probe` measures the round trip to the region once (`GET /healthz`, twice, the faster; `niadra.rtt`) when the client starts, or at the first call of an `AsyncNiadra` built outside a running loop: the read budgets left at their defaults add it, and the log warns when a budget you set, or a voice budget after the first voice read, cannot hold it. `probe=False` measures nothing. `VoiceOptions(enabled=False)` sends every voice turn to the API as the other views do.
+
+Retries: 5xx answers, 429 and network errors are retried with backoff; 421 (the space is moving between cells) is retried at once on a fresh connection; other 4xx answers are final.
+
+### The context cache
+
+Inside a conversation or task (a call with `conversation_id` or `task_id`), packs are cached in memory:
+
+- younger than 10 s: returned without a request;
+- up to 10 minutes older: returned at once while one background request refreshes it;
+- when a request fails: the last good pack, if it is less than 30 minutes old;
+- at most 1,000 packs, the least recently used evicted first;
+- in the `voice` view, with a `conversation_id` or `task_id`: the pinned body is served from memory at once, whatever its age, and revalidated by ETag in the background; each turn's slots come from the read of its words and are never cached. Ending the conversation drops its packs and what the voice read kept; an answer still on its way is not stored.
+
+Refreshes send the cached ETag, so an unchanged pack costs a `not_modified` answer instead of the full text, and only one refresh per pack runs at a time. A 401 or 403 is not an outage: the cached packs go (all of them on 401, the one requested on 403), so cutting a vendor's access also cuts what it had cached. A plain read and a `delta` read of one conversation share one entry, and each delta is handed out once.
+
+```python
+from niadra import CacheOptions
+
+CacheOptions(enabled=True, ttl=10.0, stale_while_revalidate=600.0, max_stale=1800.0, max_entries=1000)
+```
+
+### The write queue
+
+`track()`, `action()` and `handoff()` only queue. A background thread (a task, with `AsyncNiadra`) sends a batch when 15 items are waiting or one second after the first arrived, with three attempts and backoff. A message with a `conversation_id` leaves at once (`turn_interval`, 0 by default), taking whatever is waiting along: it is the turn the other agents read in `live`. One batch is in flight per client, and what is queued while it is answered leaves together in the next one, so a burst of turns costs one request per round trip, never one per turn. A batch that still fails with an error that may pass (a connection, a 5xx, a 429, a 421) goes back to the front of the queue, and the queue pauses, doubling the pause up to 30 s while Niadra does not answer; each item keeps its idempotency key, so it arrives once when Niadra is back. When the queue is full, new items are dropped and counted in `dropped`; so is a batch the API refuses and each item a 207 refuses alone, by the API's code in `dropped_by_reason`.
+
+```python
+from niadra import QueueOptions
+
+QueueOptions(capacity=10_000, batch_size=15, interval=1.0, turn_interval=0.0, heartbeat_interval=60.0)
+```
+
+## Handles
+
+Handles identify a subject in a channel or system. The helpers are top-level functions that normalize the value and raise `ValueError` on input that cannot be valid, so a malformed phone fails where it enters your code.
+
+| Function | Handle | Example |
+| --- | --- | --- |
+| `phone(number)` | `phone_e164` | `phone("+14155550123")` |
+| `email(address)` | `email`, lowercased | `email("marina@example.com")` |
+| `whatsapp(wa_id)` | `wa_id` | `whatsapp("14155550123")` |
+| `whatsapp_bsuid(user_id, business_account)` | `wa_bsuid`, scoped to the business account | `whatsapp_bsuid("bsuid.8812", "waba-1")` |
+| `system_id(namespace, id, *, kind=None)` | `system_id`; `kind="account"` or `"partner"` for organizations | `system_id("crm", "48213")` |
+| `staff(namespace, id)` | `system_id` of someone who works for your company: the conversation with them is internal, and what they say is your company's word. Only a system id names staff; a phone or an e-mail always names a customer | `staff("hr", "U-17")` |
+| `gov_id(number, country)` | `gov_id_hmac`: the document number itself, which the server checks and keeps as an HMAC | `gov_id("529.982.247-25", "BR")` |
+| `org_registry(number, country)` | `org_registry_hmac`, an organization | `org_registry("11.222.333/0001-81", "BR")` |
+| `app_user(user_id)` | `app_user_id` | `app_user("u-7781")` |
+| `anonymous(visitor_id)` | `anon_id` | `anonymous("visitor-31f")` |
+
+Every method that takes a handle also accepts a `Handle` model or a mapping with its fields (`{"type": "phone_e164", "value": "+14155550123"}`). Objects are accepted as `"invoice:erp:0823"` or as an `ObjectRef`.
+
+## context()
+
+The context pack for a person, an organization or a business object. It maps to [`POST /v1/context`](/en/api/context).
+
+```python
+niadra.context(
+    subject: HandleLike | None = None,
+    object: ObjectLike | None = None,
+    *,
+    about: HandleLike | None = None,
+    view: str = "chat",
+    verification: str = "V0",
+    conversation_id: str | None = None,
+    task_id: str | None = None,
+    query: str | None = None,
+    turn: str | None = ...,
+    delta: bool = False,
+    target: str | TargetModel | None = None,
+    format: Literal["text", "json"] = "text",
+    timeout: float | None = None,
+    use_cache: bool = True,
+) -> Context
+```
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `subject` | handle | `None` | Who the pack is about. Pass `subject` or `object`, exactly one. |
+| `object` | `str` or `ObjectRef` | `None` | Center the pack on a business object, such as `"invoice:erp:0823"`. |
+| `about` | handle | `None` | The account or partner the person acts for. Needs an active link. |
+| `view` | `str` | `"chat"` | `voice`, `chat`, `brief`, `full`, `account`, `partner` or a task view such as `task:billing`. |
+| `verification` | `str` | `"V0"` | The level requested, `V0` to `V4`, or `no_customer` for internal agents. The effective level is the lowest of this, the source ceiling and what the conversation proved. |
+| `conversation_id` | `str` | `None` | Pins the pack to the conversation and enables the cache. |
+| `task_id` | `str` | `None` | The same, for an internal agent's task. |
+| `query` | `str` | `None` | Other words than the turn to pick this read's [slots](/en/concepts/context#skeleton-and-per-turn-slots) by, up to 2,000 characters; wins over `turn`. The pinned pack stays the same. |
+| `turn` | `str` or `None` | the last `customer()` | The customer's last turn, sent as `query`; `turn=None` reads without one. A conversation fills it in for you. |
+| `delta` | `bool` | `False` | Ask for what changed since this agent last read the subject in this conversation or task. Never served from the cache. |
+| `target` | `str` or `TargetModel` | `None` | The model that will read the pack, such as `"openai/gpt-4.1"`, so the pack aims at its prompt-cache floor: Claude, OpenAI and Gemini floors ship with Niadra, others go in the space settings. |
+| `format` | `str` | `"text"` | `"json"` also returns `pack`: the pack as data, in the `context-pack.v1` shape, for programs that build their own prompt. |
+| `timeout` | `float` | from `Timeouts` | This call's budget, in seconds. |
+| `use_cache` | `bool` | `True` | Pass `False` to skip the cache for this call. |
+
+Returns a `Context`: every field of the API response plus what the SDK knows about the call.
+
+| Field | Description |
+| --- | --- |
+| `text` | The pack. |
+| `system_block` | The pinned pack as a string, empty when there is none. Place it after your own instructions. |
+| `turn_block` | The live turns from other channels, the turn's `slots`, the blocks asked by `include` (the state, the constraints) and the delta, in that order, tagged for the model. Place it at the end of the prompt. A constraints block the read asked for and the server could not read shows as a line that says so, never left out in silence. |
+| `unread_blocks` | The blocks asked by `include` that the answer does not carry, because the server could not read them this time (the read comes back `degraded`). |
+| `slots` | What the customer's last turn selected from memory, as a block; `None` on a read without a turn. Never served from the cache. |
+| `withheld` | Items the policy held back at this verification level. |
+| `verification` | `requested`, `effective` and the `reason` when effective is lower. |
+| `etag`, `version`, `as_of` | Identity and freshness of the pack. |
+| `live`, `delta` | Recent turns from other channels, and what changed. |
+| `pack` | With `format="json"`, the pack as data (`ContextPack`): typed `sections`, `preamble`, `variables`, `stamp` and `slots` (`PackSlot`: `section` or `derived`, `channels`, `text`). The schema is in `spec/context-pack.v1.json` in the repository, and a test keeps the models equal to it. |
+| `path`, `is_holdout` | Which read tier answered; `holdout` means the profile is in a control group and the pack is empty on purpose. |
+| `origin`, `age_ms` | `network`, `cache`, `stale`, `last_good` or `empty`; and how many milliseconds ago Niadra sent or confirmed the pack served (0 for an answer just received, `None` with no pack). |
+| `error`, `elapsed_ms` | Why the pack is empty, when it is, and how long the call took. |
+
+```python
+from niadra import Niadra, phone
+
+niadra = Niadra()
+caller = phone("+14155550123")
+niadra.verify("network_attestation", "V1", handle=caller, conversation_id="call-4471")  # what the call proved
+ctx = niadra.context(caller, view="voice", verification="V1", conversation_id="call-4471")
+
+system_prompt = f"{AGENT_INSTRUCTIONS}\n\n{ctx.system_block}"
+if ctx.turn_block:
+    messages.append({"role": "system", "content": ctx.turn_block})
+```
+
+## search()
+
+Searches the whole history of one subject by keyword and meaning. Maps to [`POST /v1/history/search`](/en/api/history-search).
+
+```python
+niadra.search(
+    subject: HandleLike,
+    query: str,
+    *,
+    about: HandleLike | None = None,
+    filters: HistoryFilters | Mapping | None = None,
+    max_tokens: int = 800,
+    limit: int | None = None,
+    verification: str = "V0",
+    conversation_id: str | None = None,
+    task_id: str | None = None,
+    voice: bool = False,
+    timeout: float | None = None,
+) -> SearchResult
+```
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `subject` | handle | required | Whose history. |
+| `query` | `str` | required | Natural language or keywords, up to 2,000 characters. |
+| `about` | handle | `None` | The organization the person acts for. |
+| `filters` | `HistoryFilters` or mapping | `None` | `since`, `until`, `channels`, `categories`, `item_kinds`, `item_statuses` (`open`, `overdue`, `resolved`; resolved rows carry `closed_at` and `closed_by`), `outcome`, `object`, `when` (a time expression in the customer's words, in Portuguese, English or Spanish), `show_expired` (also the items whose validity ended) and `where` (a tree of `AND`, `OR` and `NOT` conditions over the row fields, checked after the policy; see [Filters](/en/concepts/history#filters)). |
+| `max_tokens` | `int` | `800` | Budget of the answer, 50 to 4,000. Use 300 for voice. |
+| `limit` | `int` | `None` | At most this many items (1 to 100), after the budget. |
+| `verification` | `str` | `"V0"` | The same level the context uses. |
+| `conversation_id`, `task_id` | `str` | `None` | Who is asking, for the receipt and the verification of the session. |
+| `voice` | `bool` | `False` | Use the voice time budget. |
+
+Returns a `SearchResult` with `items`, `recurrence` (how many times the same category happened and how the last one ended), `withheld`, `as_of`, `tokens_used`, `degraded`, `window` (the period `when` was read as), `ignored` (the filters the server did not read, such as a `when` it did not recognize) and, on failure, `error`.
+
+```python
+found = niadra.search(phone("+14155550123"), "credit for missed technician visit", max_tokens=300,
+                      verification="V1", conversation_id="call-4471", voice=True)
+if found.recurrence:
+    print(found.recurrence.occurrences, found.recurrence.last_resolution)
+```
+
+## timeline()
+
+One page of the subject's history, most recent first. Maps to [`POST /v1/history/timeline`](/en/api/history-timeline).
+
+```python
+niadra.timeline(
+    subject: HandleLike,
+    *,
+    about: HandleLike | None = None,
+    filters: HistoryFilters | Mapping | None = None,
+    cursor: str | None = None,
+    limit: int = 20,
+    verification: str = "V0",
+    conversation_id: str | None = None,
+    voice: bool = False,
+    timeout: float | None = None,
+) -> TimelinePage
+```
+
+`limit` goes from 1 to 100. Returns a `TimelinePage` with `items`, `next_cursor`, `withheld`, `as_of` and, on failure, `error`. Pass `next_cursor` as `cursor` to go on.
+
+```python
+page = niadra.timeline(phone("+14155550123"), filters={"since": "2026-01-01T00:00:00Z"},
+                       verification="V1", conversation_id="call-4471")
+for item in page.items:
+    print(item.at, item.kind, item.text)
+```
+
+## open()
+
+Opens one episode or object found by `search()` or `timeline()`, by the row's `id` (a bare UUID). It maps to [`POST /v1/history/open`](/en/api/history-open): the item id, the level and the `conversation_id` go in the body, never in a URL. With `subject`, the server opens only an item of that customer, and the `tools()` kit sends the bound customer.
+
+```python
+niadra.open(
+    item_id: str,
+    *,
+    verification: str = "V0",
+    conversation_id: str | None = None,
+    task_id: str | None = None,
+    subject: HandleLike | None = None,
+    voice: bool = False,
+    timeout: float | None = None,
+) -> OpenedItem | None
+```
+
+Returns an `OpenedItem` (`summary`, `requested`, `promises`, `outcome`, `resolution`, `derived`, `timeline` and, when the item has them, `versions`, oldest first) or `None` when it is unavailable.
+
+```python
+item = niadra.open("0192f7a3-7c32-7b0c-9e16-5b8a0f1c2d34", verification="V1", conversation_id="call-4471")
+if item:
+    print(item.summary, item.resolution)
+```
+
+## object_state() and object_timeline()
+
+Reads of a business object. They map to [`GET /v1/objects/{object_type}/{namespace}/{external_id}`](/en/api/object) and its [timeline](/en/api/object-timeline).
+
+```python
+niadra.object_state(object: ObjectLike, *, voice: bool = False, timeout: float | None = None) -> ObjectRead | None
+
+niadra.object_timeline(
+    object: ObjectLike,
+    *,
+    cursor: str | None = None,
+    limit: int = 20,
+    voice: bool = False,
+    timeout: float | None = None,
+) -> ObjectTimeline | None
+```
+
+`ObjectRead` is the object as a `display` state read serves it: `ref`, `as_of`, `fields` (each with `v`, `logic`, `status`, `claim_safe`, its stamps and source) and whatever else the type declares; a type the registry does not declare reads as one with no rules. The state comes only from what the systems of record reported; an agent's action counts once a system confirms it. `ObjectTimeline` carries `ref`, `items`, `next_cursor` and `as_of`: system events and agent actions, newest first, never what anyone said. Object ids are record ids, not personal data, so they go in the URL; an id that contains a slash cannot be addressed this way.
+
+```python
+invoice = niadra.object_state("invoice:erp:0823")
+page = niadra.object_timeline("invoice:erp:0823", limit=20)
+```
+
+## track()
+
+Queues a message, a system event or an action, or any other batch item, and returns at once. Maps to [`POST /v1/batch`](/en/api/batch).
+
+```python
+niadra.track(item: EventItem | Mapping) -> bool
+```
+
+Accepts an `EventItem` or a mapping of its fields. A mapping without `channel` gets the client's default channel; `idempotency_key` (a UUIDv7) and `occurred_at` (now) are filled in when you leave them out. Use the provider's message id as `idempotency_key` when there is one, so a retried batch never duplicates anything. Returns `False` when the item was dropped: invalid, not serializable, queue full or client disabled.
+
+```python
+niadra.track({
+    "channel": "whatsapp",
+    "conversation_id": "wa-8812",
+    "idempotency_key": "wamid.HBgLMTQxNTU1NTAxMjMVAgASGBQzQUQ",
+    "handles": [phone("+14155550123")],
+    "speaker": {"role": "customer"},
+    "content": {"text": "The technician never showed up. I am calling you."},
+})
+```
+
+## action()
+
+Records what an agent did in a system of record. Queued, like `track()`.
+
+```python
+niadra.action(
+    operation: str,
+    *,
+    subject: HandleLike | None = None,
+    object: ObjectLike | None = None,
+    result: str | None = None,
+    purpose: str | None = None,
+    closes: str | Closes | Mapping | None = None,
+    conversation_id: str | None = None,
+    task_id: str | None = None,
+    channel: str | None = None,
+    speaker: str = "ai_agent",
+    speaker_id: str | None = None,
+    corrects_action_id: str | None = None,
+    occurred_at: datetime | None = None,
+    idempotency_key: str | None = None,
+    context_stamp: ContextStamp | Mapping | None = None,
+) -> bool
+```
+
+| Parameter | Description |
+| --- | --- |
+| `operation` | The canonical operation, such as `credit` or `reschedule`. |
+| `subject`, `object` | Who and what the action is about. |
+| `result` | What happened, kept whole, up to 200,000 characters (an event's text size). |
+| `closes` | The open item the action fulfils: an open item id as a string, or `{"object": ..., "operation": ...}`. |
+| `corrects_action_id` | A correction goes as a new action that points to the old one. |
+| `context_stamp` | Which context the agent acted on. Conversations and tasks set it for you after `mark_injected()`. |
+
+The action stays `declared` until the system of record confirms it with its own event. Recording actions needs the `act` scope on the key.
+
+```python
+niadra.action(
+    "credit",
+    subject=system_id("crm", "48213"),
+    object="invoice:erp:0823",
+    result="$40 credit on the August bill",
+    closes={"object": {"type": "invoice", "namespace": "erp", "id": "0823"}, "operation": "credit"},
+    channel="erp",
+    task_id="billing-7741",
+)
+```
+
+## identify()
+
+States that two or more handles belong to the same subject. Sent at once, outside the SDK queue: a new handle joins the profile in the same response, and the merge of two profiles that already existed runs before the response; if the request fails, the item is queued for the background sender and `None` is returned.
+
+```python
+niadra.identify(
+    handles: Sequence[HandleLike],
+    *,
+    method: str = "explicit_identify",
+    subject_kind: str = "person",
+    conversation_id: str | None = None,
+) -> BatchResponse | None
+```
+
+```python
+niadra.identify([phone("+14155550123"), email("marina@example.com")], conversation_id="wa-8812")
+```
+
+The method says how much the link is worth. With `explicit_identify` or `declared`, a handle joins the profile as **provisional**: it resolves to the profile, but a read through it stays at V1 (`reason: unconfirmed_link`) until the company's systems, a login or a person confirm it, and an `identify` without a record id never merges two customers that already exist (the pair becomes a suggestion). When your company has the proof, use `system_import` (your CRM's record or a load) or `login`.
+
+## verify()
+
+Raises the verification level of one conversation or task, after you proved it. Niadra never infers it. Sent at once, and the cached pack of that conversation is dropped, so the next `context()` reflects the new level.
+
+```python
+niadra.verify(
+    method: str,
+    level: str,
+    *,
+    handle: HandleLike,
+    conversation_id: str | None = None,
+    task_id: str | None = None,
+    valid_until: datetime | None = None,
+) -> BatchResponse | None
+```
+
+`method` is `otp_whatsapp`, `otp_sms`, `login`, `kba`, `network_attestation` or `human_agent`. A level above the ceiling of the source comes back as a `verification_not_allowed` item error.
+
+```python
+niadra.verify("otp_whatsapp", "V3", handle=phone("+14155550123"), conversation_id="wa-8812")
+```
+
+## feedback()
+
+Corrects what Niadra derived about a subject. Sent at once and recorded as an event, so it is audited like any other. Maps to [`POST /v1/feedback`](/en/api/feedback).
+
+```python
+niadra.feedback(
+    action: str,
+    subject: HandleLike,
+    *,
+    fact_id: str | None = None,
+    open_item_id: str | None = None,
+    conversation_id: str | None = None,
+    value: str | None = None,
+    reason: str | None = None,
+    idempotency_key: str | None = None,
+) -> BatchResponse | None
+```
+
+Each action takes its own fields:
+
+| `action` | Requires |
+| --- | --- |
+| `retract_fact` | `fact_id`. The fact leaves every pack. |
+| `correct_fact` | `fact_id` and `value`, the right value. |
+| `resolve_open_item` | `open_item_id`. |
+| `conversation_outcome` | `conversation_id` and `value`. |
+
+`fact_id` and `open_item_id` take the id as search and the timeline list it: a bare UUID. A prefixed id is refused with 422. A fact or an open item the subject does not hold, in any status, is refused with 404 `not_found` (one error per item in a batch), never stored to be skipped; with an account or a partner as the subject, an open item one of its linked contacts noted counts, and resolves under that contact. The correction applies in seconds, after the event is stored. `value` goes up to 2,000 characters and `reason` up to 500. Returns `None` when the correction could not be delivered.
+
+```python
+niadra.feedback("resolve_open_item", phone("+14155550123"), open_item_id="0192f7a2-8c41-7e3a-9b5d-2c4e6f8a0b13", reason="Visit rescheduled")
+niadra.feedback("conversation_outcome", phone("+14155550123"), conversation_id="call-4471", value="resolved")
+```
+
+## feedback_batch()
+
+Up to 500 corrections in one call, each a `FeedbackRequest` or a mapping with the same fields as `feedback()` and its own `idempotency_key` (one is minted when missing). Maps to [`POST /v1/feedback/batch`](/en/api/feedback-batch). Returns a `BatchResponse` (`accepted`, `duplicates` for replayed keys and one error per refused item), or `None` when the batch could not be delivered.
+
+```python
+niadra.feedback_batch([
+    {"action": "correct_fact", "subject": phone("+14155550123"), "fact_id": FACT, "value": "45778-204"},
+    {"action": "resolve_open_item", "subject": phone("+14155550123"), "open_item_id": ITEM},
+])
+```
+
+## context_use()
+
+How the space's agents used the context they read, as [`GET /v1/context-use`](/en/api/context-use) reports it: per bucket, sessions, sessions without context, deliveries, use, repetition, transfers and recontact, with 95% intervals. `group_by` takes `day`, `source_id` (the default), `vendor`, `channel`, `view` and `experiment_group`; `since`, `until` (dates), `source_id`, `channel`, `view` and `experiment_group` filter. Returns a `ContextUseReport` with typed `buckets` and the answer's other blocks in `extra`, or `None` when unavailable. The key of an `analyst` source with the `analytics` scope reads every source of the space; a key with `admin` reads its own.
+
+```python
+report = niadra.context_use(since=date(2026, 9, 1), group_by=["source_id", "day"])
+```
+
+## link() and end_link()
+
+A system of record that knows who works for whom (a CRM, an HR system) links a person to the account or partner they act for, and ends the link. Maps to [`POST /v1/identity/links`](/en/api/identity-links) and [`POST /v1/identity/links/{link_id}/end`](/en/api/identity-link-end), with an idempotency key. Needs a key with the `identity:link` scope (or `admin`); `can_see_contacts=True` needs `admin`. Returns a `Link` (`link_id`, `role`, `valid_from`, `valid_to`), or `None` when the call could not be delivered.
+
+```python
+link = niadra.link(phone("+14155550123"), system_id("crm", "ACC-2201", kind="account"), role="buyer")
+niadra.end_link(link.link_id)
+```
+
+## ingest_status()
+
+Whether what was sent for a conversation or task became memory yet. Maps to [`POST /v1/ingest/status`](/en/api/ingest-status).
+
+```python
+niadra.ingest_status(*, conversation_id: str | None = None, task_id: str | None = None) -> IngestStatus | None
+```
+
+Returns `state` (`open`, `processing`, `ready`, `failed` or `unknown`), `last_event_at`, `closed_at`, `close_reason` and `extraction` (the latest extraction's status), never content. Call `flush()` first when the turns went through `track()`, so they have arrived.
+
+## whoami()
+
+What this key authenticates as: `space_id`, `source_id`, `source_name`, `vendor`, `scopes`, `audience`, `verification_ceiling`, `purposes` and `agent_memory` (whether the space has the agents' notes on). Any key may ask, whatever its scopes; use it to check a key before wiring an agent to it. Maps to [`GET /v1/sources/me`](/en/api/sources-me).
+
+```python
+me = niadra.whoami()
+assert me and "context" in me.scopes
+```
+
+## niadra.admin
+
+For a key with the `admin` scope, the governance reads and writes, failing open like the rest of the SDK: `find_profiles(query, type=, scope=, limit=)`, `memory(profile_id)` ([profile memory](/en/api/profile-memory)), `fact_history(profile_id, fact_id)` ([fact history](/en/api/profile-fact-history)), `correct(profile_id, action, ...)` and `correct_batch(items)` ([data subject corrections](/en/api/corrections), one or up to 100), `forget(...)` and `forget_status(request_id)` ([erasure](/en/api/forget)) and `export(...)` ([the data subject's package](/en/api/export)). The answers are the models in `niadra.models.admin`. An agent key lacks that scope: the routes answer 403.
+
+
+## upload_media()
+
+Hands a file to Niadra, such as a call recording, and returns the reference for its event. Media never travels inside an event. Maps to [`POST /v1/media/uploads`](/en/api/media-uploads).
+
+```python
+niadra.upload_media(
+    data: bytes | bytearray | memoryview,
+    content_type: str,
+    *,
+    subject: HandleLike | None = None,
+) -> MediaUpload | None
+```
+
+The method hashes the bytes, reserves an upload, and sends the bytes straight to storage over the short-lived signed URL. It sends exactly the `upload_headers` the API returned, which are the headers the signature covers, and nothing else: never your key. The URL must be HTTPS, except against the local emulator. Storage checks the body against the declared size and digest. With `subject`, the file is stored under that person, so erasing them erases it even if no event ever references it.
+
+Returns a `MediaUpload` with `media_ref`, `media_sha256`, `content_type`, `size_bytes` and `expires_at`, or `None` when the upload failed. Each attempt of the transfer has the `upload` budget, 60 s by default.
+
+```python
+upload = niadra.upload_media(recording, "audio/wav", subject=phone("+14155550123"))
+if upload:
+    niadra.track({
+        "channel": "voice",
+        "conversation_id": "call-4471",
+        "handles": [phone("+14155550123")],
+        "speaker": {"role": "customer"},
+        "content": {
+            "type": "audio",
+            "media_ref": upload.media_ref,
+            "media_sha256": upload.media_sha256,
+            "transcript": transcript,
+        },
+    })
+```
+
+## handoff()
+
+Records a transfer to a human (`"human"`) or another agent (`"agent"`). Queued. The context-use measurement reads it to count handoffs where the receiver never read the context.
+
+```python
+niadra.handoff(
+    conversation_id: str,
+    target: str,
+    *,
+    target_source: str | None = None,
+    reason: str | None = None,
+    mode: str = "warm",
+) -> bool
+```
+
+## conversation()
+
+A conversation with one customer, used as a context manager. Leaving the block emits `conversation.ended`, even when the block raised.
+
+```python
+niadra.conversation(
+    conversation_id: str | None = None,
+    *,
+    subject: HandleLike | None = None,
+    object: ObjectLike | None = None,
+    about: HandleLike | None = None,
+    channel: str | None = None,
+    view: str = "chat",
+    verification: str = "V0",
+    target: str | TargetModel | None = None,
+    agent_id: str | None = None,
+) -> Conversation
+```
+
+Without a `conversation_id` the SDK mints one. `channel` defaults to the client's. `agent_id` identifies your agent within the source and is stamped on its turns and actions.
+
+| Method | Description |
+| --- | --- |
+| `context(**overrides)` | The pack for this turn: the pinned bytes, with every delta since the pin in `delta` and what the customer's last turn selected in `slots`. `turn=` passes another turn; `turn=None` reads without one. |
+| `begin()` | Starts the conversation's first read now, in the background: call it when the call starts (the ring, the inbound webhook), so the read runs while the call is set up. The `voice` view only; `True` when the read runs or the pack is already here. |
+| `ready()` | `begin()`, then the pack of that first read, waited for within what is left of `Timeouts.context_voice_start`: for the moment the call starts, when the platform waits anyway. Outside the `voice` view, a `context()` without the customer's turn. |
+| `prefetch(text)` | Sends a partial transcript of the customer's turn, while they speak, so the read that answers the turn finds their memory warm and, in the `voice` view, reads the turn with it once the words have stayed the same for `VoiceOptions.settle`; the final turn takes that read's slots and delta when it starts with the partial's words. In the background, one at a time per conversation with the newest text waiting; it never raises and never delays a turn. Maps to [`POST /v1/context/prefetch`](/en/api/context-prefetch): the read with the same `query` answers from the work done; a longer transcript still finds the customer's memory open; a turn with time words or a count is recomputed at the read. |
+| `mark_injected(context=None, *, at=None)` | Records that the pack went into the prompt. The agent's next turns and actions carry it as `context_stamp`. |
+| `customer(text, **event)` | Records what the customer said. |
+| `agent(text, *, usage=None, strict=False, **event)` | Records the agent's answer, with the context stamp and, with `usage`, what the model provider reported for the call. Before sending, it checks the backing: every number, date, code and amount in the answer (amounts with a currency or a money word, dates in PT, EN and ES, codes and numbers of three or more digits; never words, one or two digits, times or a year on its own) is looked up in what the agent had in the conversation: the packs and turn blocks it read, the words of the customer and of a human attendant, the results of `action(result=...)`, the history tools of `tools()` and what you passed to `tool_result()`. A sum, a difference and a count times a backed amount are backed. The turn carries the result as `backing` (kinds, counts and the short ids of the guards it went against, never a value); `last_backing` keeps the full `BackingReport`. With `strict=True`, it returns the list of `UnbackedValue` (card and document numbers masked) instead of sending, and an empty list when it sent. The check never fails a turn and costs well under 5 ms. |
+| `tool_result(result)` | Records the result of a tool of your own as a source for the backing check of the next `agent()`. |
+| `human_agent(text, **event)` | Records a turn by a human attendant. |
+| `action(operation, **options)` | `action()` with subject, object, channel, ids and stamp filled in. |
+| `verify(method, level, *, handle=None, valid_until=None)` | Raises the level and reads at the new level from then on; `handle` defaults to the subject. |
+| `handoff(target, **options)` | Records a transfer of this conversation. |
+| `tools(*, agent_memory=False, write_agent_memory=False)` | The history kit bound to this conversation, at its current level; `None` without a subject. `agent_memory` adds `search_agent_memory`, and `write_agent_memory` also `remember`. |
+| `agent_memory(max_tokens=300, *, tags=None)` | The agent's own notes for this session's view, as one block for the prompt. |
+| `remember(kind, title, body, **options)` | Saves a working note with this conversation's id as evidence. |
+| `end()` | Emits `conversation.ended`. Later calls do nothing. |
+
+The first `context()` gets the pack the server pins for the conversation. Later reads also ask for the delta, and the conversation keeps every delta it receives, in order, so `turn_block` carries the live turns, the turn's `slots` and all the changes since the pin, in that order. The conversation sends the text of the last `customer()` as `query` on every read: the pinned pack is cached as a read without `query`, and the `slots` never are. When the server pins a new pack, after `verify()` for instance, the kept deltas are dropped: the new pack already has them. `query=` picks this read's slots by other words than the turn; the pack is the pinned one all the same.
+
+Call `mark_injected()` each time you put the pack in a prompt. It is how Niadra tells a context that arrived after the agent spoke from one the agent had and did not use. The session also keeps `context_injected_at` and `first_agent_turn_at`, the first of each, for your own checks.
+
+```python
+with niadra.conversation("wa-8812", subject=phone("+14155550123"), channel="whatsapp", verification="V1") as conv:
+    conv.customer("The technician never showed up. I am calling you.", verification_hint="V1")  # from her number
+    niadra.flush()  # the turn, and the level it proves, land before the first read
+    ctx = conv.context()
+    conv.mark_injected(ctx)
+    reply = llm(system=[AGENT_INSTRUCTIONS, ctx.system_block], turn=ctx.turn_block)
+    conv.agent(reply)
+    conv.verify("otp_whatsapp", "V3")
+    conv.handoff("human", reason="asked for a person")
+```
+
+`current_session()` returns the conversation or task whose block is running in the current thread or task, if any.
+
+## task()
+
+The same for an internal agent (billing, orders, tickets). It emits `task.ended` on exit.
+
+```python
+niadra.task(
+    task_id: str | None = None,
+    *,
+    subject: HandleLike | None = None,
+    object: ObjectLike | None = None,
+    about: HandleLike | None = None,
+    channel: str | None = None,
+    view: str = "brief",
+    verification: str = "V0",
+    target: str | TargetModel | None = None,
+    agent_id: str | None = None,
+) -> Task
+```
+
+With an `object`, the pack is centered on it; use a task view such as `task:billing`. A task has the same methods as a conversation except `handoff()`.
+
+```python
+with niadra.task("billing-7741", object="invoice:erp:0823", view="task:billing",
+                 verification="no_customer", channel="erp") as task:
+    ctx = task.context()
+    task.mark_injected(ctx)
+    task.action(
+        "credit",
+        result="$40 credit on the August bill",
+        closes={"object": {"type": "invoice", "namespace": "erp", "id": "0823"}, "operation": "credit"},
+    )
+```
+
+## tools()
+
+The history kit as function-calling tools, bound to one customer. The customer is bound here, outside the model's reach: the model picks the query, never the profile, so a prompt injection has no argument to switch customers with.
+
+```python
+niadra.tools(
+    subject: HandleLike,
+    *,
+    about: HandleLike | None = None,
+    conversation_id: str | None = None,
+    task_id: str | None = None,
+    verification: str = "V0",
+    voice: bool = False,
+) -> ToolKit
+```
+
+| Member | Description |
+| --- | --- |
+| `definitions` | The three tools, `search_customer_history`, `get_customer_timeline` and `open_history_item`, as `{"type": "function", "function": {...}}`; with `agent_memory=True`, also `search_agent_memory`, and with `write_agent_memory=True`, `remember`. |
+| `names` | Their names. |
+| `anthropic_definitions()` | The same tools as `name`, `description` and `input_schema`. |
+| `call(name, arguments)` | Runs one tool call and returns the text for the model: compact JSON, or a short error that tells the model to carry on. |
+
+`AsyncNiadra.tools()` returns an `AsyncToolKit`, whose `call()` is awaited. The definitions are also served by [`GET /v1/history/tools`](/en/api/history-tools).
+
+```python
+kit = niadra.tools(phone("+14155550123"), verification="V1", conversation_id="call-4471")
+reply = llm.chat.completions.create(model=MODEL, messages=messages, tools=kit.definitions)
+for call in reply.choices[0].message.tool_calls or []:
+    output = kit.call(call.function.name, call.function.arguments)
+    messages.append({"role": "tool", "tool_call_id": call.id, "content": output})
+```
+
+## subject_token()
+
+Mints a signed 15-minute token that binds an MCP connection to one customer. Call it from your backend. Maps to [`POST /v1/subject-tokens`](/en/api/subject-tokens).
+
+```python
+niadra.subject_token(
+    subject: HandleLike,
+    *,
+    about: HandleLike | None = None,
+    conversation_id: str | None = None,
+    task_id: str | None = None,
+    verification: str = "V0",
+) -> SubjectToken | None
+```
+
+Returns a `SubjectToken` with `token`, `expires_at` and `headers`, the `Niadra-Subject-Token` header to send with the source key when the agent opens the connection to `mcp_url`. With `about`, the organization is bound like the subject. See [MCP with any LLM](/en/guides/mcp).
+
+```python
+token = niadra.subject_token(phone("+14155550123"), conversation_id="call-4471", verification="V1")
+# connect to niadra.mcp_url with the source key as Bearer and token.headers
+```
+
+## agent_memory(), search_agent_memory() and remember()
+
+The [agent's own memory](/en/concepts/agent-memory): its working notes, never about a customer. They correspond to [`GET /v1/agent-memory/block`](/en/api/agent-memory-block), [`POST /v1/agent-memory/search`](/en/api/agent-memory-search) and [`POST /v1/agent-memory/notes`](/en/api/agent-memory-notes-create).
+
+```python
+niadra.agent_memory(max_tokens: int = 300, *, tags: Sequence[str] | None = None, view: str | None = None, timeout: float | None = None) -> AgentMemory
+niadra.search_agent_memory(query: str, *, tags: Sequence[str] | None = None, limit: int = 5, conversation_id: str | None = None, task_id: str | None = None, timeout: float | None = None) -> list[AgentNote]
+niadra.remember(kind: AgentNoteKind, title: str, body: str, *, tags: Sequence[str] | None = None, evidence: Evidence | Mapping | None = None, visibility: AgentNoteVisibility | None = None, valid_until: datetime | None = None) -> RememberResult
+```
+
+`agent_memory()` returns an `AgentMemory`: `text` (the block, for after your instructions and before the customer's context), `notes` (the ids of the notes in it), `etag`, `tokens`, `enabled` (`False` when the space has agent memory off) and `source` (`network`, `cache` or `empty`). The block is cached per (`max_tokens`, `tags`, `view`) for as long as the context and revalidated by ETag. Inside a conversation or task, `agent_memory()` uses the session's view.
+
+`search_agent_memory()` returns the notes that match the query and the tags, best first; empty on failure.
+
+`remember()` is sent at once and returns a `RememberResult`: `note` (the saved note), or `proposal_id` when the space takes agent notes only through a person, or `error`. A note with personal data comes back with `error="personal_data_in_agent_memory"` (in strict mode, an `UnprocessableEntityError` with that code): rewrite it without the data. It needs a key with the `agent_memory:write` scope. `kind` is `procedure`, `tool_note`, `process_note` or `pitfall`; `visibility` is `source` (the default), `vendor` or `space`.
+
+```python
+notes = conversation.agent_memory(tags=["scheduling"])
+system_prompt = "\n\n".join(part for part in (AGENT_INSTRUCTIONS, notes.text, ctx.system_block) if part)
+
+saved = conversation.remember("pitfall", "Scheduling API", "Dates without a time zone are refused.", tags=["scheduling"])
+if saved.error == "personal_data_in_agent_memory":
+    ...  # rewrite without the customer's data
+```
+
+## wrap()
+
+Wraps the OpenAI Python client, or any client with the same shape, so every call inside a conversation or task block gets the context and records the answer.
+
+```python
+wrap(client, *, conversation: Conversation | Task | None = None) -> client
+```
+
+Inside a block (or for the session you pass), `chat.completions.create` and `chat.completions.parse`, sync or async, streaming or not, get the pinned pack as a system message right after your own leading system messages, and the turn block as a system message at the end. The injection is stamped with `mark_injected()`, and the model's answer is recorded as the agent's turn: when a stream ends or is closed and, through `with_raw_response`, when you call `parse()`. Outside a block, calls pass through untouched. The wrapper returns a proxy and never modifies your client. Nothing it does can fail your model call: a context it cannot fetch is left out, and a failure to record the answer is logged, without content.
+
+```python
+from openai import OpenAI
+from niadra import Niadra, phone, wrap
+
+niadra = Niadra(channel="whatsapp")
+openai = wrap(OpenAI())
+
+with niadra.conversation("wa-8812", subject=phone("+14155550123")) as conv:
+    conv.customer(incoming_text)
+    reply = openai.chat.completions.create(model="gpt-4.1", messages=messages)
+```
+
+### The provider's prompt cache
+
+The agent's turn also carries the usage the provider reported for the call, as `usage` (`ModelUsage`): the provider, the model, every input token (`usage.prompt_tokens`), the ones it read from its prompt cache (`usage.prompt_tokens_details.cached_tokens`) and, through gateways that pass Anthropic's fields along, the ones it wrote to it. A stream reports usage only when you ask for it, with `stream_options={"include_usage": True}`; the wrapper never changes your request to get it. Niadra sums the usage per agent, vendor and model, and the Console and [`GET /v1/usage/prompt-cache`](/en/api/usage-prompt-cache) show the cache hit rate and the estimated savings.
+
+Without `wrap()`, pass the provider's response with the agent's turn. OpenAI responses (chat completions and Responses) and Anthropic ones are read; on Anthropic, `usage.input_tokens` counts only the uncached rest, and the total is `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`.
+
+```python
+message = anthropic.messages.create(model="claude-sonnet-4-5", max_tokens=1024, system=system, messages=messages)
+conv.agent(message.content[0].text, usage=message)
+
+# or build it yourself
+from niadra import ModelUsage
+conv.agent(reply_text, usage=ModelUsage(provider="openai", model="gpt-4.1", prompt_tokens=3000, cached_tokens=2048))
+```
+
+`ModelUsage.from_response(response)` reads a response on its own. A response without usage is left out, and the turn is recorded either way.
+
+## Integrations
+
+Every voice or agent framework has an adapter in `niadra.integrations.<name>`, installed as an optional extra (`pip install 'niadra[livekit]'`): LiveKit Agents, Pipecat, ElevenLabs, Vapi, Retell AI, WhatsApp Cloud API, Twilio, OpenAI Agents SDK, LangChain, LangGraph, Google ADK, Strands Agents, Pydantic AI, LlamaIndex, CrewAI, Agno, Microsoft Agent Framework, Semantic Kernel, Haystack, CAMEL-AI, DSPy, AG2, Anthropic, Amazon Bedrock, Google GenAI and LiteLLM, plus the Langflow components and the Dify plugin. All of them wire the context, the turns, the tools, the verification and the handoff into the framework's own extension points and take `agent_memory=`. See [Integrations](/en/integrations/overview).
+
+## flush() and close()
+
+```python
+niadra.flush(timeout: float | None = None) -> bool
+niadra.close(timeout: float | None = 5.0) -> None
+```
+
+`flush()` sends everything queued from the calling thread and returns `True` when nothing is left. One batch is in flight per client: `flush()` waits for the batch the background sender already sent, even with an empty queue, and only then sends the rest in queue order, so a `conversation.ended` never lands before the turns queued ahead of it; `timeout` bounds that wait. `close()` flushes for up to `timeout` seconds and releases connections. With `AsyncNiadra`, both are awaited.
+
+## AsyncNiadra
+
+`AsyncNiadra` has the same methods. The reads, `identify()`, `verify()`, `feedback()`, `upload_media()`, `subject_token()`, `flush()` and `close()` are awaited; `track()`, `action()`, `handoff()`, `conversation()`, `task()` and `tools()` are not. Conversations and tasks are async context managers.
+
+```python
+from niadra import AsyncNiadra, phone
+
+niadra = AsyncNiadra(channel="whatsapp")
+
+async with niadra.conversation("wa-8812", subject=phone("+14155550123"), verification="V1") as conv:
+    conv.customer("The technician never showed up. I am calling you.", verification_hint="V1")
+    await niadra.flush()
+    ctx = await conv.context()
+    conv.mark_injected(ctx)
+```
+
+## Turn records, claims, coordination and working memory
+
+Everything in this section depends on the [features](/en/concepts/spaces-and-keys#space-features) the space turned on. The SDK reads the [SDK profile](/en/api/sdk-profile) on first need and revalidates it by ETag; `niadra.profile()` returns the features on, the claim contract, the summarized type registry and the turn recording mode, and the last profile read stays in use with Niadra out of reach. With a feature off, each call below returns an empty value or goes on without it, never an error.
+
+### Turn records
+
+```python
+with conversation.turn(
+    kind="message",              # message, action, event or timer
+    build=Niadra.build(prompts={"core": "v16"}, model="gpt-4.1-mini"),
+    agent=None,                  # the session's agent_id by default
+) as frame:
+    ...
+```
+
+`Niadra.build(*, prompts=, corpus_digest=, model=, assembler=, tool_schemas=)` makes the build's pins. `conversation.turn()` (and `task.turn()`) opens a turn as a context manager, sync or async; opened inside another, it is a sub-turn. The `TurnFrame` has `turn_id`, `interact(item)` for an interaction, `flag(name)` for a flag (`error`, `guard_acted`, `handoff`, `assertion_failed`, `synthetic`, `incomplete`, `negative_feedback`, `truncated`), `tool_call()` and `model_call()` to record a call by hand. `@Niadra.tool(name=None, *, provenance=None, ui=None, exclude=(), dry_run=False, binding=None, mask_output=None, on_unknown="pass")` records each call of a tool of yours in the turn in progress. With `binding`, it also measures the [constraints block](/en/concepts/signals#tool-bindings); without one, it uses the binding the profile serves for the tool of that name. `mask_output=True` keeps the fields the key may not read out of the output before it reaches the model (`deny` removes, `mask` masks, by the profile's `field_access`); left unset, it follows the served binding's `capabilities.mask_output`. `on_unknown="block"` withholds the whole output when no profile was ever read; `"pass"`, the default, lets it through. `niadra.turns.bind(fn)` carries the turn to a thread. `Niadra(turns=TurnOptions(content_mode=None, max_bytes=64 * 1024 * 1024, max_turns=2000, interval=1.0))` configures the queue, and `niadra.turns.store(put=None, *, s3_bucket=None, client=None)` puts the values in your bucket (`pointer` mode). `niadra.turns.otel` puts the turn on your spans (`pip install 'niadra[otel]'`). The Google ADK, OpenAI Agents, LangGraph and LangChain adapters take `turns=True`. See [Turn records](/en/concepts/turn-records).
+
+### Claims and resolvers
+
+`conversation.claims` is the claim contract in the agent's process: `check(text, *, context="chat", immutable=False, agent=None)` classifies and counts, without changing the text; `guard_text(text, *, context="chat", immutable=None, agent=None)` and `guard(stream, *, context="chat", ...)` act as the contract's actions say. `niadra.use_claim_contract(contract)` swaps the profile's contract for your own copy, in CI. `conversation.verify_claim(ref, field, value, *, budget=None)` (and `niadra.verify_claim(..., subject=)`) says whether a value may be claimed now and, when it is not safe, reads it again through the type's resolver, within 300 ms: `niadra.resolvers.register(type, fn, *, rate=None)` registers a function of yours `(ref, fields) -> dict | Resolved`, which returns `niadra.resolvers.NOT_FOUND` when the source no longer has the object; `niadra.resolvers.fetch()` says why a read brought no object. `niadra.content.register(fetch)` puts back the text a `pointer` mode space keeps in your storage. See [Claims](/en/concepts/claims) and [The resolver worker](/en/guides/resolver-worker).
+
+### Coordination
+
+```python
+decision = conversation.check("proposal_followup", purpose="marketing", channel="whatsapp")
+conversation.declare.contact_made(decision, purpose="marketing", channel="whatsapp")
+conversation.declare.effect(key, "done")            # done, failed or unknown_outcome
+conversation.declare("case.closed", claim_id=..., epoch=...)
+claimed = conversation.claim(kind="case", lease_s=600, intents=["proposal_followup"])
+allowed = niadra.may_contact(customer, "marketing", channel="whatsapp")
+gateway = niadra.contact_gateway("wa_gateway", space=SPACE_ID, key=GATEWAY_KEY)
+```
+
+`check(intent, *, purpose, direction="outbound", channel=None, effect_key=None, effect_kind=None, object=None, task=None, gateway_id=None, destination_hash=None, fail_open=None, timeout=None)` waits at most 200 ms and, with no answer, decides by the purpose's direction; it never raises. Every `check` about an outbound contact keeps the local copy of the suppression list, read again in the background once a minute, and with Niadra down the opt-out holds by it. `conversation.declare(kind, **detail)` and the shortcuts `effect()` and `contact_made()` send in the background. `conversation.claim(*, object=None, task=None, kind=None, lease_s=600, level=None, intents=())` returns a `Claimed`, with `held` and `error`. `niadra.may_contact(handle, purpose, *, channel=None, at=None, fail_open=None)` applies the local copy of the suppression list. The first call reads the copy, the salt and the first page each within `Timeouts.navigation`; a list longer than a page, or a read that ran out of time, goes on in the background, and the next call has the copy. An entry with a `window` (the hours the customer asked for, as "don't call before 9 am") says no only inside those local hours, at the moment `at` (now by default), and with Niadra down a check inside the window waits until it ends (`contact_window`). With no copy and Niadra out of reach, the purpose decides: `transactional` and `service` go, the others wait; `fail_open` overrides that. `niadra.contact_gateway(gateway_id, *, space, key, seen=None)` returns a `ContactGateway` with `verify(token, *, channel, destination=None, handle=None)`, which raises `ContactTokenError`; `niadra.coordination.verify_contact_token()` checks a token against a fixed key set (`pip install 'niadra[gateway]'`). See [Coordination](/en/concepts/coordination) and [Gateways](/en/guides/gateways).
+
+### Working memory
+
+`conversation.agent_state.get()` returns a `WorkingState` (`body`, `version`); `put(body, *, mode="merge_by_key", if_version=None)` returns a `StateWrite` (`stored`, `version`, `reason`, `pending`), and the `conflicts` property lists the resent compare-and-swaps that met another version. See [Working memory](/en/concepts/agent-state).
+
+### Replay, worker and command line
+
+`niadra.replay.Replayer(niadra, agent_factory, *, build=None, read=None).run(scenario_ids, *, runs=5, mode="hermetic_turn", vary=(), paraphrase=None)` runs the scenarios in your CI and returns a `ReplayRun` (`run_id`, `status`, `verdict`, `scenarios`, `regressed`); `AsyncReplayer` for the async client. `niadra.replay.Counterfactual` runs the [tool counterfactual](/en/concepts/outcomes): the recorded calls whose arguments carried an element of the constraints block run again without it, dry when the tool writes state and never without a dry run, and only overlaps and positions go to Niadra; `niadra.replay.overlap_at_k()` is the depth-weighted overlap the report uses. `niadra.cli.worker.ResolverWorker(niadra, *, limit=50, poll=2.0, budget=5.0)` serves the refresh requests with `run_once()`, with [watch revalidation](/en/guides/resolver-worker#watch-revalidation): it serves `watch_revalidation` requests first, pushes each object it read with the `request_id` it answers and releases what it cannot answer. The `niadra` command has `replay` (`--agent`, `--build`, `--scenario`, `--runs`, `--vary`; exit 1 on a regression), `counterfactual` (`--tools`, `--tool`, `--element`, `--scenario`, `--safe`, `--k`, `--label`), `resolver-worker` (`--resolvers`, `--once`, `--limit`, `--poll`), `types derive` (`--dsn`, `--table`, `--type`, `--system`, `--ownership`, `--out`, and `--check` with `--declaration` and `--no-send`) and `contract test` (`--contract`, `--corpus`, `--examples`). `niadra.api` has one method per route (`niadra.api.check(...)`, `niadra.api.promote_turns(...)`, `niadra.api.overview(days=7)`, `niadra.api.notifications(cursor=, limit=)`, `niadra.api.release_refresh_request(request_id, body)`), which takes the models of `niadra.models` and raises the API's error. See [Replay in your CI](/en/guides/replay-in-ci).
+
+### Examples
+
+One runnable example per concept, in the SDK repository, each run by the tests:
+
+| Concept | Example |
+|---|---|
+| Turn records | [`examples/turn_records.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/turn_records.py) |
+| Claims and the guard | [`examples/claim_guard.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/claim_guard.py) |
+| Coordination | [`examples/coordination.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/coordination.py) |
+| Typed state and the check of a claim | [`examples/object_state.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/object_state.py) |
+| Working memory | [`examples/working_state.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/working_state.py) |
+| Field access in a tool | [`examples/masked_tool.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/masked_tool.py) |
+| Replay | [`examples/replay_demo.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/replay_demo.py) |
+| Tool counterfactual | [`examples/tool_counterfactual.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/tool_counterfactual.py) |
+| `types derive --check` and `contract test` in CI | [`examples/ci/niadra-checks.yml`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/ci/niadra-checks.yml) |
+
+## Errors
+
+With `strict=True`, or from helpers you call directly such as `ApiKey.parse()` and the handle functions, the SDK raises:
+
+| Exception | When |
+| --- | --- |
+| `NiadraError` | Base class of all of them. |
+| `ConfigurationError` | Missing or malformed key, bad base URL. |
+| `APIConnectionError` | No HTTP answer: DNS, TCP, TLS or a dropped connection. |
+| `APITimeoutError` | The method's own budget ran out. |
+| `APIError` | Any error status. `status_code`, `code`, `request_id` and `problem` (the RFC 9457 body); `str(error)` reads `HTTP 422 invalid_input: <detail> (request <id>)`, never a value sent. |
+| `BadRequestError` | 400. |
+| `AuthenticationError` | 401: the key is unknown, revoked or malformed. |
+| `PermissionDeniedError` | 403: the key lacks the scope, or the source was cut. |
+| `NotFoundError` | 404. |
+| `ConflictError` | 409: the same `Idempotency-Key` with a different body. |
+| `WrongCellError` | 421: the space is moving between cells. |
+| `UnprocessableEntityError` | 422. |
+| `RateLimitError` | 429, with `retry_after`. |
+| `ServerError` | 5xx. |
+
+The full code catalog is in [Errors](/en/errors). Quote `request_id` when you contact support.
+
+## Local emulator
+
+`niadra-mock`, installed with the package, is a local in-memory emulator of the same API. In tests, run the SDK against it in-process:
+
+```python
+import httpx
+from niadra import Niadra
+from niadra_mock import MOCK_KEY, MockApp
+
+mock = MockApp()
+http = httpx.Client(transport=httpx.WSGITransport(app=mock.wsgi))  # ASGITransport(app=mock.asgi) for AsyncNiadra
+niadra = Niadra(MOCK_KEY, base_url="http://mock", http_client=http, strict=True)
+```
+
+Recent turns become a small pack, deltas are sent once per change, search matches keywords, verification only rises through `verify()`, objects take their state from system events, feedback becomes a `feedback.*` event and media uploads land in `mock.cell.media`. `mock.cell` also lets you inspect events and inject failures (`fail_next`, `revoke`, `cut`, `put_in_holdout`). From a shell, `niadra-mock --port 8765` serves it over HTTP.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="TypeScript SDK" href="/en/sdk/typescript">
+    The same surface for Node 20 and later.
+  </Card>
+  <Card title="Quickstart" href="/en/quickstart">
+    From a key to the first delivered context.
+  </Card>
+  <Card title="Context and views" href="/en/concepts/context">
+    What goes into the pack and why.
+  </Card>
+  <Card title="Errors" href="/en/errors">
+    The code catalog and what to do with each code.
+  </Card>
+</CardGroup>

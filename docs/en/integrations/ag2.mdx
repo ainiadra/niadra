@@ -1,0 +1,79 @@
+---
+title: "AG2"
+description: "The customer's memory in an AG2 1.x agent, AutoGen's community continuation: a middleware and the kit as tools."
+---
+
+`NiadraAG2(conversation)` gives `middleware` (for the `Agent`'s `middleware=` list) and `tools`. Python only. This is the adapter for AG2 1.x (`pip install ag2`), the community continuation of AutoGen; for Microsoft's line, AutoGen's successor is the [Agent Framework](/en/integrations/agent-framework), with an adapter of its own.
+
+## Install
+
+```sh
+pip install 'niadra[ag2]'   # ag2 1.1 or newer, below 2
+```
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | Before every model call the middleware adds one system prompt fragment after the agent's own: the agent's notes (with `agent_memory=`), the pack and the `turn_block`. It is taken out again after the call, so it never piles up in the conversation's prompt |
+| Turns | The request that starts a turn is the customer's; the final answer of the turn is the agent's, with the model's usage (input tokens, prompt cache reads and writes) |
+| Tools | `tools`: AG2 function tools with the kit's names, descriptions and JSON Schemas, bound to the customer |
+| Verification | `conversation.verify()` before the first `ask` |
+| Handoff | `transferred_to_agent()` and `transferred_to_human()` record a transfer, for a network of agents that hands over or an escalation to a person |
+
+## Minimal example
+
+```python
+"""An AG2 agent with the customer's memory as middleware and tools."""
+
+import asyncio
+
+from ag2 import Agent
+from ag2.config import OpenAIConfig
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.ag2 import NiadraAG2
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    memory = NiadraAG2(niadra.conversation("thread-81", subject=phone("+5511912345678")))
+    agent = Agent(
+        "acme",
+        "You are Acme's agent.",
+        config=OpenAIConfig(model="gpt-4.1"),
+        tools=memory.tools,
+        middleware=[memory.middleware],
+    )
+    reply = await agent.ask("Where is my replacement lid?")
+    print(reply.body)
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+
+The same code is in `examples/ag2_agent.py`.
+
+## Agent memory
+
+`NiadraAG2(conversation, agent_memory=True)` puts the agent's own notes before the customer's context and adds the two tools. See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- Works with `Niadra` and `AsyncNiadra` conversations.
+- Nothing here stops the agent: with Niadra slow or down, it runs without the pack and a tool answers that the history is unavailable.
+- An AutoGen 0.4 agent (the older line) uses the kit's tools and `conversation.context()` directly; there is no adapter of its own.
+- Tested against `ag2` 1.1.0 with the model replaced by a fake and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Microsoft Agent Framework" href="/en/integrations/agent-framework">
+    the context provider of Microsoft's line.
+  </Card>
+  <Card title="History navigation" href="/en/concepts/history">
+    the three tools the agent receives.
+  </Card>
+</CardGroup>

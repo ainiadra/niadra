@@ -1,0 +1,13 @@
+{
+  "scope": {
+    "kind": "conversation",
+    "id": "c-8812"
+  },
+  "agent": "closing",
+  "mode": "merge_by_key",
+  "body": {
+    "step": {
+      "$delete": false
+    }
+  }
+}

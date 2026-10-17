@@ -1,0 +1,274 @@
+---
+title: "Events and the batch"
+description: "Messages, system events and actions, sent in batches, idempotent, with per-item errors."
+---
+
+Niadra's omnichannel memory is built from events. Everything that happens with a customer, on any channel, platform or system, enters Niadra through the same door, as an event: what they said, what a system recorded, what an agent did. Every event carries the channel, who spoke and when it happened, and from those events Niadra builds one memory of each customer, for any agent to read. Its content is never edited afterwards. A correction is a new event, and erasure is a separate operation that issues a receipt.
+
+## Three kinds of event
+
+The `kind` field says what the event records:
+
+| `kind` | What it is | Example |
+|---|---|---|
+| `message` | Something said or sent in a conversation. The default. | Marina writes on WhatsApp at 2:02 pm that the technician never came |
+| `system_event` | A change in a system of record, with a `canonical_type` | The ERP emits `invoice.credited` at 2:06 pm |
+| `action` | What an agent did in a system, with the `action` block | The billing agent applies a $40 credit to invoice 0823 |
+
+Each event carries its `channel` (`whatsapp`, `voice`, `app`, `email`, `erp`, `crm`, `ticket`), who spoke in `speaker` (`customer`, `ai_agent`, `human_agent` or `system`), the moment in `occurred_at`, and at least one handle, subject or object saying whom or what it is about. Free text from inside a system, such as a ticket description or an e-mail body, comes in as a `message` on its own channel.
+
+Memory is ordered by `occurred_at`, never by arrival. A WhatsApp resync that replays old messages lands in the right place. A timestamp outside the clock tolerance is corrected to the arrival time and flagged.
+
+## The batch
+
+Every event comes in through `POST /v1/batch`. A batch takes up to **500 items**, with at most **1 MB per item** and **2.5 MB per batch**, and mixes items of several kinds through the `type` field:
+
+| `type` | What it is for |
+|---|---|
+| `event` | A message, system event or action |
+| `identify` | States that two or more handles belong to the same subject |
+| `verify` | Raises the verification level of a conversation or task |
+| `conversation.ended` | Closes the session now instead of waiting for inactivity; the end's `occurred_at` is the time that counts, so send the real time the conversation ended |
+| `task.ended` | Closes the session of an internal-agent task, at its `occurred_at` |
+| `handoff` | Records a transfer to a human or another agent |
+| `heartbeat` | SDK counters used to measure the coverage of each source |
+
+The event is stored before the answer goes out. A batch made only of conversation turns is masked and prepared in process, then sealed and written in one statement, into the space's intake table together with the idempotency keys: the answer leaves from there, and the realtime workers store the rest (conversation, identity, session) right after, in arrival order, through the same code the full transaction runs. The live layer is written while that row lands, so a read that arrives with the batch already finds the turn in `live`. The answer also holds, in the state store, what each turn proves for its conversation (the plausibility of a customer turn, the network attestation of a call) until the worker stores the row: a `context()` read right after the first turn of a new conversation comes out at the level the channel proved, not at V0. A batch with any other kind of item (a system event, an action, `verify`, `identify`, the end of a conversation) takes the full transaction, which first stores what was answered and still waited. You rarely build a batch by hand: the SDKs keep events in a local queue and send them in batches without blocking the agent.
+
+Before storing, ingestion holds back any card number, security code, password or URL credential in the text and leaves a marker in its place (`[withheld:card ****1234]`); the answer counts what it held by type in `masked`. Protocol, order, postal code, amount and date are never touched. See [what is never stored](/en/concepts/privacy#cards-security-codes-and-passwords-are-never-stored).
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+
+niadra = Niadra(channel="whatsapp")
+
+niadra.track({
+    "conversation_id": "wa-8812",
+    "idempotency_key": message["id"],  # the provider message id
+    "handles": [phone("+14155550123")],
+    "speaker": {"role": "customer"},
+    "content": {"text": "The technician never showed up. I am calling you."},
+})
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+
+niadra.track({
+  channel: "whatsapp",
+  conversation_id: "wa-8812",
+  idempotency_key: message.id, // the provider message id
+  handles: [handles.phone("+14155550123")],
+  speaker: "customer",
+  text: "The technician never showed up. I am calling you.",
+});
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/batch" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "items": [
+    {
+      "type": "event",
+      "kind": "message",
+      "idempotency_key": "wamid.HBgLMTQxNTU1NTAxMjMVAgASGBQzQUQ",
+      "channel": "whatsapp",
+      "conversation_id": "wa-8812",
+      "handles": [{"type": "phone_e164", "value": "+14155550123"}],
+      "speaker": {"role": "customer"},
+      "content": {"type": "text", "text": "The technician never showed up. I am calling you."},
+      "occurred_at": "2026-09-22T17:02:11Z"
+    }
+  ]
+}'
+```
+</CodeGroup>
+
+## Idempotency
+
+Every item carries an `idempotency_key`. Use the provider message id whenever there is one: channel providers resend webhooks for days, and the same id never becomes two events. When there is no id, the SDK mints a UUIDv7, which also sorts by time.
+
+Deduplication is by id, never by content similarity. Two identical short messages ("ok", "yes") are two messages. A repeated item is counted in `duplicates`, without an error.
+
+## One bad item never fails the batch
+
+The batch answers **200** when every item went in and **207** when any item was rejected, always with a result per item. What went in counts as `accepted`, what already existed counts as `duplicates`, and every rejected item shows up in `errors` with its position and code:
+
+```json
+{
+  "accepted": 498,
+  "duplicates": 1,
+  "errors": [
+    { "index": 17, "code": "verification_not_allowed", "detail": "V4 is above the ceiling of this source" }
+  ]
+}
+```
+
+Validation happens in two steps: the edge checks only the shape of the envelope, and each item is checked afterwards. The shape rules, which the SDKs also apply before sending:
+
+- a message needs text, a transcript or a media reference;
+- a system event needs a `canonical_type`, such as `invoice.credited`;
+- an action needs the `action` block, and the block is only valid when `kind` is `action`;
+- every event needs at least one handle, subject or object.
+
+An item over 1 MB comes back with the code `too_large`. A body over 2.5 MB, or a batch with more than 500 items, is refused whole with 422 `invalid_input`.
+
+The SDK retries with backoff on network failures, 429 and 503, and never retries a validation 4xx.
+
+## Conversations, tasks and sessions
+
+The `conversation_id` is yours: it can be a WhatsApp thread that lasts months, or a call id. Niadra splits each conversation into **sessions**, windows of activity: turns less than the channel's inactivity apart (about 20 minutes on WhatsApp, 30 in an app) are one session. A session nobody ended closes after 3 minutes without turns and becomes memory then; a turn of the same activity reopens it, and it is extracted again once it goes quiet again: each reopen doubles the wait (3, 6, 12 minutes), never past the channel's inactivity, so a slow conversation is not extracted after every reply. `conversation.ended` closes it at once. For voice, send `conversation.ended` when the call hangs up, with the real time of the end: the session keeps that time, and it decides which side of it a late turn falls on. An end that arrives before its turns is not lost: it is kept for 30 days and closes the session as soon as they arrive. A turn re-sent with the same idempotency key is ignored. Memory dates a conversation by its last turn, not by when the server closed the session, and resolves relative dates in the turns ("tomorrow", "on the 30th") against that day. A call often has two ids, the platform one and the trunk one: send the second in `conversation_aliases`.
+
+Internal agents use a `task_id` instead of a conversation. A task closes on `task.ended` or after 10 minutes without activity. The SDKs handle this with `conversation()` and `task()`, which emit the end when the block finishes. To know whether a conversation or task became memory yet, [`POST /v1/ingest/status`](/en/api/ingest-status) (the id in the body, never in the URL) answers `open` (still receiving turns), `processing` (closed, extraction queued or running, or extracted and memory still applying it), `ready` (extracted and applied: a context read made at that moment already sees it, in the pack and in a pinned conversation's delta and slots), `failed` (a template episode stands in and the nightly pass extracts again) or `unknown`, with the times and the latest extraction's status, never content (after a late turn from before the end, the state goes back to `processing` and then `ready`; a turn after the end shows `open`, because it is a new session); in the SDKs, `ingest_status()` / `ingestStatus()`, after a `flush()` when the turns went through `track()`. The answer also carries `masked`: how many cards, security codes, passwords and secrets ingestion held back from the events of that conversation or task, by type.
+
+When a session closes, its turns stay readable at once (the live layer serves them to every read), and its extraction waits 8 seconds for the same customer's other sessions to close too: the step that closes the session calls no model, it only schedules the extraction for after the window, and the newest session to close takes the others that waited (up to 8 per call, from the last hour, the ones that see the customer through the same identities; the rest follow in the next call). The window catches an imported history or a customer who writes and then calls. Niadra's AI first answers once for the whole batch, on the already masked text: whether each short session (at most two messages, at most 200 characters, no other kind of event) was only a general question answered on the spot (hours, prices, rules, a copy sent: nothing left open, nothing learned about the customer), and whether any message tries to instruct the system or reveals a special category of personal data. A session answered on the spot is kept as its own turns, with the category that screening gave it, and never reaches extraction; a greeting with nothing in it keeps its own lines as its summary too ("Customer: Hi, all good?"), so the agent sees the customer reached out, with no outcome nobody judged. The rest of the batch is one extraction call to Niadra's AI, with a closed schema and hard validation, which names the batch's matters first and then each session's episode; nothing in it names a document, a card, an account or a password: not the PII model, not the words around a number, not such a word anywhere in a turn. Nothing that was said is cut to fit one call: a batch larger than one call reads, or a turn longer than one part (30 thousand characters), is read in windows, in order. Each part of a long turn is marked with its place, parts overlap by 2 thousand characters, a window's last whole turns are read again in the next one, and the windows' answers merge per session, each entry once and with its evidence joined. What extraction learns (summary, resolution, values, open items, instructions) is stored whole, with no cut for length. Only a batch the screening flags has its turns checked for injection one by one, and only then are the texts memory keeps checked for a special category. A short exchange that settles a value (an id, an amount, a date, a code, a postal code) is always memory, however short: its values come from the rule pass as for every session. The summary and resolution of each episode keep identifiers, amounts, dates, codes and addresses exactly as they were said ("protocol 4471 sent", never "protocol number sent"), and never the customer's document, card or bank account numbers. The summary, the resolution, the descriptions of open items and the matter label come out in the language the customer wrote in, even when it is not the space's (the space's only when the customer wrote nothing); the fixed labels of the context follow the space's language. Extraction names the **matter** of the conversation: a short English key of two or three words, the specific thing and what happened to it (`delivery_failed`, `internet_down`, `tow_late`), and a label with that key in the customer's words. The keys of the same customer's conversations of the last 90 days go in the prompt, and the sessions of one batch that are about the same problem share one entry, so the same problem said in other words gets the same key, and two spellings of one key (`delivery_failed`, `failed_delivery`) merge into the one that already exists; a key built on a generic word (service, product, support), or a key or label holding a digit or a placeholder, is dropped, and a conversation about sensitive content keeps no matter ([what extraction never keeps](/en/concepts/privacy#what-extraction-never-keeps)). The [count by matter](/en/concepts/context#skeleton-and-per-turn-slots) reads that key. A deadline the customer states ("I need it by the 24th", "até sexta") becomes a company open item with that due date: the model is asked to record it, and a rule pass over the customer's turns, in Portuguese, English and Spanish, fills in the undated item that cites the turn or adds one ("Deadline the customer asked for") when the model left it out. The rule resolves the day against the turn's date in the space's time zone (a day of the month is the next such day, a weekday the next one), up to 120 days ahead, and only in a sentence that asks for something: "the internet was down until the 24th" is no deadline, nor is "within 24 hours".
+
+A new message enters the hot tier before the API answers the batch, already in the `live` part of the next context read from another channel. Actions and system events take the full transaction and reach the context through the profile's recompilation, which the workers run next; the [benchmark](https://niadra.com/en/benchmark) measures those times in the region.
+
+## Media and late data
+
+Media never travels inside the event. Reserve an upload with [`POST /v1/media/uploads`](/en/api/media-uploads), giving `content_type`, `size_bytes` (up to 500 MB), the `sha256` of the bytes and, whenever you know it, the `subject` the file belongs to: the file is then stored under that person, and erasing them erases it even if no event ever points to it. The answer carries `upload_url`, `upload_headers` and `expires_at`. `PUT` the bytes to `upload_url` with **exactly** the headers of `upload_headers`: the store refuses any other bytes. The text of a file is read only when the space lists the type in `media.extract_text_from` (empty by default): `application/pdf`, `image/jpeg`, `image/png` and the three Office types, `application/vnd.openxmlformats-officedocument.wordprocessingml.document` (DOCX), `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (XLSX) and `application/vnd.openxmlformats-officedocument.presentationml.presentation` (PPTX). The type comes from the file's bytes, never from the declared `content_type`. All reading happens inside the cell's models server, in one child process per document, and no file leaves the region: a PDF gives each page's text layer, and a scanned page, one with no text layer, is rendered at 200 dpi and read by OCR; JPEG and PNG are read by OCR, with the recognized boxes grouped into rows; DOCX, XLSX and PPTX give one line per paragraph and one line per table row. An Office file with macros or a VBA project is refused, as is a ZIP with more than 2,000 entries or more than 100 MiB uncompressed. A file goes up to 20 MiB and is read whole, in windows of 50 pages (sheets or slides), each starting where the last one stopped. None of the text is cut: a text longer than 100 thousand characters becomes several derived turns, in order, each saying which part (`part`) of how many (`parts`) it is. The text keeps its line breaks, so a table row stays one line; the redactor and the identity-document rule read the breaks as spaces and decide exactly as before. The text passes the redactor before extraction and enters as a derived turn, marked `extracted_from` (`pdf_text`, `pdf_ocr`, `ocr` or `office`); a file whose text carries an identity document is never stored. Then send the event with `content.media_ref` and `content.media_sha256`. The SDKs do the three steps in one call.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+
+niadra = Niadra(channel="whatsapp")
+marina = phone("+14155550123")
+
+# Reserves the upload, PUTs the bytes with the exact headers, returns the reference
+media = niadra.upload_media(voice_note_bytes, "audio/ogg", subject=marina)
+
+if media:
+    niadra.track({
+        "conversation_id": "wa-8812",
+        "handles": [marina],
+        "speaker": {"role": "customer"},
+        "content": {
+            "type": "audio",
+            "media_ref": media.media_ref,
+            "media_sha256": media.media_sha256,
+            "transcript": "The technician never showed up. I am calling you.",
+        },
+    })
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+const marina = handles.phone("+14155550123");
+
+// Reserves the upload, PUTs the bytes with the exact headers, returns the reference
+const { data: media } = await niadra.uploadMedia({ data: voiceNote, content_type: "audio/ogg", subject: marina });
+
+if (media) {
+  niadra.track({
+    channel: "whatsapp",
+    conversation_id: "wa-8812",
+    handles: [marina],
+    speaker: "customer",
+    content: {
+      type: "audio",
+      media_ref: media.media_ref,
+      media_sha256: media.media_sha256,
+      transcript: "The technician never showed up. I am calling you.",
+    },
+  });
+}
+```
+```bash cURL
+BASE=https://acme-prod.us-east-2.api.niadra.com
+
+# 1. Reserve the upload
+curl -X POST "$BASE/v1/media/uploads" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" -H "Content-Type: application/json" \
+  -d '{"content_type": "audio/ogg", "size_bytes": 48213, "sha256": "'"$(shasum -a 256 note.ogg | cut -d" " -f1)"'",
+       "subject": {"type": "phone_e164", "value": "+14155550123"}}'
+# => {"media_ref": "...", "upload_url": "https://...", "upload_headers": {"Content-Type": "audio/ogg", ...}, "expires_at": "..."}
+
+# 2. PUT the bytes with every header of upload_headers, exactly as returned
+curl -X PUT "$UPLOAD_URL" -H "Content-Type: audio/ogg" -H "x-amz-checksum-sha256: <value from upload_headers>" --data-binary @note.ogg
+```
+</CodeGroup>
+
+Data that arrives later, such as the full transcript of a call, is a new event, not an update. In a session closed by `conversation.ended` or `task.ended`, a turn whose `occurred_at` is at or before the end's, whenever it arrives, joins the session, which closes again as `ended` without waiting for inactivity: the extraction runs again, and its episode gets a new version, which the [opened item](/en/concepts/history) lists in `versions`. A turn after the end opens a new session in the same conversation, and the memory derived from it sits beside the earlier one. In a session closed on quiet the earlier rule holds: a turn that arrives within 30 minutes of the close (or the channel's inactivity, when longer, as with e-mail), and falls within that inactivity of its last turn, reopens the session; later than that, it opens a new one.
+
+## Settled values
+
+What a session settles that is not a fact about the customer becomes memory of its own too: a protocol, ticket, order, record or receipt number, a postal code, an amount, a date, a code. Each is kept as a typed item (`protocol`, `ticket`, `order`, `record`, `receipt`, `postal_code`, `amount`, `date`, `code`), with who said it, on which channel, in which session and when, so "the protocol you sent me by e-mail" is answered by rule: type `protocol`, channel `email`, most recent. The extraction returns the values as the turns wrote them; a deterministic net reads the same turns and keeps what it finds (a token of three or more digits, typed by the word before it, in Portuguese, English or Spanish), so a session the gate skipped or whose extraction failed still keeps its protocol or its new postal code.
+
+Three vetoes, on both paths: never a document, card or bank account number, nor a password or verification code (the word next to the token vetoes it, and a document word vetoes it from up to six words back; "ID" names a document, as in "my ID number" and "o ID é", unless a value word qualifies it, as in "order ID" and "ID do pedido"; a number that passes a document or card check digit is dropped whatever the word); never what came back from a redaction, other than a postal code; never a type the list does not have. Cards, security codes and passwords do not even reach the two paths: ingestion holds them back before storing and extraction receives only the marker.
+
+Among values of one type, the most recent holds; between statements of the same moment, the origin breaks the tie: system of record, human agent, AI agent, customer, in that order. A system record in force supersedes the other side's values stated up to that moment, with a `supersedes` edge; one stated after the record stays beside it. [History search](/en/concepts/history) finds an item by its value, and the data subject's [access package](/en/concepts/privacy) carries the settled values.
+
+## Extraction guidance
+
+The space's schema says what extraction may write: predicates, categories, intents, outcomes. The `extraction-guidance` configuration document, written and approved by the integration role like the schema, says what it should focus on and leave out, in the company's own words: free instructions (up to 2,000 characters), an `include` list of topics to capture with care and an `exclude` list of topics to leave out (up to 20 each), and the same per source, in `sources`, by id or name, adding to the space's like the schema's per-source predicates. The guidance goes into the prompt after every rule it cannot change (evidence for every item, the space's predicates, sensitive data only under a sensitive predicate), in the cached part of the prompt, and changed guidance extracts the recent sessions again; a space without it keeps its usual prompt.
+
+## Anchors on the system's events
+
+A question such as "what did I report after the inspection" is read against the customer's own system event, without a model: the time words ("depois de", "antes de", "desde", "after", "since", "después de") and the event word ("inspection", "delivery", "card replacement") match a canonical type, and the customer's latest event of that type (or the first, when the question says so) gives the date that becomes a window. The words live in the space's configuration, in `event_anchors` (the starter covers inspection, delivery, pickup, card replacement, technician visit, installation, invoice and payment, in Portuguese, English and Spanish), and a [mapping rule](/en/guides/system-webhooks) can name the words for the event it maps in `anchor_terms`. An anchor without its event filters nothing.
+
+## Source coverage
+
+The SDK sends a periodic `heartbeat` with how many events it sent. Niadra shows what the SDK says it sent beside what arrived, and marks as `silent` a source that goes 30 minutes without sending an event. The context reports this in `coverage`, and a silent source can fire a [trigger](/en/concepts/triggers-and-webhooks). [`GET /v1/sources/coverage`](/en/api/sources-coverage) shows each source day by day, for up to 90 days: what the SDK says it `sent`, what was `received`, what was `rejected` and what arrived with a type your mapping does not cover (`unmapped`).
+
+## Which context the agent used
+
+When an agent answers, the SDK stamps its turn with `context_stamp`: the `etag` of the context that went into the prompt and `injected_at`, the moment it went in. That is how [context use](/en/concepts/context-use) tells a context that arrived late from one that arrived and went unused. Inside a `conversation()` the SDKs stamp it for you when you call `mark_injected()` in Python or `markInjected()` in TypeScript; send it yourself only when you build events by hand.
+
+The turn of an agent may also carry `backing`, what the backing check of the SDK found in the answer: how many numbers, dates, codes and amounts it stated, which of them no source the agent had backs (the pack, the system records, the words of the customer, the tool results it recorded) and which [guard lines](/en/concepts/context#guard-lines-and-the-intent-gate) it went against, by their short ids; kinds and counts, never a value. Memory counts it per agent and per vendor in [`GET /v1/context-use`](/en/api/context-use) and sends the `guard.violated` webhook when the turn arrives.
+
+
+An event can also say until when what it states holds, in `valid_until`: an offer valid until a date, a temporary condition. After that moment, the facts it gave leave the context and the search; `show_expired` on the search still finds them.
+
+```json
+{
+  "type": "event",
+  "idempotency_key": "call-4471-t2",
+  "channel": "voice",
+  "conversation_id": "call-4471",
+  "handles": [{"type": "phone_e164", "value": "+14155550123"}],
+  "speaker": {"role": "ai_agent"},
+  "content": {"text": "Hi Marina, I can see the $40 credit on your August bill."},
+  "context_stamp": {"etag": "\"cp1-9f2c4e\"", "injected_at": "2026-09-22T17:07:04Z"},
+  "occurred_at": "2026-09-22T17:07:06Z"
+}
+```
+
+## Files: seed identity or backfill history
+
+For volume that does not belong in the conversation path, [`POST /v1/ingest/files`](/en/api/ingest-files) takes a whole file of up to 512 MB, with the `track` scope, and answers **202** with an `import_id`:
+
+- `text/csv` seeds identity. The header names handle types (`phone_e164`, `email`, `system_id`...), with `<type>_scope` for the namespace, `<type>_2` to `<type>_9` for more values of the same type, and the optional `idempotency_key`, `occurred_at` and `subject_kind`. Each row becomes one `identify` with the method `system_import`, under the same protections as any other.
+- `application/x-ndjson` backfills history: each line is one item of `POST /v1/batch`, validated the same way. Each imported conversation needs its own `occurred_at` on every event and its own `conversation.ended`: memory dates the conversation by its last turn, not by the file's arrival, and relative dates in the turns resolve against that day.
+
+```bash
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/ingest/files" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: text/csv" \
+  --data-binary @crm-customers.csv
+```
+
+Follow the import with [`GET /v1/ingest/files/{import_id}`](/en/api/ingest-file): `status` (`queued`, `running`, `completed`, `failed`), `records`, `accepted`, `duplicates`, `rejected` and the first 100 row errors, which carry the row number and never the values.
+
+## Corrections
+
+A correction is an event too. [`POST /v1/feedback`](/en/api/feedback) takes one `action`, and each action needs its own fields: `retract_fact` needs `fact_id`; `correct_fact` needs `fact_id` and `value`; `resolve_open_item` needs `open_item_id`; the ids are the bare UUIDs search and the timeline list, and a prefixed id is refused; `conversation_outcome` needs `conversation_id` and `value`. A request without them is refused with 422, instead of being stored and skipped. The answer has the shape of the batch answer. [`POST /v1/feedback/batch`](/en/api/feedback-batch) takes up to 500 corrections in one call, each with its own idempotency key: 200, or 207 with one error per refused item, like the batch. Both SDKs have `feedback()` and `feedback_batch()` / `feedbackBatch()`. A wrong retraction or correction is undone by the `security` role, with [`POST /v1/facts/{fact_id}/restore`](/en/api/facts-restore): the fact comes back as it was, the correction that replaced it is retracted and the history of the fact keeps every step; agents do not have this action. A feedback event is lineage, never evidence: it tells the history of the fact, but only the events of the customer hold it, so an erasure takes the fact even if the company corrected or restored it.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Identity and verification" href="/en/concepts/identity">
+    how handles become one customer.
+  </Card>
+  <Card title="Systems, objects and actions" href="/en/concepts/systems">
+    ERP events and actions that close open items.
+  </Card>
+  <Card title="Send a batch" href="/en/api/batch">
+    the full reference for `POST /v1/batch`.
+  </Card>
+</CardGroup>

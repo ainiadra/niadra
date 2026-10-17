@@ -1,0 +1,5 @@
+---
+title: "Release a refresh request"
+description: "A leased request the worker cannot answer: the object is not at the source (`not_found`) or the fetch failed (`failed`). The request leaves at once and its paid call counts; a watch revalidation falls back to the type's `refetch.unconfirmed_watch`."
+openapi: "/openapi/en/cell.json POST /v1/state/refresh-requests/{request_id}/release"
+---

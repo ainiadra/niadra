@@ -1,0 +1,73 @@
+---
+title: "Microsoft Agent Framework"
+description: "The customer's memory as a Microsoft Agent Framework context provider, AutoGen's successor."
+---
+
+`NiadraContextProvider` is an Agent Framework context provider: before each run it adds the pack to the instructions and the history tools to the agent, and records the turns. Python only.
+
+## Install
+
+```sh
+pip install 'niadra[agent-framework]'   # agent-framework-core 1.19 or newer, below 2
+```
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | Before each run the provider adds the pack (after the agent's own notes, with `agent_memory=`) and the `turn_block` as instructions, which the framework places after the agent's own |
+| Turns | The run's new user messages are the customer's turns; the run's response is the agent's turn, with its usage (input tokens, cache reads and writes) and model |
+| Tools | `FunctionTool`s whose input model is the kit's JSON Schema, bound to the customer |
+| Verification | `conversation.verify()` before the run |
+| Handoff | `transferred_to_agent()` and `transferred_to_human()` record the transfer, for a workflow that hands over or an escalation to a person |
+
+## Minimal example
+
+```python
+"""A Microsoft Agent Framework agent with the customer's memory as a context provider."""
+
+import asyncio
+
+from agent_framework import Agent
+from agent_framework.openai import OpenAIChatClient
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.agent_framework import NiadraContextProvider
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    provider = NiadraContextProvider(niadra.conversation("thread-81", subject=phone("+5511912345678")))
+    agent = Agent(
+        client=OpenAIChatClient(), instructions="You are Acme's agent.", context_providers=[provider]
+    )
+    print((await agent.run("Where is my replacement lid?")).text)
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+
+The same code is in `examples/agent_framework_agent.py`.
+
+## Agent memory
+
+`NiadraContextProvider(conversation, agent_memory=True)` puts the agent's own notes before the customer's context and adds the two tools. See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- This is the adapter for the Agent Framework, AutoGen's successor in Microsoft's line. AutoGen's community continuation, AG2 1.x, has an [adapter of its own](/en/integrations/ag2); an AutoGen 0.4 agent uses the kit's tools and `conversation.context()` directly.
+- Nothing here fails the run: without a pack, the instructions stay yours alone.
+- Tested against `agent-framework-core` 1.19 with the model replaced by a fake and Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="OpenAI and Azure OpenAI" href="/en/integrations/openai">
+    the client `wrap()`, for those calling the model directly.
+  </Card>
+  <Card title="Internal agents" href="/en/guides/internal-agents">
+    tasks, objects and actions that close open items.
+  </Card>
+</CardGroup>

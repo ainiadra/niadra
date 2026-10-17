@@ -1,0 +1,6610 @@
+{
+  "components": {
+    "schemas": {
+      "AccessChangeKind": {
+        "enum": [
+          "invited",
+          "invitation_accepted",
+          "roles_changed",
+          "deactivated",
+          "reactivated",
+          "second_factor_reset",
+          "sso_person_created",
+          "sso_roles_synced",
+          "sso_saved",
+          "sso_removed"
+        ],
+        "title": "AccessChangeKind",
+        "type": "string"
+      },
+      "AccessChangeOut": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who made the change; null when the tenant's identity provider made it at a sign-in.",
+            "title": "Actor Id"
+          },
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "change_id": {
+            "format": "uuid",
+            "title": "Change Id",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AccessChangeKind"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "change_id",
+          "kind",
+          "at",
+          "user_id",
+          "actor_id",
+          "reason",
+          "detail"
+        ],
+        "title": "AccessChangeOut",
+        "type": "object"
+      },
+      "Audience": {
+        "enum": [
+          "customer_agent",
+          "internal_agent",
+          "human",
+          "reviewer",
+          "analyst",
+          "trigger_target",
+          "export"
+        ],
+        "title": "Audience",
+        "type": "string"
+      },
+      "BindingIn": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "source_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Source Ids",
+            "type": "array"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "BindingIn",
+        "type": "object"
+      },
+      "BindingOut": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "source_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Source Ids",
+            "type": "array"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
+          }
+        },
+        "required": [
+          "role",
+          "space_id",
+          "source_ids"
+        ],
+        "title": "BindingOut",
+        "type": "object"
+      },
+      "CellCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "pattern": "^https://",
+            "title": "Address",
+            "type": "string"
+          },
+          "capacity": {
+            "minimum": 1,
+            "title": "Capacity",
+            "type": "integer"
+          },
+          "cell_id": {
+            "pattern": "^[a-z0-9-]{3,63}$",
+            "title": "Cell Id",
+            "type": "string"
+          },
+          "region": {
+            "pattern": "^[a-z]{2}(-[a-z]+)+-\\d{1,2}$",
+            "title": "Region",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cell_id",
+          "region",
+          "address",
+          "capacity"
+        ],
+        "title": "CellCreate",
+        "type": "object"
+      },
+      "CellOut": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "capacity": {
+            "title": "Capacity",
+            "type": "integer"
+          },
+          "cell_id": {
+            "title": "Cell Id",
+            "type": "string"
+          },
+          "code_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code Version"
+          },
+          "region": {
+            "title": "Region",
+            "type": "string"
+          },
+          "schema_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Revision"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CellStatus"
+          }
+        },
+        "required": [
+          "cell_id",
+          "region",
+          "address",
+          "capacity",
+          "status"
+        ],
+        "title": "CellOut",
+        "type": "object"
+      },
+      "CellStatus": {
+        "enum": [
+          "active",
+          "draining",
+          "closed"
+        ],
+        "title": "CellStatus",
+        "type": "string"
+      },
+      "CertificateOut": {
+        "additionalProperties": false,
+        "properties": {
+          "not_after": {
+            "format": "date-time",
+            "title": "Not After",
+            "type": "string"
+          },
+          "pem": {
+            "description": "The certificate as stored: public, so the Console shows it for the next save.",
+            "title": "Pem",
+            "type": "string"
+          },
+          "sha256_fingerprint": {
+            "title": "Sha256 Fingerprint",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "not_after",
+          "sha256_fingerprint",
+          "pem"
+        ],
+        "title": "CertificateOut",
+        "type": "object"
+      },
+      "ConfigTypeOut": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "roles": {
+            "description": "Roles that may write and approve it, besides admin.",
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "description",
+          "roles"
+        ],
+        "title": "ConfigTypeOut",
+        "type": "object"
+      },
+      "DeletionReceiptIn": {
+        "additionalProperties": false,
+        "properties": {
+          "cell_id": {
+            "pattern": "^[a-z0-9-]{3,63}$",
+            "title": "Cell Id",
+            "type": "string"
+          },
+          "receipt": {
+            "additionalProperties": true,
+            "description": "The receipt as the cell drafted it; `receipt_hash` is the SHA-256 of its canonical JSON.",
+            "title": "Receipt",
+            "type": "object"
+          },
+          "receipt_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Receipt Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cell_id",
+          "receipt",
+          "receipt_hash"
+        ],
+        "title": "DeletionReceiptIn",
+        "type": "object"
+      },
+      "DeletionReceiptOut": {
+        "additionalProperties": false,
+        "description": "What the cell deleted, as it reported it. The data keys are destroyed, so any copy of the space's\ndata that still exists (the database server's own snapshots, until `instance_snapshot_expiry`) can\nno longer be read.",
+        "properties": {
+          "backups_deleted": {
+            "description": "Nightly dumps of the space's database deleted.",
+            "title": "Backups Deleted",
+            "type": "integer"
+          },
+          "cell_id": {
+            "title": "Cell Id",
+            "type": "string"
+          },
+          "db_name": {
+            "description": "The space's database, dropped.",
+            "title": "Db Name",
+            "type": "string"
+          },
+          "dek_versions_destroyed": {
+            "description": "Versions of the space's data keys destroyed.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Dek Versions Destroyed",
+            "type": "array"
+          },
+          "dropped_at": {
+            "format": "date-time",
+            "title": "Dropped At",
+            "type": "string"
+          },
+          "instance_snapshot_expiry": {
+            "description": "When the last automatic snapshot of the database server that may hold the space's encrypted data expires.",
+            "format": "date-time",
+            "title": "Instance Snapshot Expiry",
+            "type": "string"
+          },
+          "objects_deleted": {
+            "description": "Stored objects deleted: raw payloads, media, imports, exports, event archives and audit anchors.",
+            "title": "Objects Deleted",
+            "type": "integer"
+          },
+          "receipt_hash": {
+            "description": "SHA-256 of the receipt's canonical JSON, in hexadecimal.",
+            "title": "Receipt Hash",
+            "type": "string"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "secrets_deleted": {
+            "description": "Secret versions deleted (webhook and export credentials).",
+            "title": "Secrets Deleted",
+            "type": "integer"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "cell_id",
+          "db_name",
+          "dropped_at",
+          "dek_versions_destroyed",
+          "objects_deleted",
+          "backups_deleted",
+          "secrets_deleted",
+          "instance_snapshot_expiry",
+          "receipt_hash",
+          "received_at"
+        ],
+        "title": "DeletionReceiptOut",
+        "type": "object"
+      },
+      "DiffCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "title": "Document"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "type",
+          "document",
+          "reason"
+        ],
+        "title": "DiffCreate",
+        "type": "object"
+      },
+      "DiffOut": {
+        "additionalProperties": false,
+        "properties": {
+          "applied_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Version"
+          },
+          "author_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Id"
+          },
+          "author_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who proposed it, to show: the person's e-mail, or the label of an author that is not a person (`assistant@<cell>`, `niadra:observed`). Null only for a person who no longer exists.",
+            "title": "Author Label"
+          },
+          "base_version": {
+            "title": "Base Version",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "decided_by_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The e-mail of the person who approved or rejected it.",
+            "title": "Decided By Label"
+          },
+          "diff_id": {
+            "format": "uuid",
+            "title": "Diff Id",
+            "type": "string"
+          },
+          "document": {
+            "title": "Document"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "rollback_of": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollback Of"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DiffStatus"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "diff_id",
+          "space_id",
+          "type",
+          "status",
+          "reason",
+          "base_version",
+          "author_id",
+          "author_label",
+          "decided_by",
+          "decided_at",
+          "applied_version",
+          "rollback_of",
+          "created_at",
+          "document"
+        ],
+        "title": "DiffOut",
+        "type": "object"
+      },
+      "DiffStatus": {
+        "enum": [
+          "pending",
+          "proposed",
+          "applied",
+          "rejected"
+        ],
+        "title": "DiffStatus",
+        "type": "string"
+      },
+      "DocumentOut": {
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "title": "Document"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "space_id",
+          "type",
+          "version",
+          "document"
+        ],
+        "title": "DocumentOut",
+        "type": "object"
+      },
+      "Environment": {
+        "enum": [
+          "sandbox",
+          "production"
+        ],
+        "title": "Environment",
+        "type": "string"
+      },
+      "InvitationAcceptOut": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "description": "The person's e-mail, for the sign-in that follows.",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "InvitationAcceptOut",
+        "type": "object"
+      },
+      "InvitationAcceptRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "maxLength": 1024,
+            "minLength": 12,
+            "title": "Password",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 128,
+            "minLength": 20,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "password"
+        ],
+        "title": "InvitationAcceptRequest",
+        "type": "object"
+      },
+      "InvitationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "token": {
+            "description": "Shown once. The Console turns it into the link `<console>/console/convite#<token>`, which works once and until `expires_at`. Niadra keeps only a keyed hash of it.",
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expires_at"
+        ],
+        "title": "InvitationOut",
+        "type": "object"
+      },
+      "InvitationPreviewOut": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "tenant_name": {
+            "title": "Tenant Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "tenant_name",
+          "expires_at"
+        ],
+        "title": "InvitationPreviewOut",
+        "type": "object"
+      },
+      "InvitationTokenRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "maxLength": 128,
+            "minLength": 20,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "InvitationTokenRequest",
+        "type": "object"
+      },
+      "IssuedKeyOut": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/KeyOut"
+          },
+          "secret": {
+            "description": "The full key. Shown once; Niadra keeps only two hashes of it.",
+            "title": "Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "secret"
+        ],
+        "title": "IssuedKeyOut",
+        "type": "object"
+      },
+      "KeyCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Scope"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Defaults follow the source's audience.",
+            "title": "Scopes"
+          }
+        },
+        "title": "KeyCreate",
+        "type": "object"
+      },
+      "KeyOut": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/KeyStatus"
+          }
+        },
+        "required": [
+          "key_id",
+          "source_id",
+          "scopes",
+          "status",
+          "created_at",
+          "expires_at",
+          "revoked_at"
+        ],
+        "title": "KeyOut",
+        "type": "object"
+      },
+      "KeyRotate": {
+        "additionalProperties": false,
+        "properties": {
+          "grace_seconds": {
+            "anyOf": [
+              {
+                "maximum": 604800,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grace Seconds"
+          }
+        },
+        "title": "KeyRotate",
+        "type": "object"
+      },
+      "KeyStatus": {
+        "enum": [
+          "active",
+          "revoked"
+        ],
+        "title": "KeyStatus",
+        "type": "string"
+      },
+      "LoginRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "recovery_code": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "One of the person's recovery codes, in place of `totp` when the authenticator app is lost. Case, spaces and dashes do not matter. Each code works once.",
+            "title": "Recovery Code"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
+          },
+          "totp": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{6}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totp"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "MeOut": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Not collected yet; reserved for SSO profiles.",
+            "title": "Name"
+          },
+          "password_set": {
+            "default": true,
+            "description": "False for a person the tenant's SSO created: they sign in only through it.",
+            "title": "Password Set",
+            "type": "boolean"
+          },
+          "spaces": {
+            "description": "Every space the person can open, with the roles held there.",
+            "items": {
+              "$ref": "#/components/schemas/SpaceRoles"
+            },
+            "title": "Spaces",
+            "type": "array"
+          },
+          "sso": {
+            "default": false,
+            "description": "The e-mail domain belongs to the tenant's SSO connection.",
+            "title": "Sso",
+            "type": "boolean"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "tenant_id",
+          "email",
+          "spaces"
+        ],
+        "title": "MeOut",
+        "type": "object"
+      },
+      "MoveOut": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "from_cell": {
+            "title": "From Cell",
+            "type": "string"
+          },
+          "move_id": {
+            "format": "uuid",
+            "title": "Move Id",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MoveStatus"
+          },
+          "to_cell": {
+            "title": "To Cell",
+            "type": "string"
+          }
+        },
+        "required": [
+          "move_id",
+          "from_cell",
+          "to_cell",
+          "status",
+          "requested_at"
+        ],
+        "title": "MoveOut",
+        "type": "object"
+      },
+      "MoveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cell_id": {
+            "title": "Cell Id",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cell_id",
+          "reason"
+        ],
+        "title": "MoveRequest",
+        "type": "object"
+      },
+      "MoveStatus": {
+        "enum": [
+          "copying",
+          "completed"
+        ],
+        "title": "MoveStatus",
+        "type": "string"
+      },
+      "OidcIn": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required when the connection is created or moves to OIDC; null keeps the one stored. Never returned: it is stored sealed with the control plane's key.",
+            "title": "Client Secret"
+          },
+          "issuer": {
+            "description": "The provider's issuer, https. Niadra reads `<issuer>/.well-known/openid-configuration`.",
+            "maxLength": 2048,
+            "minLength": 9,
+            "title": "Issuer",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "Scopes beyond `openid email profile`, which always go, such as `groups`.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "issuer",
+          "client_id"
+        ],
+        "title": "OidcIn",
+        "type": "object"
+      },
+      "OidcOut": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_secret_set": {
+            "description": "Always true: the secret itself is never returned.",
+            "title": "Client Secret Set",
+            "type": "boolean"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "issuer",
+          "client_id",
+          "scopes",
+          "client_secret_set"
+        ],
+        "title": "OidcOut",
+        "type": "object"
+      },
+      "PasswordRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The person's password once more: a session alone does not change the second factor.",
+            "title": "Password"
+          },
+          "totp": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{6}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "In place of the password, only for a person the tenant's SSO created, who has none: the current code of the authenticator app.",
+            "title": "Totp"
+          }
+        },
+        "title": "PasswordRequest",
+        "type": "object"
+      },
+      "PlacementOut": {
+        "additionalProperties": false,
+        "properties": {
+          "cell_id": {
+            "title": "Cell Id",
+            "type": "string"
+          },
+          "move": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoveOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "cell_id"
+        ],
+        "title": "PlacementOut",
+        "type": "object"
+      },
+      "PreferenceIn": {
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "description": "Any JSON value but null, at most 4096 bytes once serialized.",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "PreferenceIn",
+        "type": "object"
+      },
+      "PreferencesOut": {
+        "additionalProperties": false,
+        "description": "What the Console keeps for the signed-in person across browsers, by key.",
+        "properties": {
+          "preferences": {
+            "additionalProperties": true,
+            "title": "Preferences",
+            "type": "object"
+          }
+        },
+        "required": [
+          "preferences"
+        ],
+        "title": "PreferencesOut",
+        "type": "object"
+      },
+      "Problem": {
+        "additionalProperties": false,
+        "description": "RFC 9457 problem details; `code` comes from the versioned error catalog.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Request Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "default": "about:blank",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "status",
+          "code"
+        ],
+        "title": "Problem",
+        "type": "object"
+      },
+      "ProjectCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "region": {
+            "pattern": "^[a-z]{2}(-[a-z]+)+-\\d{1,2}$",
+            "title": "Region",
+            "type": "string"
+          },
+          "slug": {
+            "pattern": "^[a-z][a-z0-9-]{1,30}[a-z0-9]$",
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug",
+          "region"
+        ],
+        "title": "ProjectCreate",
+        "type": "object"
+      },
+      "ProjectOut": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "region": {
+            "title": "Region",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "spaces": {
+            "items": {
+              "$ref": "#/components/schemas/SpaceOut"
+            },
+            "title": "Spaces",
+            "type": "array"
+          }
+        },
+        "required": [
+          "project_id",
+          "name",
+          "slug",
+          "region",
+          "spaces"
+        ],
+        "title": "ProjectOut",
+        "type": "object"
+      },
+      "ProposalCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "cell_id": {
+            "title": "Cell Id",
+            "type": "string"
+          },
+          "document": {
+            "title": "Document"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "type",
+          "document",
+          "reason",
+          "cell_id"
+        ],
+        "title": "ProposalCreate",
+        "type": "object"
+      },
+      "QuotaIn": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "minimum": 0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "metric": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Metric",
+            "type": "string"
+          },
+          "period": {
+            "default": "month",
+            "title": "Period",
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "metric",
+          "limit"
+        ],
+        "title": "QuotaIn",
+        "type": "object"
+      },
+      "RecoveryCodesOut": {
+        "additionalProperties": false,
+        "properties": {
+          "recovery_codes": {
+            "description": "Ten single-use codes, `XXXXX-XXXXX`. Shown once; Niadra keeps only a keyed hash of each, and the earlier codes of the person no longer work.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Recovery Codes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recovery_codes"
+        ],
+        "title": "RecoveryCodesOut",
+        "type": "object"
+      },
+      "RevocationFeedOut": {
+        "additionalProperties": false,
+        "description": "`body` is `{\"cell_id\", \"seq\", \"keys\": [{\"space_id\", \"key_id\"}], \"sources\": [...]}`, the cell's\n`RevocationFeed`; `signature` (Ed25519, base64url) covers its canonical JSON. Pass `after=seq` next.",
+        "properties": {
+          "body": {
+            "additionalProperties": true,
+            "title": "Body",
+            "type": "object"
+          },
+          "kid": {
+            "title": "Kid",
+            "type": "string"
+          },
+          "signature": {
+            "title": "Signature",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body",
+          "kid",
+          "signature"
+        ],
+        "title": "RevocationFeedOut",
+        "type": "object"
+      },
+      "RevocationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Id"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "space_id",
+          "kind",
+          "source_id",
+          "key_id",
+          "at"
+        ],
+        "title": "RevocationOut",
+        "type": "object"
+      },
+      "RevokeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "RevokeRequest",
+        "type": "object"
+      },
+      "Role": {
+        "description": "Console roles, combinable.",
+        "enum": [
+          "admin",
+          "security",
+          "integration",
+          "review",
+          "analysis",
+          "vendor"
+        ],
+        "title": "Role",
+        "type": "string"
+      },
+      "RoleMappingModel": {
+        "additionalProperties": false,
+        "properties": {
+          "group": {
+            "description": "A value of the groups claim (OIDC) or attribute (SAML): a group name, or an id such as the object id Microsoft Entra ID sends. Compared without case.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Group",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role",
+            "description": "Given on the whole tenant. The vendor role is never given by a group."
+          }
+        },
+        "required": [
+          "group",
+          "role"
+        ],
+        "title": "RoleMappingModel",
+        "type": "object"
+      },
+      "RoleOut": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        },
+        "required": [
+          "role",
+          "description"
+        ],
+        "title": "RoleOut",
+        "type": "object"
+      },
+      "RolesSet": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why, kept in the person's access history.",
+            "title": "Reason"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/BindingIn"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Roles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "roles"
+        ],
+        "title": "RolesSet",
+        "type": "object"
+      },
+      "RollbackRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "RollbackRequest",
+        "type": "object"
+      },
+      "SamlIn": {
+        "additionalProperties": false,
+        "properties": {
+          "idp_certificate": {
+            "description": "The certificate that signs the assertions, PEM or the base64 body from the metadata.",
+            "maxLength": 20000,
+            "minLength": 100,
+            "title": "Idp Certificate",
+            "type": "string"
+          },
+          "idp_entity_id": {
+            "description": "The provider's entity id (issuer).",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Idp Entity Id",
+            "type": "string"
+          },
+          "idp_sso_url": {
+            "description": "The provider's single sign-on address for the HTTP-Redirect binding, https.",
+            "maxLength": 2048,
+            "minLength": 9,
+            "title": "Idp Sso Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "idp_entity_id",
+          "idp_sso_url",
+          "idp_certificate"
+        ],
+        "title": "SamlIn",
+        "type": "object"
+      },
+      "SamlOut": {
+        "additionalProperties": false,
+        "properties": {
+          "certificate": {
+            "$ref": "#/components/schemas/CertificateOut"
+          },
+          "idp_entity_id": {
+            "title": "Idp Entity Id",
+            "type": "string"
+          },
+          "idp_sso_url": {
+            "title": "Idp Sso Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "idp_entity_id",
+          "idp_sso_url",
+          "certificate"
+        ],
+        "title": "SamlOut",
+        "type": "object"
+      },
+      "Scope": {
+        "enum": [
+          "track",
+          "act",
+          "context",
+          "search",
+          "identify",
+          "admin",
+          "analytics",
+          "agent_memory",
+          "agent_memory:write",
+          "replay",
+          "coordinate",
+          "state:push",
+          "agent_state",
+          "identity:link"
+        ],
+        "title": "Scope",
+        "type": "string"
+      },
+      "SecondFactorConfirmRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "totp": {
+            "description": "The current code of the new authenticator app.",
+            "pattern": "^\\d{6}$",
+            "title": "Totp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "totp"
+        ],
+        "title": "SecondFactorConfirmRequest",
+        "type": "object"
+      },
+      "SecondFactorOut": {
+        "additionalProperties": false,
+        "properties": {
+          "secret": {
+            "description": "Base32 TOTP secret, for typing into an authenticator app.",
+            "title": "Secret",
+            "type": "string"
+          },
+          "totp_uri": {
+            "description": "otpauth:// address of the same secret, for a QR code.",
+            "title": "Totp Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret",
+          "totp_uri"
+        ],
+        "title": "SecondFactorOut",
+        "type": "object"
+      },
+      "SecondFactorRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "SecondFactorRequest",
+        "type": "object"
+      },
+      "SecondFactorResetOut": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "reset_by": {
+            "description": "The admin who reset it.",
+            "format": "uuid",
+            "title": "Reset By",
+            "type": "string"
+          },
+          "reset_id": {
+            "format": "uuid",
+            "title": "Reset Id",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reset_id",
+          "user_id",
+          "reset_by",
+          "reason",
+          "at"
+        ],
+        "title": "SecondFactorResetOut",
+        "type": "object"
+      },
+      "SecondFactorResetRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "description": "Why, kept with the reset.",
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "SecondFactorResetRequest",
+        "type": "object"
+      },
+      "SecondFactorStatusOut": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the authenticator in use was confirmed; null while there is none.",
+            "title": "Confirmed At"
+          },
+          "recovery_codes_left": {
+            "description": "Recovery codes not used yet.",
+            "title": "Recovery Codes Left",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "confirmed_at",
+          "recovery_codes_left"
+        ],
+        "title": "SecondFactorStatusOut",
+        "type": "object"
+      },
+      "SecretRefIn": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "ref": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Ref",
+            "type": "string"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "space_id",
+          "ref",
+          "kind",
+          "version"
+        ],
+        "title": "SecretRefIn",
+        "type": "object"
+      },
+      "SecretRefOut": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "ref": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Ref",
+            "type": "string"
+          },
+          "rotated_at": {
+            "format": "date-time",
+            "title": "Rotated At",
+            "type": "string"
+          },
+          "rotated_by": {
+            "format": "uuid",
+            "title": "Rotated By",
+            "type": "string"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "space_id",
+          "ref",
+          "kind",
+          "version",
+          "rotated_by",
+          "rotated_at"
+        ],
+        "title": "SecretRefOut",
+        "type": "object"
+      },
+      "ServiceProviderOut": {
+        "additionalProperties": false,
+        "description": "What to paste into the identity provider.",
+        "properties": {
+          "oidc_redirect_uri": {
+            "description": "OIDC: the redirect (callback) URI of the application.",
+            "title": "Oidc Redirect Uri",
+            "type": "string"
+          },
+          "saml_acs_url": {
+            "description": "SAML: the assertion consumer service, HTTP-POST binding.",
+            "title": "Saml Acs Url",
+            "type": "string"
+          },
+          "saml_entity_id": {
+            "description": "SAML: the service provider's entity id (audience).",
+            "title": "Saml Entity Id",
+            "type": "string"
+          },
+          "saml_metadata_url": {
+            "description": "SAML: the service provider's metadata, once the connection exists.",
+            "title": "Saml Metadata Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "oidc_redirect_uri",
+          "saml_entity_id",
+          "saml_acs_url",
+          "saml_metadata_url"
+        ],
+        "title": "ServiceProviderOut",
+        "type": "object"
+      },
+      "SnapshotOut": {
+        "additionalProperties": false,
+        "description": "`signature` covers the canonical JSON of `manifest`; `keys_signature` that of `keys` (both Ed25519,\nbase64url). Each document's SHA-256 over its canonical JSON must match the manifest.",
+        "properties": {
+          "documents": {
+            "additionalProperties": true,
+            "title": "Documents",
+            "type": "object"
+          },
+          "keys": {
+            "additionalProperties": true,
+            "title": "Keys",
+            "type": "object"
+          },
+          "keys_signature": {
+            "title": "Keys Signature",
+            "type": "string"
+          },
+          "kid": {
+            "title": "Kid",
+            "type": "string"
+          },
+          "manifest": {
+            "additionalProperties": true,
+            "title": "Manifest",
+            "type": "object"
+          },
+          "signature": {
+            "title": "Signature",
+            "type": "string"
+          }
+        },
+        "required": [
+          "manifest",
+          "signature",
+          "kid",
+          "documents",
+          "keys",
+          "keys_signature"
+        ],
+        "title": "SnapshotOut",
+        "type": "object"
+      },
+      "SourceCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "audience": {
+            "$ref": "#/components/schemas/Audience"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "confirms_before_acting": {
+            "default": false,
+            "title": "Confirms Before Acting",
+            "type": "boolean"
+          },
+          "critical": {
+            "default": false,
+            "title": "Critical",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "navigation_enabled": {
+            "default": true,
+            "title": "Navigation Enabled",
+            "type": "boolean"
+          },
+          "purposes": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Purposes",
+            "type": "array"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "trusted_action_ops": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Trusted Action Ops",
+            "type": "array"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor"
+          },
+          "verification_ceiling": {
+            "$ref": "#/components/schemas/Verification",
+            "default": "V2"
+          }
+        },
+        "required": [
+          "space_id",
+          "name",
+          "audience"
+        ],
+        "title": "SourceCreate",
+        "type": "object"
+      },
+      "SourceOut": {
+        "additionalProperties": false,
+        "properties": {
+          "audience": {
+            "$ref": "#/components/schemas/Audience"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "confirms_before_acting": {
+            "title": "Confirms Before Acting",
+            "type": "boolean"
+          },
+          "critical": {
+            "title": "Critical",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "navigation_enabled": {
+            "title": "Navigation Enabled",
+            "type": "boolean"
+          },
+          "purposes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Purposes",
+            "type": "array"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "trusted_action_ops": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Trusted Action Ops",
+            "type": "array"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor"
+          },
+          "verification_ceiling": {
+            "$ref": "#/components/schemas/Verification"
+          }
+        },
+        "required": [
+          "source_id",
+          "space_id",
+          "name",
+          "audience",
+          "vendor",
+          "channel",
+          "purposes",
+          "verification_ceiling",
+          "confirms_before_acting",
+          "navigation_enabled",
+          "trusted_action_ops",
+          "critical",
+          "revoked_at"
+        ],
+        "title": "SourceOut",
+        "type": "object"
+      },
+      "SpaceDeletionOut": {
+        "additionalProperties": false,
+        "properties": {
+          "deleted_at": {
+            "format": "date-time",
+            "title": "Deleted At",
+            "type": "string"
+          },
+          "receipt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeletionReceiptOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "`deleting` until the cell reports what it deleted; then `deleted`, with the receipt.",
+            "enum": [
+              "deleting",
+              "deleted"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "deleted_at",
+          "status"
+        ],
+        "title": "SpaceDeletionOut",
+        "type": "object"
+      },
+      "SpaceKeyIn": {
+        "additionalProperties": false,
+        "description": "The customer's KMS key of a space, under contract (10, D.1); null returns new data keys to the\ncell's own key.",
+        "properties": {
+          "kms_key_arn": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kms Key Arn"
+          }
+        },
+        "title": "SpaceKeyIn",
+        "type": "object"
+      },
+      "SpaceKeyOut": {
+        "additionalProperties": false,
+        "properties": {
+          "kms_key_arn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kms Key Arn"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id"
+        ],
+        "title": "SpaceKeyOut",
+        "type": "object"
+      },
+      "SpaceOut": {
+        "additionalProperties": false,
+        "properties": {
+          "cell_id": {
+            "title": "Cell Id",
+            "type": "string"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/Environment"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "region": {
+            "title": "Region",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "project_id",
+          "environment",
+          "slug",
+          "region",
+          "cell_id"
+        ],
+        "title": "SpaceOut",
+        "type": "object"
+      },
+      "SpaceRoles": {
+        "additionalProperties": false,
+        "properties": {
+          "environment": {
+            "$ref": "#/components/schemas/Environment"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "region": {
+            "title": "Region",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "project_id",
+          "environment",
+          "slug",
+          "region",
+          "roles"
+        ],
+        "title": "SpaceRoles",
+        "type": "object"
+      },
+      "SsoCodeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 128,
+            "minLength": 20,
+            "title": "Code",
+            "type": "string"
+          },
+          "verifier": {
+            "maxLength": 128,
+            "minLength": 20,
+            "title": "Verifier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "verifier"
+        ],
+        "title": "SsoCodeRequest",
+        "type": "object"
+      },
+      "SsoConnectionIn": {
+        "additionalProperties": false,
+        "properties": {
+          "default_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a person in no mapped group; null lets in only people of mapped groups."
+          },
+          "domains": {
+            "description": "The e-mail domains whose people sign in through this connection. Each domain belongs to one tenant; public mailboxes (gmail.com and the like) are refused.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Domains",
+            "type": "array"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "enforced": {
+            "default": false,
+            "description": "People of the domains sign in only through SSO. A tenant-wide admin keeps the password, as the way in when the provider fails.",
+            "title": "Enforced",
+            "type": "boolean"
+          },
+          "groups_attribute": {
+            "default": "groups",
+            "description": "The claim (OIDC) or attribute (SAML) that carries the groups.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Groups Attribute",
+            "type": "string"
+          },
+          "oidc": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OidcIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/SsoProtocol"
+          },
+          "reason": {
+            "description": "Why, kept in the tenant's access history.",
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          },
+          "require_second_factor": {
+            "default": false,
+            "description": "Ask for the Niadra authenticator code after the provider, on top of the provider's MFA.",
+            "title": "Require Second Factor",
+            "type": "boolean"
+          },
+          "role_mappings": {
+            "items": {
+              "$ref": "#/components/schemas/RoleMappingModel"
+            },
+            "maxItems": 100,
+            "title": "Role Mappings",
+            "type": "array"
+          },
+          "saml": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SamlIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "protocol",
+          "domains",
+          "reason"
+        ],
+        "title": "SsoConnectionIn",
+        "type": "object"
+      },
+      "SsoConnectionOut": {
+        "additionalProperties": false,
+        "properties": {
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "default_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "domains": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Domains",
+            "type": "array"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "enforced": {
+            "title": "Enforced",
+            "type": "boolean"
+          },
+          "groups_attribute": {
+            "title": "Groups Attribute",
+            "type": "string"
+          },
+          "oidc": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OidcOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/SsoProtocol"
+          },
+          "require_second_factor": {
+            "title": "Require Second Factor",
+            "type": "boolean"
+          },
+          "role_mappings": {
+            "items": {
+              "$ref": "#/components/schemas/RoleMappingModel"
+            },
+            "title": "Role Mappings",
+            "type": "array"
+          },
+          "saml": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SamlOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "updated_by": {
+            "format": "uuid",
+            "title": "Updated By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection_id",
+          "protocol",
+          "domains",
+          "enabled",
+          "enforced",
+          "default_role",
+          "role_mappings",
+          "groups_attribute",
+          "require_second_factor",
+          "oidc",
+          "saml",
+          "created_at",
+          "updated_at",
+          "updated_by"
+        ],
+        "title": "SsoConnectionOut",
+        "type": "object"
+      },
+      "SsoDiscoverOut": {
+        "additionalProperties": false,
+        "properties": {
+          "enforced": {
+            "description": "Only the tenant-wide admins of the domain may still use a password.",
+            "title": "Enforced",
+            "type": "boolean"
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SsoProtocol"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sso": {
+            "description": "The e-mail's domain signs in through a tenant's SSO. Says nothing about the person.",
+            "title": "Sso",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sso",
+          "protocol",
+          "enforced"
+        ],
+        "title": "SsoDiscoverOut",
+        "type": "object"
+      },
+      "SsoDiscoverRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "SsoDiscoverRequest",
+        "type": "object"
+      },
+      "SsoExchangeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "The one-time sign-in code the control plane put in the fragment of the Console address.",
+            "maxLength": 128,
+            "minLength": 20,
+            "title": "Code",
+            "type": "string"
+          },
+          "recovery_code": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Code"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
+          },
+          "totp": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{6}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the tenant asks for the Niadra second factor.",
+            "title": "Totp"
+          },
+          "verifier": {
+            "description": "The value whose SHA-256 went as `binding`.",
+            "maxLength": 128,
+            "minLength": 20,
+            "title": "Verifier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "verifier"
+        ],
+        "title": "SsoExchangeRequest",
+        "type": "object"
+      },
+      "SsoOut": {
+        "additionalProperties": false,
+        "properties": {
+          "connection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SsoConnectionOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null while the tenant has no connection."
+          },
+          "service_provider": {
+            "$ref": "#/components/schemas/ServiceProviderOut"
+          }
+        },
+        "required": [
+          "connection",
+          "service_provider"
+        ],
+        "title": "SsoOut",
+        "type": "object"
+      },
+      "SsoProtocol": {
+        "enum": [
+          "oidc",
+          "saml"
+        ],
+        "title": "SsoProtocol",
+        "type": "string"
+      },
+      "SsoRemoveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "description": "Why, kept in the tenant's access history.",
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "SsoRemoveRequest",
+        "type": "object"
+      },
+      "SsoStartOut": {
+        "additionalProperties": false,
+        "properties": {
+          "authorize_url": {
+            "description": "Where to send the browser: the provider's sign-in.",
+            "title": "Authorize Url",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorize_url",
+          "expires_at"
+        ],
+        "title": "SsoStartOut",
+        "type": "object"
+      },
+      "SsoStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "binding": {
+            "description": "base64url, without padding, of the SHA-256 of a random value the Console keeps for this tab and sends again at the exchange.",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "title": "Binding",
+            "type": "string"
+          },
+          "email": {
+            "maxLength": 320,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "binding"
+        ],
+        "title": "SsoStartRequest",
+        "type": "object"
+      },
+      "SsoTestOut": {
+        "additionalProperties": false,
+        "properties": {
+          "authorize_url": {
+            "description": "Open it in another tab: the provider's sign-in, in test mode.",
+            "title": "Authorize Url",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "test_id": {
+            "format": "uuid",
+            "title": "Test Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "test_id",
+          "authorize_url",
+          "expires_at"
+        ],
+        "title": "SsoTestOut",
+        "type": "object"
+      },
+      "SsoTestResultOut": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The e-mail the provider sent for the account used in the test.",
+            "title": "Email"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why a real sign-in would be refused: denied, expired, invalid, domain, no_role, other_tenant, deactivated, unavailable or disabled.",
+            "title": "Failure"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null while the test waits for the provider.",
+            "title": "Ok"
+          },
+          "person_exists": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Person Exists"
+          },
+          "roles": {
+            "description": "The roles that account would get.",
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "test_id": {
+            "format": "uuid",
+            "title": "Test Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "test_id",
+          "status",
+          "created_at",
+          "completed_at",
+          "ok",
+          "failure",
+          "detail",
+          "email",
+          "groups",
+          "roles",
+          "person_exists"
+        ],
+        "title": "SsoTestResultOut",
+        "type": "object"
+      },
+      "TenantCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "mfa_required": {
+            "default": true,
+            "title": "Mfa Required",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$",
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug"
+        ],
+        "title": "TenantCreate",
+        "type": "object"
+      },
+      "TenantOut": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "mfa_required": {
+            "title": "Mfa Required",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "name",
+          "slug",
+          "mfa_required",
+          "created_at"
+        ],
+        "title": "TenantOut",
+        "type": "object"
+      },
+      "TokenOut": {
+        "additionalProperties": false,
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "recovery_codes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shown once: the ten recovery codes, when this login confirmed the authenticator. Null otherwise.",
+            "title": "Recovery Codes"
+          },
+          "recovery_codes_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many recovery codes remain, when this login used one. Null otherwise.",
+            "title": "Recovery Codes Left"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "token_type": {
+            "default": "Bearer",
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "expires_in",
+          "space_id"
+        ],
+        "title": "TokenOut",
+        "type": "object"
+      },
+      "TokenRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "space_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
+          }
+        },
+        "title": "TokenRequest",
+        "type": "object"
+      },
+      "UsageItem": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_micros": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Cost Micros",
+            "type": "integer"
+          },
+          "metric": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Metric",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date-time",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "quantity": {
+            "minimum": 0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "period_start",
+          "metric",
+          "quantity"
+        ],
+        "title": "UsageItem",
+        "type": "object"
+      },
+      "UsageOut": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UsageItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "quotas": {
+            "items": {
+              "$ref": "#/components/schemas/QuotaIn"
+            },
+            "title": "Quotas",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "quotas"
+        ],
+        "title": "UsageOut",
+        "type": "object"
+      },
+      "UsagePush": {
+        "additionalProperties": false,
+        "properties": {
+          "cell_id": {
+            "title": "Cell Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UsageItem"
+            },
+            "maxItems": 5000,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cell_id",
+          "items"
+        ],
+        "title": "UsagePush",
+        "type": "object"
+      },
+      "UsageStatementLine": {
+        "additionalProperties": false,
+        "properties": {
+          "ai_cost_micros": {
+            "description": "What the space's AI calls cost Niadra, in millionths of a dollar.",
+            "title": "Ai Cost Micros",
+            "type": "integer"
+          },
+          "billable": {
+            "description": "Conversations and tasks of the month, the unit the price is set per.",
+            "title": "Billable",
+            "type": "integer"
+          },
+          "environment": {
+            "title": "Environment",
+            "type": "string"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Every metric of the month, by name.",
+            "title": "Metrics",
+            "type": "object"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "project_id",
+          "environment",
+          "slug",
+          "billable",
+          "ai_cost_micros",
+          "metrics"
+        ],
+        "title": "UsageStatementLine",
+        "type": "object"
+      },
+      "UsageStatementOut": {
+        "additionalProperties": false,
+        "properties": {
+          "lines": {
+            "description": "One line per space of the tenant that existed in the month, with or without usage.",
+            "items": {
+              "$ref": "#/components/schemas/UsageStatementLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "month": {
+            "title": "Month",
+            "type": "string"
+          }
+        },
+        "required": [
+          "month",
+          "lines"
+        ],
+        "title": "UsageStatementOut",
+        "type": "object"
+      },
+      "UserCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 12,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional. Without it the person receives an invitation: a single-use link to choose a password, then the authenticator at the first sign-in. A person whose e-mail domain belongs to the tenant's SSO gets no invitation and signs in through the identity provider.",
+            "title": "Password"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/BindingIn"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Roles",
+            "type": "array"
+          },
+          "with_totp": {
+            "default": true,
+            "description": "Only with `password`: creates the authenticator secret now and returns it in `totp_uri`. Without a password the person sets up the authenticator at the first sign-in.",
+            "title": "With Totp",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "email",
+          "roles"
+        ],
+        "title": "UserCreate",
+        "type": "object"
+      },
+      "UserOut": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "deactivated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deactivated At"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "invitation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvitationOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shown once: at creation, for a person created without a password."
+          },
+          "invitation_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Until when the person's open invitation link works; null when none is open.",
+            "title": "Invitation Expires At"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "last_sso_login_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sso Login At"
+          },
+          "password_set": {
+            "description": "False while an invited person has not chosen a password.",
+            "title": "Password Set",
+            "type": "boolean"
+          },
+          "recovery_codes_left": {
+            "default": 0,
+            "title": "Recovery Codes Left",
+            "type": "integer"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/BindingOut"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "second_factor_confirmed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the authenticator in use was confirmed; null while there is none.",
+            "title": "Second Factor Confirmed At"
+          },
+          "sso": {
+            "description": "The e-mail domain belongs to the tenant's SSO connection.",
+            "title": "Sso",
+            "type": "boolean"
+          },
+          "totp_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shown once, at creation, for enrollment.",
+            "title": "Totp Uri"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "email",
+          "active",
+          "roles",
+          "created_at",
+          "password_set",
+          "sso"
+        ],
+        "title": "UserOut",
+        "type": "object"
+      },
+      "UserStateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "description": "Why, kept in the person's access history.",
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "UserStateRequest",
+        "type": "object"
+      },
+      "Verification": {
+        "description": "Session verification levels. `no_customer` sits outside the V0-V4 scale.",
+        "enum": [
+          "V0",
+          "V1",
+          "V2",
+          "V3",
+          "V4",
+          "no_customer"
+        ],
+        "title": "Verification",
+        "type": "string"
+      },
+      "VersionOut": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "diff_id": {
+            "format": "uuid",
+            "title": "Diff Id",
+            "type": "string"
+          },
+          "document": {
+            "title": "Document"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "type",
+          "diff_id",
+          "created_at",
+          "document"
+        ],
+        "title": "VersionOut",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Niadra control plane",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/.well-known/jwks.json": {
+      "get": {
+        "operationId": "jwks__well_known_jwks_json_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Jwks  Well Known Jwks Json Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Jwks"
+      }
+    },
+    "/v1/access-changes": {
+      "get": {
+        "description": "Changes to people's access and to SSO, signed, for the cell's receipt chains (SEG-18). The body is\n`{\"cell_id\", \"after\", \"changes\": [...]}`; pass `after` back next time.",
+        "operationId": "access_changes_v1_access_changes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cell_id",
+            "required": true,
+            "schema": {
+              "title": "Cell Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevocationFeedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Access Changes"
+      }
+    },
+    "/v1/auth/invitation": {
+      "post": {
+        "description": "Sets the password of the invited person (12 characters or more) and spends the link. The person then\nsigns in and sets up the authenticator app, like everyone.",
+        "operationId": "accept_invitation_v1_auth_invitation_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationAcceptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationAcceptOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Accept Invitation"
+      }
+    },
+    "/v1/auth/invitation/preview": {
+      "post": {
+        "description": "Whose invitation this is, before the person chooses a password. 401 alike for an unknown, used or\nexpired link.",
+        "operationId": "preview_invitation_v1_auth_invitation_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationPreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Preview Invitation"
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "operationId": "login_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Login"
+      }
+    },
+    "/v1/auth/second-factor": {
+      "post": {
+        "description": "The authenticator enrollment, for a person whose login answered \"second factor enrollment\nrequired\": the password again, and the secret comes back. The first valid code at login confirms\nit, and that login answers with the person's recovery codes; once confirmed, this answers 409.",
+        "operationId": "second_factor_v1_auth_second_factor_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecondFactorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecondFactorOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Second Factor"
+      }
+    },
+    "/v1/auth/sso/discover": {
+      "post": {
+        "description": "Whether the e-mail's domain signs in through SSO. It answers by domain, so it never says whether a\nperson exists.",
+        "operationId": "discover_v1_auth_sso_discover_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoDiscoverRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoDiscoverOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Discover"
+      }
+    },
+    "/v1/auth/sso/exchange": {
+      "post": {
+        "description": "The session for a one-time sign-in code and the value the Console kept for the tab. When the tenant\nasks for the Niadra second factor, the answers are those of the password login: 401 \"second factor\nenrollment required\" (then POST /v1/auth/sso/second-factor) or \"invalid second factor\"; the code stays\nvalid for five wrong codes and ten minutes.",
+        "operationId": "exchange_v1_auth_sso_exchange_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoExchangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Exchange"
+      }
+    },
+    "/v1/auth/sso/oidc/callback": {
+      "get": {
+        "description": "The OIDC redirect URI. Answers 303 to the Console with a one-time sign-in code in the URL fragment, or\nwith the reason of a refusal; a test run lands on a short page instead.",
+        "operationId": "oidc_callback_v1_auth_sso_oidc_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Oidc Callback"
+      }
+    },
+    "/v1/auth/sso/saml/{tenant_id}/acs": {
+      "post": {
+        "description": "The assertion consumer service (HTTP-POST binding): `SAMLResponse` and `RelayState` as a form. The\nassertion must be signed by the configured certificate and answer the request Niadra sent.",
+        "operationId": "saml_acs_v1_auth_sso_saml__tenant_id__acs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "properties": {
+                  "RelayState": {
+                    "description": "Sent back as Niadra put it in the request.",
+                    "type": "string"
+                  },
+                  "SAMLResponse": {
+                    "description": "The base64 SAML Response.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "SAMLResponse",
+                  "RelayState"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Saml Acs"
+      }
+    },
+    "/v1/auth/sso/saml/{tenant_id}/metadata": {
+      "get": {
+        "description": "The service provider's SAML metadata: entity id, assertion consumer service and name id format.",
+        "operationId": "saml_metadata_v1_auth_sso_saml__tenant_id__metadata_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Saml Metadata"
+      }
+    },
+    "/v1/auth/sso/second-factor": {
+      "post": {
+        "description": "The authenticator enrollment of a person who signed in through SSO, when the tenant asks for the Niadra\nsecond factor: the sign-in code and the kept value stand in for the password.",
+        "operationId": "sso_second_factor_v1_auth_sso_second_factor_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecondFactorOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Sso Second Factor"
+      }
+    },
+    "/v1/auth/sso/start": {
+      "post": {
+        "description": "The identity provider's address for this e-mail, with a fresh state, nonce and PKCE challenge. Only\nthe Console's origins may start (403 otherwise): the provider's answer comes back to that origin.",
+        "operationId": "start_v1_auth_sso_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoStartOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Start"
+      }
+    },
+    "/v1/auth/token": {
+      "post": {
+        "operationId": "reissue_v1_auth_token_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Reissue"
+      }
+    },
+    "/v1/cells": {
+      "get": {
+        "operationId": "list_cells_v1_cells_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CellOut"
+                  },
+                  "title": "Response List Cells V1 Cells Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Cells"
+      },
+      "post": {
+        "operationId": "register_cell_v1_cells_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CellCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CellOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Register Cell"
+      }
+    },
+    "/v1/config/diffs": {
+      "get": {
+        "operationId": "list_diffs_v1_config_diffs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DiffStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DiffOut"
+                  },
+                  "title": "Response List Diffs V1 Config Diffs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "List Diffs"
+      },
+      "post": {
+        "operationId": "submit_diff_v1_config_diffs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiffCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiffOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Submit Diff"
+      }
+    },
+    "/v1/config/diffs/{diff_id}/approve": {
+      "post": {
+        "operationId": "approve_diff_v1_config_diffs__diff_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "diff_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Diff Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiffOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Approve Diff"
+      }
+    },
+    "/v1/config/diffs/{diff_id}/reject": {
+      "post": {
+        "operationId": "reject_diff_v1_config_diffs__diff_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "diff_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Diff Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiffOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Reject Diff"
+      }
+    },
+    "/v1/config/diffs/{diff_id}/rollback": {
+      "post": {
+        "operationId": "rollback_diff_v1_config_diffs__diff_id__rollback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "diff_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Diff Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RollbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiffOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Rollback Diff"
+      }
+    },
+    "/v1/config/history": {
+      "get": {
+        "operationId": "history_v1_config_history_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VersionOut"
+                  },
+                  "title": "Response History V1 Config History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "History"
+      }
+    },
+    "/v1/config/observed": {
+      "post": {
+        "description": "What a cell inferred of a document from the space's traffic, as an applied diff by `niadra:observed`;\nit changes no declaration.",
+        "operationId": "record_observed_v1_config_observed_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposalCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiffOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Record Observed"
+      }
+    },
+    "/v1/config/proposals": {
+      "post": {
+        "operationId": "propose_v1_config_proposals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposalCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiffOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Propose"
+      }
+    },
+    "/v1/config/types": {
+      "get": {
+        "operationId": "config_types_v1_config_types_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConfigTypeOut"
+                  },
+                  "title": "Response Config Types V1 Config Types Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Config Types"
+      }
+    },
+    "/v1/config/{type}": {
+      "get": {
+        "operationId": "config_document_v1_config__type__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Config Document"
+      }
+    },
+    "/v1/projects": {
+      "get": {
+        "operationId": "list_projects_v1_projects_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectOut"
+                  },
+                  "title": "Response List Projects V1 Projects Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Projects"
+      },
+      "post": {
+        "operationId": "create_project_v1_projects_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Create Project"
+      }
+    },
+    "/v1/quotas": {
+      "put": {
+        "operationId": "set_quota_v1_quotas_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuotaIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaIn"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Set Quota"
+      }
+    },
+    "/v1/revocations": {
+      "get": {
+        "operationId": "revocations_v1_revocations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cell_id",
+            "required": true,
+            "schema": {
+              "title": "Cell Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevocationFeedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Revocations"
+      }
+    },
+    "/v1/roles": {
+      "get": {
+        "operationId": "roles_v1_roles_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RoleOut"
+                  },
+                  "title": "Response Roles V1 Roles Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Roles"
+      }
+    },
+    "/v1/secret-refs": {
+      "get": {
+        "operationId": "secret_refs_v1_secret_refs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SecretRefOut"
+                  },
+                  "title": "Response Secret Refs V1 Secret Refs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Secret Refs"
+      },
+      "post": {
+        "operationId": "put_secret_ref_v1_secret_refs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretRefIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretRefOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Put Secret Ref"
+      }
+    },
+    "/v1/snapshot/{cell_id}": {
+      "get": {
+        "description": "With `after`, a long poll: answers when a newer version exists, or 304 at the deadline.",
+        "operationId": "snapshot_v1_snapshot__cell_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cell_id",
+            "required": true,
+            "schema": {
+              "title": "Cell Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "wait",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 30,
+              "minimum": 0,
+              "title": "Wait",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Snapshot"
+      }
+    },
+    "/v1/sources": {
+      "get": {
+        "operationId": "list_sources_v1_sources_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SourceOut"
+                  },
+                  "title": "Response List Sources V1 Sources Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "List Sources"
+      },
+      "post": {
+        "operationId": "create_source_v1_sources_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Create Source"
+      }
+    },
+    "/v1/sources/{source_id}/keys": {
+      "get": {
+        "operationId": "list_keys_v1_sources__source_id__keys_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KeyOut"
+                  },
+                  "title": "Response List Keys V1 Sources  Source Id  Keys Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "List Keys"
+      },
+      "post": {
+        "operationId": "issue_key_v1_sources__source_id__keys_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedKeyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Issue Key"
+      }
+    },
+    "/v1/sources/{source_id}/keys/{key_id}/revoke": {
+      "post": {
+        "operationId": "revoke_key_v1_sources__source_id__keys__key_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevocationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Revoke Key"
+      }
+    },
+    "/v1/sources/{source_id}/keys/{key_id}/rotate": {
+      "post": {
+        "operationId": "rotate_key_v1_sources__source_id__keys__key_id__rotate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyRotate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedKeyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Rotate Key"
+      }
+    },
+    "/v1/sources/{source_id}/revoke": {
+      "post": {
+        "operationId": "revoke_source_v1_sources__source_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevocationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Revoke Source"
+      }
+    },
+    "/v1/spaces/{space_id}": {
+      "delete": {
+        "description": "Deletes a space for good. Its keys stop working at once; the cell that serves it drops the space's\ndatabase, destroys its data keys, deletes its stored objects, nightly dumps, secrets and cache keys,\nand sends back a deletion receipt, which `GET /v1/spaces/{space_id}/deletion-receipt` shows. The\nanswer comes before the cell finishes, with `status` `deleting`; asking again returns the same state.\nNeeds the admin role.",
+        "operationId": "delete_space_v1_spaces__space_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceDeletionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Delete Space"
+      },
+      "get": {
+        "operationId": "get_space_v1_spaces__space_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Get Space"
+      }
+    },
+    "/v1/spaces/{space_id}/deletion-receipt": {
+      "get": {
+        "operationId": "deletion_receipt_v1_spaces__space_id__deletion_receipt_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceDeletionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Deletion Receipt"
+      },
+      "post": {
+        "description": "Where a cell reports what it deleted for a deleted space, with the SHA-256 of the receipt's\ncanonical JSON. Sending the same receipt again is accepted; a different one for the same space\nanswers 409, and one whose hash does not match answers 422.",
+        "operationId": "store_deletion_receipt_v1_spaces__space_id__deletion_receipt_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeletionReceiptIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionReceiptOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Store Deletion Receipt"
+      }
+    },
+    "/v1/spaces/{space_id}/kms-key": {
+      "put": {
+        "description": "Operators only: a customer-managed key is a contract, never a tenant setting.",
+        "operationId": "set_space_key_v1_spaces__space_id__kms_key_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpaceKeyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceKeyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Set Space Key"
+      }
+    },
+    "/v1/spaces/{space_id}/placement": {
+      "get": {
+        "operationId": "placement_v1_spaces__space_id__placement_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlacementOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Placement"
+      },
+      "post": {
+        "operationId": "request_move_v1_spaces__space_id__placement_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Request Move"
+      }
+    },
+    "/v1/spaces/{space_id}/placement/complete": {
+      "post": {
+        "operationId": "complete_move_v1_spaces__space_id__placement_complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Complete Move"
+      }
+    },
+    "/v1/sso": {
+      "delete": {
+        "description": "Removes the tenant's connection. People created by it keep their roles and sign in with a password\nonly after an admin sends them an invitation.",
+        "operationId": "delete_sso_v1_sso_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoRemoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Delete Sso"
+      },
+      "get": {
+        "description": "The tenant's single sign-on and what to paste into the identity provider. Needs the admin role.",
+        "operationId": "get_sso_v1_sso_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Sso"
+      },
+      "put": {
+        "description": "Creates or replaces the tenant's connection, OIDC or SAML. An OIDC issuer is checked against its\ndiscovery document; a SAML certificate must parse. A domain another tenant uses answers 409. Needs the\nadmin role.",
+        "operationId": "put_sso_v1_sso_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoConnectionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Put Sso"
+      }
+    },
+    "/v1/sso/test": {
+      "post": {
+        "description": "A test sign-in through the provider: open `authorize_url` in another tab and sign in; then\nGET /v1/sso/tests/{test_id} says what a real sign-in would do (e-mail, groups, roles). Nobody is created\nand no role changes. Works on a connection that is still off.",
+        "operationId": "start_test_v1_sso_test_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoTestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Start Test"
+      }
+    },
+    "/v1/sso/tests/{test_id}": {
+      "get": {
+        "description": "The outcome of a test sign-in; `pending` until the provider answers (ten minutes at most).",
+        "operationId": "test_result_v1_sso_tests__test_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "test_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Test Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoTestResultOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Test Result"
+      }
+    },
+    "/v1/tenants": {
+      "post": {
+        "operationId": "create_tenant_v1_tenants_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Create Tenant"
+      }
+    },
+    "/v1/tenants/{tenant_id}": {
+      "get": {
+        "operationId": "get_tenant_v1_tenants__tenant_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Get Tenant"
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "description": "Usage aggregates of the spaces the caller's analysis, security or admin role covers, and the\ntenant's quotas.",
+        "operationId": "usage_v1_usage_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "since",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Since",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Until",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Usage"
+      },
+      "post": {
+        "operationId": "push_usage_v1_usage_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsagePush"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Push Usage V1 Usage Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Push Usage"
+      }
+    },
+    "/v1/usage/statement": {
+      "get": {
+        "description": "The month's usage per space, to invoice from: conversations and tasks, every metric and the AI\ncost; `format=csv` for a spreadsheet. It lists the spaces of the tenant that the caller's analysis,\nsecurity or admin role covers: all of them for a role on the whole tenant, one for a role on one.",
+        "operationId": "usage_statement_v1_usage_statement_get",
+        "parameters": [
+          {
+            "description": "The UTC month, `YYYY-MM`.",
+            "in": "query",
+            "name": "month",
+            "required": true,
+            "schema": {
+              "description": "The UTC month, `YYYY-MM`.",
+              "pattern": "^\\d{4}-\\d{2}$",
+              "title": "Month",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "pattern": "^(json|csv)$",
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageStatementOut"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Usage Statement"
+      }
+    },
+    "/v1/users": {
+      "get": {
+        "description": "Every person of the tenant, with roles, how they sign in and the state of the second factor.",
+        "operationId": "list_users_v1_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserOut"
+                  },
+                  "title": "Response List Users V1 Users Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Users"
+      },
+      "post": {
+        "description": "A new person of the tenant. Without `password`, the answer carries the invitation, shown once: a\nsingle-use link where the person chooses a password; the authenticator comes at the first sign-in. A\nperson whose e-mail domain belongs to the tenant's SSO signs in through it and gets no invitation.",
+        "operationId": "create_user_v1_users_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Create User"
+      }
+    },
+    "/v1/users/me": {
+      "get": {
+        "operationId": "me_v1_users_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Me"
+      }
+    },
+    "/v1/users/me/preferences": {
+      "get": {
+        "description": "What the Console keeps for the signed-in person across browsers: the tutorials done, the welcome\nseen. Only the person reads and writes their own.",
+        "operationId": "my_preferences_v1_users_me_preferences_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferencesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Preferences"
+      }
+    },
+    "/v1/users/me/preferences/{key}": {
+      "put": {
+        "description": "Writes one key and answers every key. A person keeps at most 16 keys of 4096 bytes of JSON each;\npast either, 422.",
+        "operationId": "set_my_preference_v1_users_me_preferences__key__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreferenceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferencesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Set My Preference"
+      }
+    },
+    "/v1/users/me/recovery-codes": {
+      "post": {
+        "description": "Ten new recovery codes for the signed-in person, shown once; the earlier ones stop working. Asks for\nthe password again, and a wrong one answers 403, so a typo never ends the session. 409 while the\nperson has no confirmed authenticator.",
+        "operationId": "regenerate_recovery_codes_v1_users_me_recovery_codes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Regenerate Recovery Codes"
+      }
+    },
+    "/v1/users/me/second-factor": {
+      "get": {
+        "description": "The second factor of the signed-in person: when the authenticator in use was confirmed, and how\nmany recovery codes are left.",
+        "operationId": "my_second_factor_v1_users_me_second_factor_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecondFactorStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Second Factor"
+      },
+      "post": {
+        "description": "Starts the move to another authenticator app, after the password again (403 when wrong). The new\nsecret comes back and waits beside the current one, which keeps working until\nPOST /v1/users/me/second-factor/confirm receives a first code of the new app. Starting again replaces\na secret that was never confirmed.",
+        "operationId": "change_second_factor_v1_users_me_second_factor_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecondFactorOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Change Second Factor"
+      }
+    },
+    "/v1/users/me/second-factor/confirm": {
+      "post": {
+        "description": "Switches to the new authenticator app with its first code: the old app stops working, and ten new\nrecovery codes come back, shown once. A wrong code answers 403; 409 when no change was started.",
+        "operationId": "confirm_second_factor_v1_users_me_second_factor_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecondFactorConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Confirm Second Factor"
+      }
+    },
+    "/v1/users/{user_id}/deactivate": {
+      "post": {
+        "description": "The person can no longer sign in, and the control plane refuses their token at once; the data API\naccepts a token already issued until it expires, 15 minutes at most. Open invitations stop working. 409\nfor the caller themselves and for the last admin of the tenant.",
+        "operationId": "deactivate_user_v1_users__user_id__deactivate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserStateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Deactivate User"
+      }
+    },
+    "/v1/users/{user_id}/history": {
+      "get": {
+        "description": "What changed in the person's access, newest first: invitations, roles, deactivation, second factor\nresets and what the tenant's SSO did at a sign-in, with who and why.",
+        "operationId": "access_history_v1_users__user_id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AccessChangeOut"
+                  },
+                  "title": "Response Access History V1 Users  User Id  History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Access History"
+      }
+    },
+    "/v1/users/{user_id}/invitation": {
+      "post": {
+        "description": "A new single-use link for the person to choose a password: for one who never used the first link, or\nwho forgot the password. Earlier links stop working. Shown once.",
+        "operationId": "reissue_invitation_v1_users__user_id__invitation_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Reissue Invitation"
+      }
+    },
+    "/v1/users/{user_id}/reactivate": {
+      "post": {
+        "description": "Lets a deactivated person sign in again, with the same roles, password and second factor.",
+        "operationId": "reactivate_user_v1_users__user_id__reactivate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserStateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Reactivate User"
+      }
+    },
+    "/v1/users/{user_id}/roles": {
+      "put": {
+        "description": "Replaces every role of the person. The tenant keeps at least one admin (409 otherwise). For a person\nwho signs in through the tenant's SSO, the next sign-in sets the roles from the provider's groups.",
+        "operationId": "set_roles_v1_users__user_id__roles_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RolesSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BindingOut"
+                  },
+                  "title": "Response Set Roles V1 Users  User Id  Roles Put",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Set Roles"
+      }
+    },
+    "/v1/users/{user_id}/second-factor/reset": {
+      "post": {
+        "description": "For a person who lost the authenticator app and the recovery codes: clears the secret, its\nconfirmation and every code, so the person sets up an authenticator again at the next login. The\nreset is kept with who did it and why. Needs the admin role; a person of another tenant answers 404.",
+        "operationId": "reset_second_factor_v1_users__user_id__second_factor_reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecondFactorResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecondFactorResetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not match the contract."
+          }
+        },
+        "summary": "Reset Second Factor"
+      }
+    }
+  }
+}

@@ -1,0 +1,72 @@
+---
+title: "Cloudflare Agents"
+description: "The customer's memory in an Agent of the Cloudflare Agents SDK: the AI SDK middleware with the writes handed to ctx.waitUntil(), the kit as tools and the preparation for models called without the AI SDK."
+---
+
+`niadraAgent(this, { niadra, subject })` returns one helper per `Agent` instance (a Durable Object), bound to a conversation whose id is the agent's name (the id you route to, such as a chat or a user) unless you give another. Only web APIs and the AI SDK, which the `agents` package already requires: it runs on Workers as it is. TypeScript only.
+
+## Install
+
+```sh
+npm install @niadra/sdk agents ai   # agents 0.24 or newer, below 1, as an optional peer dependency
+```
+
+The integration is in `@niadra/sdk` on npm.
+
+## The five primitives
+
+| Primitive | How the adapter wires it |
+|---|---|
+| Context | `middleware` is the [AI SDK](/en/integrations/ai-sdk) middleware for `wrapLanguageModel()`, the way agents call models (`AIChatAgent.onChatMessage`, `streamText`, `generateText`): the pack after your system prompt and the `turn_block` at the end of the last user message. For a model called without the AI SDK (the Workers AI binding, a voice agent's `onTurn()`), `prepare(messages)` returns the messages with the context in place |
+| Turns | The middleware records the customer's newest message and the answer with the provider's usage; `record(text, { usage: workersAiUsage(answer, model) })` records an answer given without the AI SDK. After each answer, the queued writes go to `ctx.waitUntil()`, so the instance does not go idle before Niadra has them |
+| Tools | `tools()`: the kit as AI SDK tools, bound to the customer |
+| Verification | `verify` in the options, recorded once before the first context |
+| Handoff | `end()` ends the conversation; `session.handoff()` where your agent transfers |
+
+## Minimal example
+
+```typescript
+import { AIChatAgent } from "@cloudflare/ai-chat";
+import { convertToModelMessages, streamText, wrapLanguageModel } from "ai";
+import { createWorkersAI } from "workers-ai-provider";
+import { Niadra, handles } from "@niadra/sdk";
+import { niadraAgent } from "@niadra/sdk/cloudflare-agents";
+
+let niadra: Niadra | undefined; // one client per isolate
+
+export class Support extends AIChatAgent<Env> {
+  async onChatMessage() {
+    niadra ??= new Niadra({ apiKey: this.env.NIADRA_API_KEY });
+    const memory = niadraAgent(this, { niadra, subject: handles.appUserId(this.name) });
+    const result = streamText({
+      model: wrapLanguageModel({ model: createWorkersAI({ binding: this.env.AI })("@cf/openai/gpt-oss-120b"), middleware: memory.middleware }),
+      system: "You are Acme's support agent.",
+      messages: await convertToModelMessages(this.messages),
+      tools: { ...memory.tools(), ...yourTools },
+    });
+    return result.toUIMessageStreamResponse();
+  }
+}
+```
+
+## Agent memory
+
+`niadraAgent(this, { ..., agentMemory: true })` puts the agent's own notes before the customer's context and adds the two tools. See [Agent memory](/en/concepts/agent-memory).
+
+## Limits
+
+- The first call builds the helper; later calls on the same instance return the same one, so the conversation keeps its pinned pack and its deltas across turns.
+- `channel: "voice"` gives the voice budget and view; `session` takes a conversation or a task you opened yourself, in place of `subject`.
+- Nothing here stops the agent: with Niadra slow or down, the model gets the messages as they came; with no customer found, everything passes through.
+- Tested with the `agents` 0.24.0 types and, bundled with the AI SDK, running inside workerd (`pnpm runtimes`), with Niadra on the emulator.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Vercel AI SDK" href="/en/integrations/ai-sdk">
+    the middleware this adapter reuses.
+  </Card>
+  <Card title="TypeScript SDK" href="/en/sdk/typescript">
+    the client, the conversations and the tasks.
+  </Card>
+</CardGroup>

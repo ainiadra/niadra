@@ -1,0 +1,6 @@
+# How to report a security vulnerability in Niadra (RFC 9116).
+# Write to us through the form below, with "Segurança" selected; we answer in Portuguese or English.
+Contact: https://niadra.com/enterprise?interesse=seguranca
+Expires: 2027-09-23T23:59:59.000Z
+Preferred-Languages: pt, en
+Canonical: https://niadra.com/.well-known/security.txt

@@ -1,0 +1,5 @@
+{"version": "cv_8f2c41d9a07b",
+ "hard": [{"id": "h1", "attr": "item_variant.color", "op": "not_in", "values": ["preto"], "source": "inferred",
+           "scope": "session", "origin": {"kind": "stated"}}],
+  "text": "<restrições>\n- exigido: color diferente de preto\n</restrições>"
+}

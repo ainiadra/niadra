@@ -1,0 +1,146 @@
+{{- if eq .Values.part "app" }}
+# The small-models server: stateless, CPU-bound, scaled on CPU.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: models
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  # No `replicas`: the autoscaler below owns that field. With it here, a deploy after a scale-up
+  # fails on a server-side apply conflict with the controller (23/09/2026).
+  # The old copy stops before the new one starts: two at once need 1.3 GB, and history search
+  # falls back to text for the minute the model loads.
+  strategy:
+    rollingUpdate: {maxSurge: 0, maxUnavailable: 1}
+  selector:
+    matchLabels: {{- include "niadra.selector" "models" | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "niadra.selector" "models" | nindent 8 }}
+        niadra.com/metrics: "true"
+    spec:
+      {{- include "niadra.spread" "models" | nindent 6 }}
+      containers:
+        - name: models
+          image: {{ include "niadra.image" (list . "models") }}
+          ports: [{name: http, containerPort: 8080}]
+          {{- with .Values.models.embedModel }}
+          env:
+            - {name: NIADRA_MODELS_ONNX_EMBED_DIR, value: "/models/{{ . }}"}
+            - {name: NIADRA_MODELS_ONNX_THREADS, value: {{ $.Values.models.onnxThreads | quote }}}
+          {{- end }}
+          {{- include "niadra.probes" . | nindent 10 }}
+          {{- include "niadra.resources" .Values.models.resources | nindent 10 }}
+          {{- include "niadra.securityContext" . | nindent 10 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: models
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "niadra.selector" "models" | nindent 4 }}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: models
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: models}
+  minReplicas: {{ .Values.models.replicas }}
+  maxReplicas: {{ .Values.models.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+{{- if not .Values.controlPlane.url }}
+---
+# The site, with the developer docs and the governance Console, served as static files.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: site
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.site.replicas }}
+  selector:
+    matchLabels: {{- include "niadra.selector" "site" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "niadra.selector" "site" | nindent 8 }}
+    spec:
+      {{- include "niadra.spread" "site" | nindent 6 }}
+      containers:
+        - name: site
+          image: {{ include "niadra.image" (list . "site") }}
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - {name: NIADRA_CONTROL_URL, value: "https://{{ .Values.hosts.control }}"}
+            - {name: NIADRA_API_URL, value: "https://{{ first .Values.hosts.api }}"}
+            - {name: SITE_ORIGIN, value: "https://{{ first .Values.hosts.site }}"}
+            - {name: ADMIN_HOST, value: {{ include "niadra.siteAdminHost" . | quote }}}
+            # Caddy sends a copy of each access log entry here (UDP), for the site API to count.
+            - {name: ACCESS_LOG_ADDR, value: "site-api:{{ .Values.siteApi.accessLogPort }}"}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          {{- include "niadra.resources" .Values.site.resources | nindent 10 }}
+          {{- include "niadra.securityContext" . | nindent 10 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: site
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "niadra.selector" "site" | nindent 4 }}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+# The site API: the contact form, the access counter and the admin panel's API, on its own database.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: site-api
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.siteApi.replicas }}
+  selector:
+    matchLabels: {{- include "niadra.selector" "site-api" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "niadra.selector" "site-api" | nindent 8 }}
+    spec:
+      {{- include "niadra.spread" "site-api" | nindent 6 }}
+      containers:
+        - name: site-api
+          image: {{ include "niadra.image" (list . "site-api") }}
+          ports:
+            - {name: http, containerPort: 8787}
+            - {name: access-log, containerPort: {{ .Values.siteApi.accessLogPort }}, protocol: UDP}
+          env:
+            - {name: PORT, value: "8787"}
+            - {name: ALLOWED_ORIGINS, value: {{ include "niadra.origins" . | quote }}}
+            - {name: SITE_HOST, value: {{ first .Values.hosts.site | quote }}}
+            - {name: ADMIN_HOST, value: {{ include "niadra.siteAdminHost" . | quote }}}
+            - {name: ACCESS_LOG_PORT, value: {{ .Values.siteApi.accessLogPort | quote }}}
+          envFrom: [{secretRef: {name: niadra-site-api}}, {secretRef: {name: niadra-site-admin, optional: true}}]
+          readinessProbe:
+            httpGet: {path: /api/saude, port: http}
+            periodSeconds: 10
+          {{- include "niadra.resources" .Values.siteApi.resources | nindent 10 }}
+          {{- include "niadra.securityContext" . | nindent 10 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: site-api
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "niadra.selector" "site-api" | nindent 4 }}
+  ports:
+    - {name: http, port: 8787, targetPort: http}
+    - {name: access-log, port: {{ .Values.siteApi.accessLogPort }}, targetPort: access-log, protocol: UDP}
+{{- end }}
+{{- end }}

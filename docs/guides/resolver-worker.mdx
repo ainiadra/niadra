@@ -1,0 +1,159 @@
+---
+title: "O worker de resolução"
+description: "A Niadra nunca chama um sistema seu: quando um valor precisa ser lido de novo, ela pede, e um worker seu lê e devolve, dentro da sua empresa e do orçamento que você deu."
+---
+
+Um preço que o agente vai afirmar está velho demais para afirmar. Um temporizador venceu e pede uma releitura. Um cliente observa um item e o valor dele precisa ser conferido ao vivo. Em todos esses casos, alguém precisa perguntar ao seu sistema de registro, e a Niadra nunca faz isso: ela **pede**, e um **worker de resolução** seu, rodando dentro da sua empresa com as suas credenciais, lê o objeto e devolve o que leu por [`POST /v1/objects/push`](/api/objects-push). O mesmo código serve à releitura imediata de uma afirmação, no processo do agente, dentro de 300 ms.
+
+## Antes de começar
+
+- A funcionalidade `state` ligada no espaço e os [tipos declarados](/concepts/object-types) com uma seção `refetch`: os motivos de releitura, cada um com a condição, a prioridade e o orçamento, e a unidade do orçamento (`platform_call`, por exemplo), nunca dinheiro.
+- Uma chave com o escopo `state:push` para o worker, e `context` para o agente que confere afirmações.
+
+## Os resolvedores
+
+Um resolvedor é uma função sua por tipo: recebe a referência do objeto e os campos pedidos e devolve os campos lidos da fonte, com a proveniência. Registre um por tipo:
+
+<CodeGroup>
+```python Python
+from datetime import datetime, timezone
+
+from niadra import Niadra
+from niadra.resolvers import Resolved
+
+niadra = Niadra()
+
+
+def read_variant(ref, fields):
+    row = platform.variant(ref.id)  # your system, your credentials
+    return Resolved(
+        fields={"available": row.available, "price_sale": row.price_sale},
+        version=row.version,                                  # the source's version of the object, when it has one
+        observed_at=datetime.now(timezone.utc),
+    )
+
+
+niadra.resolvers.register("item_variant", read_variant, rate=20)  # at most 20 reads per second
+```
+```typescript TypeScript
+import { Niadra } from "@niadra/sdk";
+
+const niadra = new Niadra();
+
+niadra.resolvers.register(
+  "item_variant",
+  async (ref, fields) => {
+    const row = await platform.variant(ref.id); // your system, your credentials
+    return { fields: { available: row.available, price_sale: row.price_sale }, version: row.version, observedAt: new Date() };
+  },
+  { rate: 20 }, // at most 20 reads per second
+);
+```
+</CodeGroup>
+
+Um resolvedor pode devolver só um dicionário de campos: eles contam como observados agora, ao vivo. `version` é a versão do objeto na fonte, quando ela tem uma; o push só move um campo sob uma versão maior. Cada resolvedor roda na taxa que você deu e atrás de um disjuntor: 5 falhas em 30 segundos o abrem por 30 segundos, e enquanto ele está aberto nada é lido daquele tipo.
+
+## O worker
+
+O worker toma os pedidos de releitura que a Niadra admitiu ([`GET /v1/state/refresh-requests`](/api/state-refresh-requests)), os de prioridade maior e os mais antigos primeiro, cada um emprestado a ele por 60 segundos; lê cada objeto com o resolvedor do tipo, na taxa dele; e envia o que leu por `POST /v1/objects/push`, com o `request_id` do pedido em cada item, o que encerra o pedido e a reserva paga dele. Um pedido que o resolvedor não consegue responder, o worker **libera** por [`POST /v1/state/refresh-requests/{request_id}/release`](/api/state-refresh-request-release): `not_found` quando o resolvedor devolve `niadra.resolvers.NOT_FOUND` (`NOT_FOUND` em TypeScript), porque a fonte não tem mais o objeto, e `failed` quando ele falhou; o pedido sai na hora e a chamada paga conta como falha. Um pedido nem respondido nem liberado é oferecido de novo, três vezes no máximo, e depois é abandonado, com a chamada paga contada como falha. Um pedido de um tipo sem resolvedor, ou cujo disjuntor está aberto, fica para o prazo dele, com um aviso no log uma vez por tipo. `Resolvers.fetch()` diz por que uma leitura não trouxe objeto; `resolve()` continua igual.
+
+<CodeGroup>
+```sh Python
+niadra resolver-worker --resolvers app.resolvers:register --limit 50 --poll 2
+# --once serves what waits now and stops; NIADRA_API_KEY holds the state:push key
+```
+```sh TypeScript
+npx niadra resolver-worker --resolvers ./dist/resolvers.js:register
+```
+```python Python (in code)
+from niadra.cli.worker import ResolverWorker
+
+worker = ResolverWorker(niadra, limit=50, poll=2.0, budget=5.0)
+pushed = worker.run_once()  # leases, resolves, pushes; returns how many objects were pushed
+```
+```typescript TypeScript (in code)
+import { ResolverWorker } from "@niadra/sdk";
+
+const worker = new ResolverWorker(niadra, { limit: 50, pollMs: 2000, budgetMs: 5000 });
+await worker.run(abortController.signal); // or await worker.runOnce()
+```
+</CodeGroup>
+
+`--resolvers` nomeia um módulo e um export: um `Resolvers` já montado, ou uma função que registra os resolvedores no que ela recebe. Rode um worker por espaço, com a chave `state:push` dele; vários processos podem rodar em paralelo, porque cada pedido é emprestado a um só.
+
+## Quem pede, e quando
+
+A Niadra avalia os motivos de `refetch` de cada tipo quando lê o objeto e quando um valor chega, e nomeia na leitura o motivo de prioridade mais alta que vale (`refetch.reason`), ou `floor` quando a observação mais nova passou da idade em que uma releitura é devida seja qual for o motivo. `admitted` diz se um pedido para o worker foi admitido, dentro do orçamento e nesta ordem: um motivo em `never` é reportado e nunca admitido; um pedido por objeto e motivo no período do orçamento (`item/1h` é uma hora); o `min_interval` do tipo entre duas releituras de um objeto; e o orçamento pago da unidade da empresa, reservado antes da leitura, em que um custo desconhecido reserva o maior medido e uma chamada paga que falha conta mesmo assim. A leitura nunca espera pela fonte e nunca falha por isso.
+
+Um exemplo de motivos, num item de loja compartilhado:
+
+```json
+"refetch": {
+  "reasons": [
+    { "name": "never_observed", "when": "observer(available) == none", "budget": { "units": 1, "per": "item/1h" } },
+    { "name": "exposed_now", "when": "presented_in_top(3)", "budget": { "units": 1, "per": "item/60s" } },
+    { "name": "claim_pending", "when": "purpose == 'claim'", "budget": { "units": 1, "per": "turn" } },
+    { "name": "interest_alert", "when": "watch_count > 0", "budget": { "units": 1, "per": "item/5min" } }
+  ],
+  "budget": { "unit": "platform_call", "never_money": true }
+}
+```
+
+Um temporizador com `refresh(<campo>)` também pede releitura pelos mesmos motivos.
+
+## Revalidação de watch
+
+Um [watch](/concepts/object-types#objetos-compartilhados) avisa um cliente quando um objeto compartilhado atende a uma condição, e um aviso só vale se a condição for verdade na fonte. Quando uma escrita move o objeto e a condição passa a valer sobre um valor que **não** veio ao vivo da fonte (um snapshot, um cache, o que uma ferramenta mostrou), a Niadra não avisa ainda: ela abre um pedido de releitura com o motivo `watch_revalidation`, admitido como qualquer outro, com a prioridade e o orçamento do motivo `interest_alert` do tipo, um por objeto, para todos os watches dele. O worker o serve primeiro, com os outros pedidos, e o push com o `request_id` decide: a Niadra confere a condição sobre o objeto guardado com os valores lidos no lugar dos da fonte, mesmo quando o push foi `stale_version`, e envia `object.watch_fired` com `revalidated: true` só quando a condição continua valendo.
+
+Sem valor fresco, `refetch.unconfirmed_watch` do tipo decide: `fire`, o padrão, avisa com `revalidated: false`; `drop` não avisa. Isso acontece quando nenhum worker tomou pedidos nos últimos dez minutos, quando o orçamento recusou o pedido, quando o worker o liberou (`not_found` ou `failed`) ou quando ele foi abandonado depois de três empréstimos. Um tipo sem `refetch`, ou que lista `watch_revalidation` em `never`, não pede nada, e `fire` vale na hora. Quem roda o worker recebe, portanto, avisos conferidos; quem não roda recebe os mesmos avisos com `revalidated: false`, ou nenhum.
+
+```json
+"refetch": {
+  "reasons": [
+    { "name": "interest_alert", "when": "watch_count > 0", "budget": { "units": 1, "per": "item/5min" } }
+  ],
+  "unconfirmed_watch": "drop"
+}
+```
+
+## A releitura imediata de uma afirmação
+
+`claim_pending` não vai ao worker: é admitido para a conferência no próprio processo do agente, que lê na hora. `conversation.verify_claim(ref, field, value)` pergunta primeiro à Niadra ([`POST /v1/state/verify`](/api/state-verify)); quando o valor não está seguro para afirmar (velho, vencido, nunca observado), lê de novo pelo resolvedor do tipo, dentro do orçamento de 300 ms, e o valor fresco decide. O valor lido entra no turno como observação, então o [contrato de afirmação](/concepts/claims) e a memória o veem. Um valor nunca é conferido a partir de uma cópia velha: sem resolvedor, passado o orçamento ou com o disjuntor aberto, a resposta é `claim_safe: false`, com a lacuna dita.
+
+<CodeGroup>
+```python Python
+verdict = conversation.verify_claim("item_variant:store:991", "price_sale", 199.9)
+if verdict.claim_safe:
+    say(f"R$ {verdict.value or 199.9:.2f}")
+else:
+    say_without_the_price(verdict.prohibitions)  # or quote again
+```
+```typescript TypeScript
+const verdict = await convo.verifyClaim("item_variant:store:991", "price_sale", 199.9);
+if (verdict.claimSafe) say(`R$ ${(verdict.value ?? 199.9).toFixed(2)}`);
+else sayWithoutThePrice(verdict.prohibitions); // or quote again
+```
+</CodeGroup>
+
+`ClaimVerdict` traz `claim_safe`, `status` (`fresh`, `stale`, `expired`, `unknown`), `matches` (se o valor dado bate com o guardado), `source` (`niadra`, `resolver` ou `none`, quando ninguém conseguiu dizer), `declared_gaps`, `prohibitions` e o `value` fresco que um resolvedor leu.
+
+## Conteúdo por ponteiro
+
+Num espaço que guarda [conteúdo de terceiros](/concepts/object-types#conteúdo-de-terceiros) por ponteiro, o texto fica no seu armazenamento e a leitura traz só o marcador `content` (`mode`, `sha256`, `pointer`, `scan`). O resolvedor de conteúdo do SDK o recompõe dentro da sua empresa: `niadra.content.register(fetch)` recebe uma função que lê um ponteiro e devolve os bytes, e `niadra.content.fill(context)` (Python) ou `niadra.content.fill(view)` (TypeScript) preenche a view de estado com os textos, conferindo cada digest. O mesmo resolvedor lê os valores gravados por ponteiro num [replay](/guides/replay-in-ci). Veja [Só metadado](/guides/metadata-only).
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Tipos de objeto e estado" href="/concepts/object-types">
+    os motivos de releitura e o orçamento de cada tipo.
+  </Card>
+  <Card title="Afirmações" href="/concepts/claims">
+    o contrato que a conferência alimenta.
+  </Card>
+  <Card title="Pedidos de releitura" href="/api/state-refresh-requests">
+    a referência da rota que o worker consome.
+  </Card>
+  <Card title="Enviar estado" href="/api/objects-push">
+    a referência de `POST /v1/objects/push`.
+  </Card>
+</CardGroup>

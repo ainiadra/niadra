@@ -1,0 +1,245 @@
+---
+title: "WhatsApp agents"
+description: "wa_id, BSUID and phone, conversations that last months, OTP on the same channel, media by reference."
+---
+
+WhatsApp is where customers write first, and where a single thread can last for months. This guide connects a WhatsApp agent to Niadra: which identifiers to send, how to make webhook retries harmless, how a months-long thread becomes sessions, how an OTP on the same channel raises the verification level and how voice notes and attachments travel by reference.
+
+The example is Marina Souza's message at 2:02 pm: "The technician never showed up. I am calling you." Five minutes later she calls, and the voice agent already knows what she wrote.
+
+## Identifiers on WhatsApp
+
+The WhatsApp Cloud API reports several ids for the same person, and Niadra keeps each one as its own handle type. Send every id you receive in the same event: handles that arrive together on the same event are linked when they are strong, unblocked and consistent.
+
+| Handle type | What it is | Scope |
+|---|---|---|
+| `wa_id` | The contact's WhatsApp id, the phone number in digits | none |
+| `phone_e164` | The phone number in E.164, as your CRM or voice platform knows it | none |
+| `wa_bsuid` | The business-scoped user id | Your WhatsApp Business account, in `scope` |
+| `wa_jid`, `wa_lid` | Ids used by some WhatsApp integrations | none |
+
+With WhatsApp usernames, the sender may no longer be a phone number: it becomes a BSUID. The link between a BSUID and a phone is never assumed. It needs an explicit assertion, such as the customer typing the number, an OTP or your own records. A username is a display attribute and never identifies anyone.
+
+<Warning>
+A BSUID is only unique inside one business account. Always send it with the account in `scope` (the SDK helpers take it as an argument).
+</Warning>
+
+## Steps
+
+### 1. Record each inbound message with its WhatsApp id
+
+Use the provider message id (`wamid`) as the `idempotency_key`. The WhatsApp Cloud API retries webhooks for days, and Niadra deduplicates by that key in the database: a repeated delivery is counted as a duplicate, never stored twice. Events are ordered by `occurred_at`, the time the message was sent, never by arrival, so a resync that replays old messages lands them in the right place.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone, system_id, whatsapp, whatsapp_bsuid
+
+niadra = Niadra(channel="whatsapp")
+
+def on_message(msg):
+    niadra.track({
+        "conversation_id": "wa-8812",
+        "idempotency_key": msg["id"],  # wamid.HBgL...
+        "handles": [
+            whatsapp(msg["from"]),  # 14155550123
+            whatsapp_bsuid(msg["user_id"], "waba-301"),
+        ],
+        "speaker": {"role": "customer"},
+        "verification_hint": "V1",  # it came from that number
+        "content": {"text": msg["text"]["body"]},
+        "occurred_at": msg["timestamp_iso"],
+    })
+```
+```typescript TypeScript
+import { Niadra, handles } from "@niadra/sdk";
+
+const niadra = new Niadra();
+
+function onMessage(msg: WhatsAppMessage) {
+  niadra.track({
+    channel: "whatsapp",
+    conversation_id: "wa-8812",
+    idempotency_key: msg.id, // wamid.HBgL...
+    handles: [handles.waId(msg.from), handles.waBsuid(msg.userId, "waba-301")],
+    speaker: "customer",
+    verification_hint: "V1", // it came from that number
+    text: msg.text.body,
+    occurred_at: msg.timestampIso,
+  });
+}
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/batch" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [{
+      "type": "event",
+      "kind": "message",
+      "idempotency_key": "wamid.HBgLMTQxNTU1NTAxMjMVAgASGBQzQUQ",
+      "channel": "whatsapp",
+      "conversation_id": "wa-8812",
+      "handles": [
+        { "type": "wa_id", "value": "14155550123" },
+        { "type": "wa_bsuid", "value": "US.1098341", "scope": "waba-301" }
+      ],
+      "speaker": { "role": "customer" },
+      "direction": "inbound",
+      "verification_hint": "V1",
+      "content": { "type": "text", "text": "The technician never showed up. I am calling you." },
+      "occurred_at": "2026-09-22T17:02:11Z"
+    }]
+  }'
+```
+</CodeGroup>
+
+`track()` returns at once. The SDK queues the event: a message of the conversation leaves at once; other events leave in batches of up to 15 or every second. The API answers only once the batch is written, masked and sealed, and the message enters the live layer with the answer (for the first contact of a number the memory does not know yet, right after): when Marina calls at 2:07 pm, the voice agent receives it in `live`.
+
+### 2. Link the WhatsApp id to the phone the rest of the company knows
+
+The voice agent looks Marina up by `phone_e164`; your CRM knows her by its own id. When you know those belong to the same person, say so with `identify()`. It goes out right away: a new id joins the profile in the same response, and two profiles that already existed merge before the response.
+
+<CodeGroup>
+```python Python
+niadra.identify(
+    [whatsapp("14155550123"), phone("+14155550123"), system_id("crm", "48213")],
+    method="system_import",
+)
+```
+```typescript TypeScript
+await niadra.identify({
+  handles: [handles.waId("14155550123"), handles.phone("+14155550123"), handles.systemId("48213", "crm")],
+  method: "system_import",
+});
+```
+</CodeGroup>
+
+Every link is an assertion with its method and evidence, so a wrong one can be retracted and the memory follows each handle back to its origin. See [Identity and verification](/en/concepts/identity).
+
+### 3. Treat the thread as a conversation and let Niadra split sessions
+
+Your `conversation_id` is the thread, and a WhatsApp thread may last months. Niadra splits it into sessions: on WhatsApp, turns less than about 20 minutes apart are one session (configurable per channel). The session becomes memory after 3 minutes without turns, and a customer reply within the window reopens it and extracts it again; each reopen doubles the wait (3, 6, 12 minutes), never past the channel's window. Each session is extracted into memory on its own (a rule decides at its end whether it goes to the model: a greeting does not, a short exchange that settles an order number or a postal code does), and billing counts a conversation once per window of activity, not once per message.
+
+Read the context before every answer, at the level the conversation proved: the customer's turn with `verification_hint: "V1"` proves V1, because it came from that number, and `flush()` makes sure it arrived before the first read. Inside a session the pack is pinned, so the same bytes come back and the model provider keeps the prompt prefix cached; the SDK also caches it per conversation.
+
+<CodeGroup>
+```python Python
+niadra.flush()  # the customer's turn, and the V1 it proves, land before the first read
+with niadra.conversation("wa-8812", subject=whatsapp("14155550123"), view="chat", verification="V1") as conversation:
+    ctx = conversation.context()
+    reply = llm.reply(system=[AGENT_INSTRUCTIONS, ctx.system_block], messages=history, suffix=ctx.turn_block)
+    conversation.agent(reply)
+```
+```typescript TypeScript
+await niadra.flush(); // the customer's turn, and the V1 it proves, land before the first read
+const conversation = niadra.conversation({
+  subject: handles.waId("14155550123"),
+  channel: "whatsapp",
+  conversation_id: "wa-8812",
+  verification: "V1",
+});
+const ctx = await conversation.context();
+const reply = await llm.reply({ system: [AGENT_INSTRUCTIONS, ctx.text], messages: history, suffix: ctx.suffix });
+conversation.agent(reply);
+```
+</CodeGroup>
+
+### 4. Raise the verification level with an OTP on WhatsApp
+
+A message from a WhatsApp number is plausible by channel. Account details, documents and payments usually need more. Send a one-time code through WhatsApp; when the customer types it back correctly, record a `verify` with method `otp_whatsapp` and level V3. The level applies to this conversation only, and an OTP on WhatsApp also proves possession of that number.
+
+<CodeGroup>
+```python Python
+niadra.verify(
+    "otp_whatsapp",
+    "V3",
+    handle=whatsapp("14155550123"),
+    conversation_id="wa-8812",
+)
+ctx = conversation.context(verification="V3")
+```
+```typescript TypeScript
+await conversation.verify({ method: "otp_whatsapp", level: "V3" });
+const ctx = await conversation.context(); // re-pinned at the new level
+```
+</CodeGroup>
+
+`verify` is sent immediately and drops the cached pack of that conversation. The next read comes back with the items the policy released at V3; before that, the pack said how many were withheld in `withheld`, so the agent knows verifying is worth asking for. A level above the ceiling of your source comes back as the item error `verification_not_allowed`.
+
+### 5. Send voice notes and attachments by reference
+
+Media never travels inside an event. Reserve an upload with the `subject` it belongs to, `PUT` the bytes to the presigned URL with **exactly** the `upload_headers` of the answer (the store refuses anything else), then send the event with `media_ref` and the SHA-256. The SDKs do the first two steps in `upload_media()` and `uploadMedia()`. For voice notes, send your own transcript in `transcript`, with `stt_confidence`.
+
+<CodeGroup>
+```python Python
+media = niadra.upload_media(voice_note_bytes, "audio/ogg", subject=whatsapp("14155550123"))
+
+if media:
+    niadra.track({
+        "conversation_id": "wa-8812",
+        "idempotency_key": "wamid.HBgLMTQxNTU1NTAxMjMVAgASGBQ0QkE",
+        "handles": [whatsapp("14155550123")],
+        "speaker": {"role": "customer"},
+        "content": {
+            "type": "audio",
+            "media_ref": media.media_ref,
+            "media_sha256": media.media_sha256,
+            "transcript": "He was supposed to come between eight and noon.",
+            "stt_confidence": 0.93,
+        },
+    })
+```
+```typescript TypeScript
+const { data: media } = await niadra.uploadMedia({
+  data: voiceNote,
+  content_type: "audio/ogg",
+  subject: handles.waId("14155550123"),
+});
+
+if (media) {
+  conversation.track({
+    idempotency_key: "wamid.HBgLMTQxNTU1NTAxMjMVAgASGBQ0QkE",
+    speaker: "customer",
+    content: {
+      type: "audio",
+      media_ref: media.media_ref,
+      media_sha256: media.media_sha256,
+      transcript: "He was supposed to come between eight and noon.",
+      stt_confidence: 0.93,
+    },
+  });
+}
+```
+```bash cURL
+# 1. Reserve the upload; the answer carries upload_url and upload_headers
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/media/uploads" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "content_type": "audio/ogg", "size_bytes": 48213, "sha256": "a3f1c2d4e5b6978812ab34cd56ef7890a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "subject": { "type": "wa_id", "value": "14155550123" } }'
+
+# 2. PUT the bytes with exactly the headers of upload_headers
+curl -X PUT "$UPLOAD_URL" -H "Content-Type: audio/ogg" -H "x-amz-checksum-sha256: <value from upload_headers>" --data-binary @note.ogg
+```
+</CodeGroup>
+
+### 6. Record your agent's answers and the handoffs
+
+Record outbound messages with `conversation.agent()` (the WhatsApp message id as `idempotency_key` when you have it), attendant messages with `human_agent()` in Python or `human()` in TypeScript, and internal notes with `visibility="internal"`: the customer never saw them, and the pack marks them as such. When the conversation moves to a person, record the handoff so the measurement can tell whether the destination read the context.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Events and the batch" href="/en/concepts/events">
+    idempotency, ordering and per-item errors.
+  </Card>
+  <Card title="Identity and verification" href="/en/concepts/identity">
+    assertions, merges and the levels.
+  </Card>
+  <Card title="Voice agents" href="/en/guides/voice-agents">
+    the call at 2:07 pm.
+  </Card>
+  <Card title="Send a batch" href="/en/api/batch">
+    the full request and response.
+  </Card>
+</CardGroup>

@@ -1,0 +1,19 @@
+{
+  "version": "cv_17aa90c2e4f3",
+  "subject": {"for": "beneficiary:dep-1"},
+  "hard": [
+    {"id": "h1", "attr": "plan.network", "op": "not_in", "values": ["rede-x"], "source": "stated",
+     "scope": "persistent", "relax": "ask", "origin": {"kind": "stated", "turn_id": "0192b3c4-7000-7000-8000-000000000001"}},
+    {"id": "h2", "attr": "plan.price_full", "op": "lte", "values": [600], "source": "tool_args", "scope": "turn",
+     "origin": {"kind": "tool_args", "turn_id": "0192b3c4-7000-7000-8000-000000000002"}}
+  ],
+  "conflicts": [],
+  "rendered": {
+    "tool": "quote_plans",
+    "mode": "advisory",
+    "args": {"exclude_networks": "rede-x"},
+    "residual": ["h2"],
+    "post_filter": []
+  },
+  "text": "<restrições>\n- exigido: network diferente de rede-x\n- exigido: price full de no máximo 600\n</restrições>"
+}

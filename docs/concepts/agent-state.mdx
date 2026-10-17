@@ -1,0 +1,97 @@
+---
+title: "Memória de trabalho"
+description: "O estado de trabalho de um agente entre turnos, com esquema declarado: escrito pelo código, nunca por um modelo, mascarável, exportável e apagável com prova."
+---
+
+O código de um agente guarda um pequeno estado de trabalho entre turnos: o passo de um formulário, a oferta que mostrou, o carrinho que está montando, qual subagente está em qual parte. Guardado só pelo agente, esse estado se perde quando o processo reinicia e fica invisível à governança da sua empresa. Guardado como um blob opaco numa memória, ele não pode ser mascarado nem apagado com prova. A **memória de trabalho** é esse estado com um esquema declarado: a Niadra não interpreta o que ele quer dizer, mas conhece os campos dele, então consegue mascarar, reter, exportar e apagar cada um.
+
+Ela é diferente da [memória do agente](/concepts/agent-memory), as notas de trabalho sobre o ofício, que nunca falam de um cliente e podem entrar no prompt. A memória de trabalho fala de uma conversa, uma tarefa, um objeto ou um cliente, e nunca entra num prompt.
+
+## Ligar e desligar
+
+A memória de trabalho é a funcionalidade `agent_state` do espaço, ligada por padrão; um espaço a desliga no documento `features`, pelo papel `security`. A chave do agente precisa do escopo `agent_state`. O esquema é um tipo com `ownership: agent` no documento `object-types` ([Tipos de objeto](/concepts/object-types)): o tipo com o nome do agente ou, quando o registro declara um tipo só dessa posse, esse tipo; sem um, nenhum campo é declarado, e toda escrita é recusada com `not_declared_field`.
+
+## O esquema e o escopo
+
+O tipo declara os campos como qualquer tipo, inclusive `pii`, `sensitivity` e a retenção, e uma seção `agent_state`:
+
+| Membro | O que diz |
+|---|---|
+| `scope` | A que um estado pertence: `conversation`, `task`, `object` ou `subject` |
+| `write` | Os modos permitidos: `cas`, `merge_by_key` ou os dois (o padrão) |
+
+```json
+{
+  "type": "shopping_assistant_state",
+  "ownership": "agent",
+  "fields": {
+    "step": { "type": "enum" },
+    "offer": { "type": "string" },
+    "cart_note": { "type": "text", "pii": true }
+  },
+  "agent_state": { "scope": "conversation", "write": "both" },
+  "retention": { "state": "30d", "cart_note": "7d" }
+}
+```
+
+Um estado é nomeado pelo escopo (`kind` e `id`: o id da conversa ou da tarefa, o objeto como `type:namespace:id`, ou a forma canônica de um handle do cliente) e pelo agente que o escreve. O escopo viaja no corpo, nunca numa URL, porque um id de conversa pode parecer um telefone, e a Niadra o guarda só como hash com chave. O estado é escrito por código, nunca por um modelo: a Niadra não o oferece como ferramenta de modelo em nenhum protocolo, ele nunca entra num contexto nem numa extração, e o Console mostra o tamanho, a versão e as datas dele, nunca o conteúdo (a aba Memória de trabalho do perfil, e [`GET /v1/profiles/{profile_id}/agent-state`](/api/profile-agent-state)).
+
+## Escrever
+
+[`PUT /v1/agent-state`](/api/agent-state-write) leva o escopo, o agente, o modo, `if_version` e `body`, e `subject` quando o escopo não nomeia o cliente, para o apagamento e o pacote do titular acharem o estado.
+
+- **Compare-and-swap** (`cas`): `body` é o estado novo inteiro, e a escrita só vale quando a versão guardada é `if_version` (0 quando o estado ainda não pode existir); senão a resposta é 412 `agent_state_conflict` e nada muda. Um campo fora de `body` desaparece.
+- **Merge por chave** (`merge_by_key`): cada campo de primeiro nível de `body` troca o campo inteiro, sem fusão mais funda; um campo escrito exatamente como `{"$delete": true}` é removido; os campos que `body` não nomeia ficam. Subagentes que escrevem campos diferentes em paralelo nunca perdem a escrita um do outro, e um campo removido não volta a menos que alguém o escreva de novo. Com `if_version`, o merge só vale nessa versão.
+
+Toda escrita guardada soma um à versão, que começa em 1. A resposta é `{stored, version, reason}`. Um campo que o esquema não declara é recusado (`stored: false`, `reason: not_declared_field`), e um campo `pii` é mascarado na escrita pelas regras do espaço. Um estado é guardado inteiro, sem teto de tamanho: a Niadra nunca guarda parte de um estado nem descarta uma escrita porque o estado cresceu. O único limite é o tamanho da própria requisição, e um corpo acima dele é recusado com erro antes de qualquer coisa ser guardada, com o estado anterior intacto. A ordem da conferência é a versão (412) e os campos declarados.
+
+<CodeGroup>
+```python Python
+state = conversation.agent_state.get()  # version 0 and an empty body before the first write
+written = conversation.agent_state.put({"step": "sizes", "offer": "familia-plus"})  # merge_by_key by default
+if not written.stored:
+    print(written.reason)  # not_declared_field or conflict
+
+# Compare-and-swap of the whole state, at the version read
+written = conversation.agent_state.put({"step": "checkout"}, mode="cas", if_version=state.version)
+# Remove one field, keep the others
+conversation.agent_state.put({"offer": {"$delete": True}})
+```
+```typescript TypeScript
+import { DELETE } from "@niadra/sdk";
+
+const state = await convo.agentState.get(); // version 0 and an empty body before the first write
+const written = await convo.agentState.put({ step: "sizes", offer: "familia-plus" }); // merge_by_key by default
+if (!written.stored) console.log(written.reason); // not_declared_field or conflict
+
+// Compare-and-swap of the whole state, at the version read
+await convo.agentState.put({ step: "checkout" }, { mode: "cas", ifVersion: state.version });
+// Remove one field, keep the others
+await convo.agentState.put({ offer: DELETE });
+```
+</CodeGroup>
+
+## Ler
+
+[`POST /v1/agent-state/read`](/api/agent-state-read) com o escopo e o agente devolve `body`, `version` e `updated_at`; um estado nunca escrito lê como corpo vazio na versão 0. **Quem escreveu lê a própria escrita**: depois de um `stored: true` na versão N, toda leitura seguinte do mesmo escopo e agente devolve N ou uma versão mais nova, mesmo através dos dois armazenamentos da Niadra, e uma leitura nunca espera pelo banco. O SDK guarda, por escopo e agente, a última versão que escreveu ou leu, e serve a maior entre ela e o que lê. Com a Niadra fora do alcance, ele guarda a versão local e manda a escrita de novo depois com o mesmo `if_version`; um compare-and-swap que então conflita é reportado ao código (a propriedade `conflicts` de `agent_state` em Python e de `agentState` em TypeScript), nunca fundido em silêncio. Num replay, o estado começa vazio e as escritas ficam no executor.
+
+## Retenção e apagamento
+
+Um estado fica guardado até o tipo do agente definir uma retenção: `retention.state` diz quanto tempo ele fica depois da última escrita (qualquer duração; `while_in_working_set` guarda 30 dias depois da última escrita), e `valid_until` volta nulo enquanto nenhuma retenção é definida. Um campo pode ficar menos (`retention.<campo>`), contado da última escrita dele: um campo vencido nunca é servido, sai do estado na próxima escrita e a Niadra o remove do que guarda. Apagar um cliente apaga os estados do escopo dele e os que o nomeiam em `subject`; apagar uma conversa apaga os estados do escopo dela. O pacote do titular leva os estados dele, por campo declarado.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Tipos de objeto e estado" href="/concepts/object-types">
+    o tipo com `ownership: agent` que dá o esquema.
+  </Card>
+  <Card title="Memória do agente" href="/concepts/agent-memory">
+    as notas sobre o ofício, que entram no prompt e nunca falam de um cliente.
+  </Card>
+  <Card title="Gravar a memória de trabalho" href="/api/agent-state-write">
+    a referência de `PUT /v1/agent-state`.
+  </Card>
+  <Card title="Privacidade" href="/concepts/privacy">
+    o apagamento e o pacote do titular.
+  </Card>
+</CardGroup>

@@ -1,0 +1,783 @@
+{
+  "version": "1",
+  "types": [
+    {
+      "type": "cotacao_plano_saude",
+      "ownership": "subject",
+      "nature": "derived",
+      "mirror_of": {
+        "system": "api_da_operadora",
+        "derived_by": "declaration",
+        "drift": "alert"
+      },
+      "inputs": [
+        "lead.city",
+        "lead.state",
+        "lead.ages",
+        "lead.household",
+        "turn.product_type",
+        "campaign.discount_validity"
+      ],
+      "fields": {
+        "price_full": {
+          "type": "money",
+          "role": "price_full",
+          "claim": {
+            "allowed": true,
+            "class": "money",
+            "nature": "computed"
+          }
+        },
+        "price_discounted": {
+          "type": "money",
+          "role": "price_discounted",
+          "claim": {
+            "allowed": true,
+            "class": "money",
+            "nature": "computed"
+          }
+        },
+        "price_health_part": {
+          "type": "money",
+          "role": "health_share",
+          "claim": {
+            "allowed": false
+          }
+        },
+        "price_health_only": {
+          "type": "money",
+          "role": "price_health_only",
+          "claim": {
+            "allowed": true,
+            "class": "money",
+            "nature": "computed"
+          }
+        },
+        "enrollment_fee": {
+          "type": "money",
+          "logic": "tri",
+          "role": "enrollment_fee",
+          "unobserved_blocks": [
+            "decide:close"
+          ],
+          "claim": {
+            "allowed": true,
+            "class": "money",
+            "nature": "computed"
+          }
+        }
+      },
+      "sources": {
+        "quote_api": {
+          "kind": "pull",
+          "precedence": 1,
+          "known_defects": [
+            {
+              "field": "enrollment_fee",
+              "use_source": "budget_document"
+            }
+          ]
+        },
+        "curated_table": {
+          "kind": "batch",
+          "precedence": 2,
+          "active_when": "config.discount_source == 'table'",
+          "empty_means": "absent"
+        },
+        "budget_document": {
+          "kind": "pull",
+          "precedence": 1,
+          "authoritative_for": [
+            "enrollment_fee"
+          ]
+        }
+      },
+      "union": {
+        "*": "first_by_precedence"
+      },
+      "refetch": {
+        "reasons": [
+          {
+            "name": "input_changed",
+            "when": "derived_status == 'expired_by_input'",
+            "priority": "high",
+            "budget": {
+              "units": "unlimited"
+            }
+          },
+          {
+            "name": "time_expired",
+            "when": "age(price_full) > 72h",
+            "budget": {
+              "units": 1,
+              "per": "session"
+            }
+          },
+          {
+            "name": "discount_expired",
+            "when": "changed(campaign.discount_validity)",
+            "budget": {
+              "units": 1,
+              "per": "day"
+            }
+          }
+        ],
+        "never": [
+          "no_news"
+        ],
+        "budget": {
+          "unit": "quote_call",
+          "never_money": true
+        }
+      },
+      "purposes": {
+        "display": {
+          "on_stale": "serve_with_age"
+        },
+        "claim": {
+          "on_stale": "serve_with_prohibitions",
+          "prohibitions": [
+            "affirm_price"
+          ]
+        },
+        "decide": {
+          "on_stale": "structured_refusal",
+          "reason": "stale_quote",
+          "action": "requote"
+        }
+      },
+      "readings": {
+        "commercial": {
+          "fields": [
+            "price_full",
+            "price_discounted"
+          ],
+          "purposes": [
+            "sales"
+          ]
+        },
+        "closing": {
+          "fields": [
+            "enrollment_fee",
+            "price_discounted"
+          ],
+          "prefer_source": "budget_document",
+          "purposes": [
+            "closing"
+          ]
+        },
+        "audit": {
+          "fields": [
+            "*"
+          ],
+          "include_inputs": true,
+          "purposes": [
+            "audit"
+          ]
+        }
+      },
+      "retention": {
+        "projection": "30d"
+      }
+    },
+    {
+      "type": "proposal",
+      "ownership": "subject",
+      "mirror_of": {
+        "system": "crm",
+        "derived_by": "declaration",
+        "drift": "alert"
+      },
+      "key": {
+        "natural": [
+          "proposal_id"
+        ]
+      },
+      "time": {
+        "submitted_at": {
+          "origin": "source"
+        },
+        "signed_at": {
+          "origin": "source"
+        },
+        "timers_on": "submitted_at"
+      },
+      "relations": {
+        "quote": {
+          "type": "cotacao_plano_saude",
+          "via": "quote_ref"
+        }
+      },
+      "fields": {
+        "plan_code": {
+          "type": "string",
+          "freshness": {
+            "class": "stable"
+          }
+        },
+        "lives": {
+          "type": "number",
+          "role": "lives",
+          "claim": {
+            "allowed": true,
+            "class": "count",
+            "nature": "observed"
+          }
+        },
+        "monthly_price": {
+          "type": "money",
+          "role": "price_discounted",
+          "freshness": {
+            "class": "price",
+            "max_age": "72h"
+          },
+          "claim": {
+            "allowed": true,
+            "class": "money",
+            "nature": "computed"
+          }
+        },
+        "health_declaration": {
+          "type": "text",
+          "sensitivity": "health",
+          "pii": true,
+          "access": [
+            {
+              "readers": [
+                "agent:closing"
+              ],
+              "purposes": [
+                "closing"
+              ],
+              "effect": "allow"
+            },
+            {
+              "readers": [
+                "agent:sales"
+              ],
+              "purposes": [
+                "sales"
+              ],
+              "effect": "deny"
+            }
+          ]
+        }
+      },
+      "sources": {
+        "crm": {
+          "kind": "push",
+          "precedence": 1,
+          "authoritative_for": [
+            "*"
+          ]
+        },
+        "carrier_portal": {
+          "kind": "pull",
+          "precedence": 2,
+          "cost": "paid"
+        }
+      },
+      "states": [
+        "draft",
+        "submitted",
+        "under_review",
+        "approved",
+        "rejected",
+        "signed",
+        "paid",
+        "cancelled"
+      ],
+      "lifecycle": {
+        "transitions": [
+          {
+            "from": "draft",
+            "to": "submitted",
+            "by": [
+              "agent",
+              "human"
+            ]
+          },
+          {
+            "from": "submitted",
+            "to": "under_review",
+            "by": [
+              "source"
+            ]
+          },
+          {
+            "from": "under_review",
+            "to": "approved",
+            "by": [
+              "source"
+            ]
+          },
+          {
+            "from": "under_review",
+            "to": "rejected",
+            "by": [
+              "source"
+            ]
+          },
+          {
+            "from": "approved",
+            "to": "signed",
+            "by": [
+              "source",
+              "human"
+            ],
+            "evidence": "required"
+          },
+          {
+            "from": "signed",
+            "to": "paid",
+            "by": [
+              "source"
+            ],
+            "evidence": "required"
+          },
+          {
+            "from": "*",
+            "to": "cancelled",
+            "by": [
+              "source",
+              "human"
+            ]
+          }
+        ],
+        "forbidden": [
+          {
+            "from": "paid",
+            "to": "draft"
+          }
+        ],
+        "latches": [
+          "signed",
+          "paid"
+        ],
+        "outcome": {
+          "provisional": [
+            "signed"
+          ],
+          "final": [
+            "paid",
+            "rejected",
+            "cancelled"
+          ],
+          "expired_without_outcome": {
+            "after": "30d"
+          },
+          "vocabularies": [
+            {
+              "source": "carrier_portal",
+              "map": {
+                "APROVADA": "approved",
+                "RECUSADA": "rejected"
+              },
+              "precedence": 1
+            }
+          ]
+        }
+      },
+      "timers": {
+        "follow_up": {
+          "due": "submitted_at + 48h",
+          "once_per": "proposal",
+          "on_fire": [
+            "notify"
+          ]
+        }
+      },
+      "refetch": {
+        "reasons": [
+          {
+            "name": "under_review",
+            "when": "state == 'under_review'",
+            "budget": {
+              "units": 1,
+              "per": "object/6h"
+            }
+          }
+        ],
+        "never": [
+          "no_news"
+        ],
+        "budget": {
+          "unit": "portal_call",
+          "never_money": true,
+          "min_interval": "6h"
+        }
+      },
+      "purposes": {
+        "claim": {
+          "on_stale": "serve_with_prohibitions",
+          "prohibitions": [
+            "affirm_price",
+            "affirm_approval"
+          ]
+        }
+      },
+      "retention": {
+        "projection": "1825d"
+      }
+    },
+    {
+      "type": "waiting_period",
+      "ownership": "subject",
+      "mirror_of": {
+        "system": "api_da_operadora",
+        "derived_by": "declaration",
+        "drift": "alert"
+      },
+      "key": {
+        "natural": [
+          "contract_id",
+          "procedure_group"
+        ]
+      },
+      "fields": {
+        "procedure_group": {
+          "type": "enum",
+          "sensitivity": "health"
+        },
+        "start_on": {
+          "type": "date",
+          "freshness": {
+            "class": "stable"
+          }
+        }
+      },
+      "values": {
+        "ends_on": {
+          "rule": "carencia_contratual@v2",
+          "inputs": [
+            "start_on",
+            "procedure_group"
+          ],
+          "validity": "until_input_or_rule_change",
+          "declared_gaps": [
+            "portability_credit"
+          ],
+          "gap_effect": "errs_late"
+        }
+      },
+      "sources": {
+        "carrier_api": {
+          "kind": "pull",
+          "precedence": 1,
+          "authoritative_for": [
+            "*"
+          ]
+        }
+      },
+      "purposes": {
+        "claim": {
+          "on_stale": "serve_with_prohibitions",
+          "prohibitions": [
+            "affirm_coverage_date"
+          ]
+        }
+      },
+      "retention": {
+        "projection": "1825d"
+      }
+    },
+    {
+      "type": "authorization",
+      "ownership": "subject",
+      "mirror_of": {
+        "system": "api_da_operadora",
+        "derived_by": "declaration",
+        "drift": "alert"
+      },
+      "key": {
+        "natural": [
+          "authorization_id"
+        ]
+      },
+      "fields": {
+        "procedure": {
+          "type": "string",
+          "sensitivity": "health",
+          "pii": true
+        },
+        "decision_on": {
+          "type": "date",
+          "claim": {
+            "allowed": true,
+            "class": "date",
+            "nature": "observed"
+          }
+        }
+      },
+      "sources": {
+        "carrier_api": {
+          "kind": "pull",
+          "precedence": 1,
+          "authoritative_for": [
+            "*"
+          ],
+          "cost": "paid"
+        }
+      },
+      "states": [
+        "requested",
+        "pending_documents",
+        "approved",
+        "denied"
+      ],
+      "lifecycle": {
+        "transitions": [
+          {
+            "from": "requested",
+            "to": "pending_documents",
+            "by": [
+              "source"
+            ]
+          },
+          {
+            "from": "pending_documents",
+            "to": "requested",
+            "by": [
+              "source",
+              "human"
+            ]
+          },
+          {
+            "from": "requested",
+            "to": "approved",
+            "by": [
+              "source"
+            ]
+          },
+          {
+            "from": "requested",
+            "to": "denied",
+            "by": [
+              "source"
+            ]
+          }
+        ],
+        "latches": [
+          "approved"
+        ],
+        "outcome": {
+          "final": [
+            "approved",
+            "denied"
+          ],
+          "expired_without_outcome": {
+            "after": "21d"
+          }
+        }
+      },
+      "refetch": {
+        "reasons": [
+          {
+            "name": "pending",
+            "when": "state == 'requested' and age(decision_on) > 24h",
+            "budget": {
+              "units": 1,
+              "per": "object/24h"
+            }
+          }
+        ],
+        "budget": {
+          "unit": "carrier_call",
+          "never_money": true
+        }
+      },
+      "purposes": {
+        "claim": {
+          "on_stale": "serve_with_prohibitions",
+          "prohibitions": [
+            "affirm_approval"
+          ]
+        }
+      },
+      "retention": {
+        "projection": "1825d"
+      }
+    },
+    {
+      "type": "hospitalization",
+      "ownership": "subject",
+      "mirror_of": {
+        "system": "api_da_operadora",
+        "derived_by": "declaration",
+        "drift": "alert"
+      },
+      "key": {
+        "natural": [
+          "hospitalization_id"
+        ]
+      },
+      "time": {
+        "admitted_on": {
+          "origin": "source"
+        },
+        "timers_on": "admitted_on"
+      },
+      "relations": {
+        "hospital": {
+          "type": "network_hospital",
+          "via": "hospital_id"
+        }
+      },
+      "fields": {
+        "ward": {
+          "type": "string",
+          "sensitivity": "health"
+        },
+        "expected_discharge": {
+          "type": "date",
+          "sensitivity": "health",
+          "freshness": {
+            "class": "semi",
+            "max_age": "24h"
+          }
+        }
+      },
+      "sources": {
+        "carrier_api": {
+          "kind": "pull",
+          "precedence": 1,
+          "authoritative_for": [
+            "*"
+          ]
+        }
+      },
+      "states": [
+        "admitted",
+        "discharged",
+        "transferred"
+      ],
+      "lifecycle": {
+        "transitions": [
+          {
+            "from": "admitted",
+            "to": "discharged",
+            "by": [
+              "source"
+            ]
+          },
+          {
+            "from": "admitted",
+            "to": "transferred",
+            "by": [
+              "source"
+            ]
+          }
+        ],
+        "latches": [
+          "discharged"
+        ]
+      },
+      "timers": {
+        "stay_review": {
+          "due": "admitted_on + 72h",
+          "on_fire": [
+            "notify",
+            "refresh(expected_discharge)"
+          ]
+        }
+      },
+      "retention": {
+        "projection": "1825d"
+      }
+    },
+    {
+      "type": "network_hospital",
+      "ownership": "shared",
+      "mirror_of": {
+        "system": "api_da_operadora",
+        "derived_by": "declaration",
+        "drift": "alert"
+      },
+      "key": {
+        "natural": [
+          "hospital_id"
+        ]
+      },
+      "working_set": {
+        "enter_on": [
+          "presented",
+          "related",
+          "committed"
+        ],
+        "leave_after": "90d"
+      },
+      "fields": {
+        "name": {
+          "type": "string",
+          "freshness": {
+            "class": "stable"
+          }
+        },
+        "city": {
+          "type": "string",
+          "freshness": {
+            "class": "stable"
+          },
+          "attribute": {
+            "family": "city"
+          }
+        },
+        "in_network": {
+          "type": "bool",
+          "logic": "tri",
+          "observers": [
+            {
+              "who": "source:network_route",
+              "validity": "24h"
+            },
+            {
+              "who": "human",
+              "validity": "never",
+              "overrides": [
+                "source:network_route"
+              ]
+            }
+          ],
+          "unobserved_blocks": [
+            "claim"
+          ],
+          "freshness": {
+            "class": "semi",
+            "max_age": "24h"
+          },
+          "claim": {
+            "allowed": true,
+            "class": "text",
+            "nature": "observed"
+          }
+        }
+      },
+      "sources": {
+        "network_route": {
+          "kind": "pull",
+          "precedence": 1,
+          "authoritative_for": [
+            "in_network"
+          ],
+          "sanity": {
+            "min_items": 50
+          }
+        },
+        "network_snapshot": {
+          "kind": "batch",
+          "precedence": 2
+        },
+        "sales_material": {
+          "kind": "batch",
+          "precedence": 3
+        }
+      },
+      "union": {
+        "in_network": "union"
+      },
+      "retention": {
+        "projection": "while_in_working_set"
+      }
+    }
+  ]
+}

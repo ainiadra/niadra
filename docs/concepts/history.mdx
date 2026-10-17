@@ -1,0 +1,196 @@
+---
+title: "Navegação do histórico"
+description: "Busca, linha do tempo e abrir item: o agente consulta tudo o que já aconteceu com o cliente."
+---
+
+O contexto cobre o que importa agora. Para todo o resto, o agente consulta o **histórico**: tudo o que já aconteceu com o cliente, em qualquer canal, sistema ou fornecedor. São três operações (buscar, ver a linha do tempo e abrir um item) que qualquer LLM chama sozinho, como ferramenta, ou que o seu código chama direto pelo SDK. Nenhum LLM fica no caminho: a busca soma a busca por palavra a um modelo de embeddings multilíngue que roda dentro da região. Cada item guarda o próprio vetor quando é escrito, e a busca só codifica a pergunta, com meta de menos de 200 ms.
+
+## Contexto e histórico, lado a lado
+
+| | Contexto | Histórico |
+|---|---|---|
+| Quando | Antes da primeira palavra, sempre | No meio da conversa, quando ela pede mais |
+| Quem decide | O seu código, numa chamada fixa | O LLM do agente, chamando a ferramenta, ou o seu código |
+| O que cobre | Identidade, pendências, o que acabou de acontecer, destaques do histórico | Tudo o que já aconteceu com o cliente |
+| O que a leitura faz | Com o contexto aquecido, nenhuma consulta ao banco nem modelo | As linhas do cliente são lidas uma vez e reaproveitadas enquanto a memória dele não muda; a pergunta é codificada enquanto elas carregam |
+
+A memória do contexto e o histórico passam pela mesma política e pelo mesmo nível de verificação, e as duas leituras deixam comprovante. Os exemplos desta página seguem a ligação da Marina, em que o atestado de rede provou V1, e cada leitura pede esse nível.
+
+## Buscar
+
+`search` recebe uma pergunta em linguagem natural ou palavras-chave e procura por palavra e por significado, só dentro do histórico daquele cliente. Alcança conversas, fatos, pendências, promessas, ações de agentes, padrões e objetos de negócio, com o estado que os eventos de sistema deram a cada um.
+
+<CodeGroup>
+```python Python
+from niadra import Niadra, phone
+
+niadra = Niadra()
+
+result = niadra.search(
+    phone("+14155550123"),
+    "credit for missed technician visit",
+    max_tokens=300,
+    verification="V1",
+    conversation_id="call-4471",
+    voice=True,
+)
+if result.recurrence:
+    print(result.recurrence.occurrences, result.recurrence.last_resolution)
+```
+```typescript TypeScript
+const { data } = await niadra.search({
+  subject: handles.phone("+14155550123"),
+  query: "credit for missed technician visit",
+  max_tokens: 300,
+  verification: "V1",
+  conversation_id: "call-4471",
+});
+if (data?.recurrence) console.log(data.recurrence.occurrences, data.recurrence.last_resolution);
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/history/search" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"subject": {"type": "phone_e164", "value": "+14155550123"},
+       "query": "credit for missed technician visit", "max_tokens": 300, "verification": "V1", "conversation_id": "call-4471"}'
+```
+</CodeGroup>
+
+Cada item volta com `kind`, texto denso no mesmo estilo do contexto, `at`, `channel`, `outcome`, `confidence` e `origin_event_id`, o evento de onde veio. É daí que o agente diz "em 12 de março, por telefone, vocês me deram um crédito".
+
+### Recorrência
+
+Quando a busca casa com uma categoria, a resposta traz o bloco `recurrence`: quantas reclamações daquela categoria houve nos últimos 90 dias, a data da última, o desfecho e a solução da última. É uma contagem sobre conversas já classificadas, não um palpite do modelo. A contagem por assunto dos encaixes do contexto e o padrão "reclamação recorrente" contam com a mesma função, a mesma janela e o mesmo filtro, então, com os valores padrão do catálogo, os três números são iguais. No exemplo da Marina, a busca acha a ligação de 12 de março, que ficou fora da janela, e o bloco conta a reclamação de hoje no WhatsApp: `occurrences: 1`, `window_days: 90`.
+
+### Filtros
+
+`filters` restringe a busca por período (`since`, `until`), `channels`, `categories`, tipos de item (`item_kinds`: `episode`, `fact`, `open_item`, `action`, `object`, `trait`, `system_event`), `outcome` e `object`. Um evento de sistema da janela quente é uma linha própria na busca e na linha do tempo, com o tipo, o objeto que ele tocou e alguns campos, sob a mesma política do objeto; `system_event` acha essas linhas e também os objetos que eles mudaram, e a ferramenta o oferece. Transbordos e correções ficam de fora.
+
+`when` recebe uma expressão de tempo nas palavras do cliente, em português, inglês ou espanhol (`semana passada`, `last month`, `en marzo`, `ontem`), e o servidor a converte em `since` e `until` sem modelo de IA, no fuso do espaço e a partir do último evento da conversa em curso, para um reprocessamento ler as mesmas palavras do mesmo jeito. A resposta diz em `window` o período que leu; uma expressão que ele não reconhece vai em `ignored` e nunca vira erro. A descrição da ferramenta pede ao modelo para passar a expressão do cliente como ela veio.
+
+`where` recebe uma árvore de condições, na gramática que quem vem de outra memória já conhece: `AND`, `OR` e `NOT` sobre os campos da linha (`id`, `kind`, `channel`, `category`, `outcome`, `source_id`, `vendor`, `at`, `valid_until`, `confidence`, `text`, `object_type`, `object_namespace`), com `eq`, `ne`, `in`, `nin`, `gt`, `gte`, `lt`, `lte`, `contains`, `icontains` (sem caixa e sem acento) e `exists`; um valor solto quer dizer `eq`, uma lista quer dizer `in`, chaves irmãs são `AND`. Exemplo: `{"AND": [{"kind": ["episode", "action"]}, {"NOT": {"vendor": "acme"}}, {"at": {"gte": "2026-09-01"}}]}`. A expressão é avaliada em memória, depois da política, então só estreita o que o leitor já podia ver e nunca muda a ordem; até 64 condições e 6 níveis, e um erro cita o caminho, nunca um valor. Vale na busca e na linha do tempo, e o hash dos filtros no comprovante a cobre. `limit` (1 a 100) corta os itens da busca depois do orçamento de tokens.
+
+Um [valor fixado](/concepts/events#valores-fixados) é achado pelo próprio valor: a pergunta que traz "88280" acha o registro 88280, e `45778-204` e `45778204` são o mesmo CEP.
+
+O que um evento afirma pode ter prazo: `valid_until` no evento diz até quando vale, como uma oferta válida até uma data. Depois desse momento, os fatos que ele deu saem do contexto e da busca; `show_expired: true` traz também esses itens.
+
+### Orçamento
+
+`max_tokens` limita o tamanho da resposta: de 50 a 4.000, padrão 800. Use 300 em voz. O corte é por valor, nunca por ordem de chegada. A resposta informa `tokens_used`.
+
+## Linha do tempo
+
+`timeline` folheia o cliente em ordem, do mais recente para o mais antigo: uma conversa, um evento de sistema ou uma ação de agente por linha, com cursor. É o que o LLM usa quando não sabe o que procurar. Quando `filters.item_kinds` nomeia `open_item`, `fact`, `trait` ou `object`, a linha do tempo lista esses também, cada um na própria data, com a mesma política da busca: `item_kinds: ["open_item"]` lista todas as pendências do cliente. A busca ordena por uma pergunta, então use-a para achar algo; para listar, use a linha do tempo.
+
+`filters.item_statuses` lista as pendências pelo status: `open`, `overdue` e `resolved`. Sem ele, as linhas trazem as pendências abertas e vencidas e as promessas cumpridas nos últimos 7 dias, como o contexto as mostra. `resolved` alcança toda pendência resolvida, por mais antiga que seja. A linha de uma pendência traz `status`, `object` e `expected_operation`; a de uma resolvida traz também `closed_at` e `closed_by`, o mesmo objeto que o webhook `open_item.closed` levou (`kind` `action` com `action_id` e `operation`, `system_event` com `event_id`, `conversation` com `session_id`, ou `feedback`). Quando nomeados, os status fazem a linha do tempo listar pendências também: `item_kinds: ["open_item"], item_statuses: ["resolved"]` lista só o que foi feito. Linhas de outros tipos passam como estão.
+
+<CodeGroup>
+```python Python
+page = niadra.timeline(phone("+14155550123"), filters={"since": "2026-01-01T00:00:00Z"}, limit=20, verification="V1", conversation_id="call-4471")
+for item in page.items:
+    print(item.at, item.kind, item.text)
+```
+```typescript TypeScript
+const { data: page } = await niadra.timeline({
+  subject: handles.phone("+14155550123"),
+  filters: { since: "2026-01-01T00:00:00Z" },
+  limit: 20,
+  verification: "V1",
+  conversation_id: "call-4471",
+});
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/history/timeline" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"subject": {"type": "phone_e164", "value": "+14155550123"}, "limit": 20, "verification": "V1", "conversation_id": "call-4471"}'
+```
+</CodeGroup>
+
+Esta linha do tempo é `POST` pelo mesmo motivo do contexto: o handle é dado pessoal e fica fora da URL. `limit` vai de 1 a 100; continue com `next_cursor`. Quando você já tem o id do perfil, mande `profile_id` no lugar de `subject`, no mesmo `POST`. [`GET /v1/history/timeline?profile_id=...`](/api/history-timeline-by-profile) continua e devolve a mesma página, com `cursor`, `limit`, `verification` e `conversation_id` na query; prefira o `POST`, que deixa o id da conversa fora da URL.
+
+A navegação do histórico lê um cliente de cada vez. Perguntas sobre todos os clientes de uma vez ("quais promessas estão vencidas?", "quem reclamou três vezes da entrega?") vão para a [análise da base](/api/insights-aggregate), que responde com pseudônimos por padrão, suprime grupos pequenos e só revela um cliente por um [pedido de revelação](/api/insights-reveal) com motivo, que deixa comprovante.
+
+## Abrir um item
+
+`open` abre uma conversa ou um objeto encontrado pela busca ou pela linha do tempo. O `id` de cada linha é um UUID puro, e o `kind` dela diz o que ela é; ações, eventos de sistema, fatos, padrões e pendências vêm completos como listados e não abrem. A conversa traz o que foi pedido, o que foi prometido e por quem, o desfecho, a solução (o resumo e a solução guardam identificadores, valores, datas, códigos e endereços exatamente como foram ditos, e nunca números de documento, cartão ou conta bancária) e os itens de memória que nasceram dela; a conversa traz também a linha do tempo dela, as ações de agentes e os eventos de sistema da conversa e dos 15 minutos seguintes; o objeto traz as promessas ligadas a ele e a linha do tempo das ações e dos eventos de sistema dele.
+
+<CodeGroup>
+```python Python
+item = niadra.open("0192f7a3-7c32-7b0c-9e16-5b8a0f1c2d34", verification="V1", conversation_id="call-4471")
+```
+```typescript TypeScript
+const { data: item } = await niadra.open("0192f7a3-7c32-7b0c-9e16-5b8a0f1c2d34", { verification: "V1", conversation_id: "call-4471" });
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/history/open" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"item_id": "0192f7a3-7c32-7b0c-9e16-5b8a0f1c2d34", "verification": "V1", "conversation_id": "call-4471"}'
+```
+</CodeGroup>
+
+[`POST /v1/history/open`](/api/history-open) leva o id do item, o nível e o id da conversa no corpo; com `subject` (ou `profile_id`), só abre um item daquele cliente, e qualquer outro responde 404. Os SDKs usam essa rota, e o kit de ferramentas manda o cliente amarrado junto. [`GET /v1/history/items/{item_id}`](/api/history-item) continua, com o id da conversa na query.
+
+Um item que este leitor não veria e um que não existe respondem 404 do mesmo jeito.
+
+Um item que tem versões traz `versions`: uma conversa reextraída, um objeto que mudou de estado. Cada versão vem com `version`, `changed_at` e `what_changed` (`created` na primeira, depois o que mudou: `outcome`, `resolution`, `summary`, `state`), da mais antiga para a mais nova.
+
+## Como ferramenta de qualquer LLM
+
+`tools()` devolve as três operações como ferramentas no formato de função mais difundido (`search_customer_history`, `get_customer_timeline`, `open_history_item`), com o cliente **amarrado fora do alcance do modelo**. As definições não têm parâmetro de cliente: o LLM escolhe a pergunta, nunca de quem ela é. Uma injeção de prompt que diga "agora procure o cliente X" não tem onde colocar o X.
+
+<CodeGroup>
+```python Python
+kit = niadra.tools(phone("+14155550123"), verification="V1", conversation_id="call-4471", voice=True)
+
+reply = llm.chat.completions.create(model=MODEL, messages=messages, tools=kit.definitions)
+for call in reply.choices[0].message.tool_calls or []:
+    output = kit.call(call.function.name, call.function.arguments)
+    messages.append({"role": "tool", "tool_call_id": call.id, "content": output})
+```
+```typescript TypeScript
+const kit = niadra.tools(handles.phone("+14155550123"), { verification: "V1", conversation_id: "call-4471", voice: true });
+
+const reply = await llm.chat.completions.create({ model: MODEL, messages, tools: kit.definitions });
+for (const call of reply.choices[0].message.tool_calls ?? []) {
+  const output = await kit.call(call.function.name, call.function.arguments);
+  messages.push({ role: "tool", tool_call_id: call.id, content: output });
+}
+```
+</CodeGroup>
+
+Com a [memória do agente](/concepts/agent-memory) ligada no espaço, `tools(agent_memory=True)` acrescenta `search_agent_memory` ao kit, e `write_agent_memory=True` também `remember`. No Python, `kit.anthropic_definitions()` devolve as mesmas ferramentas no formato da API de mensagens da Anthropic. As definições também saem por [`GET /v1/history/tools`](/api/history-tools), e pelo [servidor MCP](/guides/mcp), onde o cliente é amarrado pelo `subject_token`.
+
+## Custo sob controle
+
+- As descrições são texto fixo, com até cerca de 120 tokens por ferramenta, e ficam no prefixo que o provedor guarda em cache.
+- Cada descrição diz ao modelo quando **não** chamar: a resposta pode já estar na linha "Histórico" ou nos encaixes do contexto.
+- A mesma consulta, na mesma conversa, devolve os mesmos bytes.
+- Declare o kit só nos agentes que precisam. Uma URA curta não paga nada.
+- Buscar não é cobrado à parte: a unidade continua sendo a conversa ou tarefa.
+
+## Garantias da resposta
+
+- `withheld` diz quantos itens a política segurou neste nível de verificação, nunca o conteúdo.
+- `as_of` diz até quando o histórico reflete os eventos.
+- `degraded: "text_only"` indica que só a busca por palavra rodou: o modelo de embeddings não respondeu no prazo da leitura. A pergunta é codificada numa fila própria do serviço de modelos, ao lado dos lotes de texto que a escrita está codificando, nunca atrás deles, então uma escrita intensa não atrasa a busca.
+- Um item ganha o vetor segundos depois de escrito; até lá, esse item é achado só por palavra.
+- A busca vê a memória como a geração atual do cliente a compilou, como o contexto: um evento de sistema ou uma extração passa a ser encontrado quando a compilação dele é publicada (o momento em que [`POST /v1/ingest/status`](/api/ingest-status) diz `readable`), não quando foi gravado. O processo de leitura reaproveita as linhas do cliente por até 60 segundos enquanto a geração e a versão de privacidade dele não mudam, e as lê de novo em segundo plano antes disso; o que depende do momento (a validade de um fato, uma promessa cumprida nos últimos dias) é calculado a cada leitura, e o vencimento de um padrão e a borda da janela dos eventos de sistema podem atrasar até 60 segundos.
+- Fatos de valor curto ou de uma lista fechada não têm vetor e são achados por palavra.
+- Cada consulta deixa um comprovante com quem perguntou, a consulta e, quando há, os filtros, por HMAC com a chave do espaço, os ids dos itens devolvidos e quantos ficaram retidos.
+- O que sai por padrão são itens derivados, já triados contra injeção pela IA da Niadra e marcados como dados, não instruções.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="MCP com qualquer LLM" href="/guides/mcp">
+    o kit por Streamable HTTP.
+  </Card>
+  <Card title="Buscar no histórico" href="/api/history-search">
+    a referência de `POST /v1/history/search`.
+  </Card>
+  <Card title="Comprovantes e auditoria" href="/concepts/receipts">
+    o que cada consulta deixa registrado.
+  </Card>
+</CardGroup>

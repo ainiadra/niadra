@@ -1,0 +1,120 @@
+---
+title: "Patterns"
+description: "Signals that repeat, each with its rule, its evidence and an expiry date."
+---
+
+A pattern is a signal the memory derives from what repeats across conversations, system events and agent actions. "Third complaint about a technician visit in 90 days" is a pattern. "The customer said she is upset" is a fact from one episode. Patterns change what the agent does before its first word: the tone, the priority, what to offer and what not to offer again. Every pattern carries the rule that produced it, the evidence behind it and the date it stops being true.
+
+## The catalog
+
+Your space turns on the rules it wants and sets their parameters. The initial catalog:
+
+| Pattern | Rule, with your parameters | Window | What the agent reads |
+|---|---|---|---|
+| `recurring_complaint` | 3 or more episodes with intent `complaint` in the same category | 90 days | "Third complaint about a technician visit in 90 days, the last one on Sep 22" |
+| `broken_company_promise` | A company promise past its due date with no action that closes it | 60 days | "The company owes the rescheduled visit since Sep 10" |
+| `asked_to_cancel` | One episode with intent `cancellation` recorded | 180 days | "Asked to cancel on Aug 3; kept the plan with a discount" |
+| `preferred_channel` | 70% or more of the conversations the customer started are on one channel, with 5 or more conversations | 180 days | "Prefers WhatsApp" |
+| `does_not_answer_calls` | 3 or more voice attempts with no answer, and text replies in the same period | 30 days | "Does not answer calls; replies by text" |
+| `escalated_to_human` | 2 or more conversations with outcome `escalated` | 90 days | "Transferred to a human twice in 90 days" |
+| `declining_sentiment` | Sentiment of the last 3 sessions below -0.3, all three in the last 30 days | 30 days | "Three conversations in a row with negative sentiment" |
+| `overdue_invoices` | 2 or more `invoice.overdue` system events | 90 days, the hot window of the space | Only for the `billing` purpose: "Two overdue invoices in 90 days" |
+
+Custom rules are catalog rules with your parameters (category, intent, outcome, canonical event type, count, window), never free text. A space holds up to 25 custom rules, on or off, and a rule window goes from 1 to 365 days. Rules over system events (`does_not_answer_calls` and `overdue_invoices`) count only the events kept in the live database, those of the space's hot window (`events_hot_days`, 90 days by default, from 30 to 90): their window goes up to that number, and a rule already stored with a longer window runs over the hot window. A minimum count below 2 counts as 2, because a pattern needs repetition, except in `asked_to_cancel` and `broken_company_promise`, where one structured piece of evidence is enough. A diff that goes past these limits, uses a parameter the catalog does not know or touches a sensitive category is refused when it is sent and when it is approved. In the Console, the rule form follows the same numbers: the count starts at 2 and the window of a rule over events goes up to the hot window.
+
+## How a pattern is born
+
+Patterns come from deterministic rules over typed episodes, open items, agent actions and object events. They run right after a customer's memory changes (a reconciled conversation, an object event, a merge or unmerge of profiles) and, every 5 minutes, for the patterns that expired. A new or adjusted rule holds for each customer the next time their memory changes. No language model invents a pattern: where a rule needs a classification, such as intent or sentiment, that classification was already made when the conversation was extracted. Only items that arrived through confirmed handles count: what came through an [unconfirmed link](/en/concepts/identity#safeguards-against-wrong-merges) supports no pattern, and a pattern whose evidence came through that link fires no warning; a confirmation, a merge or a split recomputes the profile's patterns right away.
+
+Each pattern stores:
+
+- the rule and its version;
+- the ids of its evidence;
+- `first_seen` and `last_evidence_at`;
+- `expires_at`, the date the rule stops matching the evidence.
+
+A pattern without evidence does not exist. When `forget` erases a piece of evidence, the pattern falls with it through the same lineage. A merge or unmerge of profiles derives the patterns again at once, and each half keeps only what its own evidence supports.
+
+## What never becomes a pattern
+
+- **Sensitive categories.** Health, religion, political opinion, sexual life and the other categories of GDPR article 9 and LGPD article 11 never become a signal. The leak usually hides in a rule parameter: "recurring complaint about exam authorization" reveals health without any personal data. So the control plane refuses a rule that names a sensitive category or event type, recognized by its name in English, Portuguese or Spanish (`saude`, `politica`, `sindicato`, `vida_sexual`, `origem_etnica`) and by the words of the name (`autorizacao_de_exame`, `exam_authorization`); the same holds for an episode's category, which never feeds a rule. Your space can limit rules to an allow list (`trait_allowed_categories`), and your team marks as sensitive the categories specific to your sector or normalizes procedures, exams, drugs and specialties as `atendimento` in the extraction schema (`normalized_as`).
+- **A single episode.** A pattern needs repetition. The only exception, `single_evidence`, covers structured and unambiguous data: a recorded `cancellation` intent, or a company promise past due with nothing that closes it. Never sentiment, tone or free text.
+- **Propensities.** No language model writes a likelihood about the person. Rules are deterministic, over structured fields, with explicit parameters.
+
+## Patterns in the context
+
+Patterns appear in the "Patterns" section of the pack. A stable pattern sits in the stable layer, without a volatile date; a volatile one sits in the recent layer, with the date of its last evidence. Each view has a ceiling:
+
+| View | Patterns delivered |
+|---|---|
+| `voice` | Up to 4, within 60 tokens |
+| `chat` | Up to 6 |
+| `brief` | Only the one with the most weight |
+
+A profile holds up to 20 active patterns. Patterns go through the same policy as facts: the `trait` category, a minimum verification level and the purpose of the reader. A rule may name its own purposes in `purposes`; without them, the catalog's apply. `overdue_invoices` only reaches a source with the `billing` purpose, even when the rule names none; `declining_sentiment` only reaches service agents. The same holds for the `trait.added` and `trait.expired` webhooks, which only reach an endpoint whose source may read the pattern. The pack says it plainly: this is data, not instructions. A pattern guides the agent and never decides for it.
+
+## Test a rule before turning it on
+
+Rules are versioned configuration, changed through a diff that a person approves in the control API. In the Console, the Patterns screen builds the rule from the catalog, tests it and sends it for approval with a reason; a rule in use is adjusted there, with the same ID and the next version, and turned on or off by a diff. The control plane checks the diff when it arrives and at approval, and refuses a rule the cell would silently ignore: an entry outside the catalog, a parameter the catalog does not know, a window outside 1 to 365 days, a sensitive or non-allowed category, or more than 25 rules in the space. A policy that starts treating a category as sensitive is always accepted: it protects people, and the rule that used the category stops producing patterns. Without `trait_allowed_categories`, a rule may name, and turn into a value, only a category the space declares in its policy or extraction schema: an undeclared category, a typo or a topic the sensitive word lists do not know never becomes a pattern. An explicit list still decides alone, event types are not categories, and a space that declares no episode categories keeps extraction's names; changing the declared categories derives the space's patterns again.
+
+Before a rule goes live, [`POST /v1/traits/rules/dry-run`](/en/api/traits-dry-run) runs it against the last 90 days of your space and shows how many profiles would get the pattern (`profiles_matching` out of `profiles_evaluated`), with a sample and its evidence. It takes a Console person with the `integration` or `analysis` role, or a key with the `admin` scope.
+
+```bash
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/traits/rules/dry-run" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"rule_id": "visit_complaints", "catalog": "recurring_complaint", "params": {"category": "technician_visit", "min_count": 3, "window_days": 90}}'
+# => {"rule_id": "visit_complaints", "window_days": 90, "profiles_evaluated": 18204, "profiles_matching": 311, "sample": [...]}
+```
+
+A new or changed rule takes effect when the diff is approved; the dry run is how you see its effect first.
+
+## Retract a wrong pattern
+
+The Console shows the rule, the version and the evidence of every pattern. When one is wrong, retract it with [`POST /v1/traits/{trait_id}/retract`](/en/api/trait-retract), as a person with the `security` or `integration` role or with an `admin` key: the tombstone keeps the same evidence from bringing it back, and only new evidence makes the pattern appear again. The answer is the pattern with `retracted_at` filled in.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/traits/0192f7c3-5a1e-7b2d-9c40-1e8f3a6b2d71/retract" \
+  -H "Authorization: Bearer $NIADRA_API_KEY"
+```
+```python Python
+import os
+import httpx
+
+response = httpx.post(
+    "https://acme-prod.us-east-2.api.niadra.com/v1/traits/0192f7c3-5a1e-7b2d-9c40-1e8f3a6b2d71/retract",
+    headers={"Authorization": f"Bearer {os.environ['NIADRA_API_KEY']}"},
+)
+response.raise_for_status()
+print(response.json()["retracted_at"])
+```
+```typescript TypeScript
+const response = await fetch(
+  "https://acme-prod.us-east-2.api.niadra.com/v1/traits/0192f7c3-5a1e-7b2d-9c40-1e8f3a6b2d71/retract",
+  { method: "POST", headers: { Authorization: `Bearer ${process.env.NIADRA_API_KEY}` } },
+);
+console.log((await response.json()).retracted_at);
+```
+</CodeGroup>
+
+## Objection to profiling
+
+A data subject can object to profiling. [Opt a subject out of patterns](/en/api/traits-opt-out), a `security` route, stops pattern derivation for that person and removes the active patterns. Patterns are part of the access and portability export, with their evidence. If your company uses a pattern to decide something about a person, that decision is yours and falls under the automated decision rules of the applicable law; Niadra gives you the means to explain it, with the rule, the version and the evidence.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Triggers and webhooks" href="/en/concepts/triggers-and-webhooks">
+    notify your system when a pattern appears.
+  </Card>
+  <Card title="Context and views" href="/en/concepts/context">
+    where the Patterns section sits in the pack.
+  </Card>
+  <Card title="Retract a pattern" href="/en/api/trait-retract">
+    the endpoint in detail.
+  </Card>
+  <Card title="Privacy, erasure and export" href="/en/concepts/privacy">
+    data subject rights by API.
+  </Card>
+</CardGroup>

@@ -1,0 +1,46 @@
+---
+title: "Langflow"
+description: "Três componentes do Langflow num arquivo só: o contexto do cliente para o prompt, o registro da resposta e a busca no histórico como ferramenta."
+---
+
+Um arquivo Python, `integrations-extras/langflow/niadra_component.py` no repositório do SDK de Python, traz três componentes:
+
+- **Niadra Context** registra a mensagem do cliente e devolve o contexto para o prompt: as notas do próprio agente (com **Agent memory** ligado), o contexto do cliente e o que mudou em outros canais. Ligue ao prompt de sistema do seu agente ou template, depois das suas instruções.
+- **Niadra Record Reply** registra a resposta do agente e a passa adiante sem mudança.
+- **Niadra Search History** busca no histórico inteiro do cliente. Em modo de ferramenta, o agente a chama com uma consulta (e, se quiser, uma expressão de tempo); o cliente é o que o fluxo configurou, nunca um valor que o modelo escolhe.
+
+## Instalar
+
+Copie o arquivo para a pasta de componentes do seu Langflow (ou cole num componente customizado) e instale o SDK onde o Langflow roda:
+
+```sh
+pip install niadra
+```
+
+## As cinco primitivas
+
+| Primitiva | Como os componentes ligam |
+|---|---|
+| Contexto | Niadra Context, ligado ao prompt de sistema depois das suas instruções |
+| Turnos | Niadra Context registra a mensagem do cliente; Niadra Record Reply, a resposta do agente |
+| Ferramentas | Niadra Search History em modo de ferramenta, com a mesma descrição do kit |
+| Verificação | O campo de nível de verificação, nos componentes |
+| Transbordo | Fora dos componentes; use o SDK ou a API |
+
+## Limites
+
+- Os três recebem os mesmos campos de conexão: a chave de fonte, o canal, o handle do cliente e o id da conversa, em geral mapeados das entradas do fluxo.
+- Com a Niadra lenta ou fora, o contexto sai vazio e a busca diz que o histórico está indisponível; o fluxo nunca para.
+- Os componentes usam o SDK síncrono e cobrem contexto, turnos e busca; linha do tempo, abrir item e transbordo ficam para o SDK.
+- Testado em `integrations-extras/langflow/test_niadra_component.py`, contra o emulador.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Flowise" href="/integrations/flowise">
+    os nós de memória e de ferramentas do Flowise.
+  </Card>
+  <Card title="SDK de Python" href="/sdk/python">
+    a biblioteca que os componentes usam.
+  </Card>
+</CardGroup>

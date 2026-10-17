@@ -1,0 +1,48 @@
+---
+title: "Flowise"
+description: "Dois nós do Flowise: uma memória com o contexto do cliente e uma ferramenta com o histórico dele, para o Tool Agent e o Conversational Agent."
+---
+
+`flowise-nodes-niadra` traz dois nós para o Flowise:
+
+- **Niadra Customer Memory** (Memory): ligue à entrada Memory de um agente (Tool Agent, Conversational Agent). Antes de cada chamada ao modelo ele entrega o contexto do cliente como mensagem de sistema logo depois do prompt de sistema do agente, seguida das mensagens do próprio chat (da memória que você ligar como **Chat History**, ou das últimas 100 guardadas no processo). O que o agente acrescenta é registrado como turnos do cliente e do agente.
+- **Niadra Customer History** (Tools): ligue à entrada Tools de um agente. Ele dá ao modelo `search_customer_history`, `get_customer_timeline` e `open_history_item` (e `search_agent_memory`, com **Agent Memory** ligado), amarradas ao cliente do chat. Nenhuma ferramenta tem parâmetro que nomeie um cliente.
+
+## Instalar
+
+O Flowise carrega nós do pacote de componentes dele. Construa e copie, a partir de `packages/flowise-nodes-niadra` no repositório do SDK de TypeScript:
+
+```sh
+pnpm build                                   # dist/NiadraMemory.js, dist/NiadraTools.js, the icon
+cp dist/*.js dist/niadra.svg <flowise>/packages/components/dist/nodes/niadra/
+cd <flowise>/packages/components && pnpm add @niadra/sdk
+```
+
+Reinicie o Flowise; os nós aparecem em Memory e Tools. O pacote depende do `@niadra/sdk`. Testado com `@langchain/core` 1.2, pelo mesmo prompt que o Tool Agent monta.
+
+## As cinco primitivas
+
+| Primitiva | Como os nós ligam |
+|---|---|
+| Contexto | O nó de memória entrega o contexto como mensagem de sistema logo depois do prompt de sistema do agente |
+| Turnos | O que o agente acrescenta à memória é registrado como turno do cliente e do agente |
+| Ferramentas | O nó de ferramentas dá ao modelo as três do histórico, amarradas ao cliente do chat |
+| Verificação | O campo de nível de verificação que o chat provou, nos dois nós |
+| Transbordo | Fora dos nós; use o SDK ou a API |
+
+## Limites
+
+- Os dois nós recebem o handle do cliente (amarre a uma variável ou à configuração de override, nunca a texto que o modelo escreve), o canal, o nível de verificação que o chat provou e a chave (ou a variável `NIADRA_API_KEY`). A sessão do chat do Flowise é a conversa da Niadra.
+- Com a Niadra lenta ou fora, o agente recebe só as mensagens do chat.
+- Os tipos da interface dos nós e o desenho do nó de memória vêm do Flowise (Apache 2.0), com atribuição em `NOTICE`.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="n8n" href="/integrations/n8n">
+    o nó de comunidade do n8n.
+  </Card>
+  <Card title="Langflow" href="/integrations/langflow">
+    os três componentes do Langflow.
+  </Card>
+</CardGroup>

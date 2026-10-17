@@ -1,0 +1,142 @@
+---
+title: "ElevenLabs Agents Platform"
+description: "Os três webhooks de um agente telefônico da ElevenLabs, respondidos do seu servidor: início da conversa, ferramentas e pós-chamada."
+---
+
+Uma ligação para um agente da ElevenLabs chega ao seu servidor por três webhooks, e o adaptador responde cada um: o de **início da conversa** entrega o contexto como variável dinâmica, as **ferramentas de servidor** rodam o kit do histórico para quem está na linha, e o de **pós-chamada** registra a transcrição turno a turno e encerra a conversa. A integração é do lado do servidor, não do dispositivo: numa central de atendimento, a ligação nasce no telefone.
+
+## Instalar
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[elevenlabs]'   # no framework dependency: the handlers take the body and the headers
+```
+```sh TypeScript
+npm install @niadra/sdk   # @niadra/sdk/elevenlabs needs no ElevenLabs package
+```
+</CodeGroup>
+
+A integração em TypeScript está no `@niadra/sdk` no npm.
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | O webhook de início ("Fetch initiation client data from a webhook") recebe `caller_id`, `called_number`, `agent_id`, `call_sid` e `conversation_id`; o adaptador abre a conversa, começa a primeira leitura (`begin()`, depois do atestado quando você o passa), a espera dentro de `context_voice_start` (1,5 s; o agente ainda não falou) e responde `conversation_initiation_client_data` com a variável dinâmica `niadra_context`. Ponha `{{niadra_context}}` no prompt do agente, depois das suas instruções (em TypeScript, também `{{niadra_turn}}` onde as falas de outros canais devem entrar) |
+| Turnos | O webhook `post_call_transcription` valida `ElevenLabs-Signature` (HMAC-SHA256 de `"<t>.<corpo>"`, 30 minutos de tolerância) e registra cada item de `transcript[]` como turno no momento dele na ligação, com o uso do modelo; depois `end()`. As chaves de idempotência vêm da ligação, então um webhook reentregue não grava nada duas vezes |
+| Ferramentas | `tool_configs(url)` (Python) e `toolConfigs()` (TypeScript) geram as três ferramentas do histórico como ferramentas webhook da ElevenLabs, com os mesmos nomes, descrições e parâmetros de todo kit. Os identificadores da ligação (`system__call_sid`, `system__conversation_id`, `system__caller_id`) são preenchidos pela ElevenLabs, nunca pelo modelo, e o tratador amarra o kit a esse cliente |
+| Verificação | O webhook de início chama `verify()` quando você passa o atestado da operadora; sem ele, a leitura é V0 |
+| Transbordo | `transfer_to_agent` e `transfer_to_number` chegam no pós-chamada e viram `handoff` |
+
+O id da conversa na Niadra é o `call_sid` da ligação (ou o `conversation_id` da ElevenLabs), o mesmo nos três webhooks. O sujeito é o número de quem liga; passe `subject=` (uma função das variáveis da ligação) para clientes identificados de outro jeito.
+
+## Exemplo mínimo
+
+<CodeGroup>
+```python Python
+"""The server side of an ElevenLabs phone agent: initiation, tools and post-call webhooks.
+
+Run: uvicorn elevenlabs_server:app. In the ElevenLabs agent, set the initiation webhook to
+/elevenlabs/initiation, add the tools from tool_configs(), and the post-call webhook to
+/elevenlabs/post-call. Put {{niadra_agent_memory}} and {{niadra_context}} in the system prompt.
+"""
+
+import os
+
+from fastapi import FastAPI, Request, Response
+
+from niadra import AsyncNiadra
+from niadra.integrations.elevenlabs import ElevenLabsWebhooks, tool_configs
+
+niadra = AsyncNiadra(channel="voice")
+hooks = ElevenLabsWebhooks(
+    niadra,
+    webhook_secret=os.environ["ELEVENLABS_WEBHOOK_SECRET"],
+    shared_secret=os.environ["NIADRA_TOOL_SECRET"],
+    agent_memory=True,
+)
+app = FastAPI()
+TOOLS = tool_configs("https://agent.example.com/elevenlabs/tools", secret=os.environ["NIADRA_TOOL_SECRET"])
+
+
+def answer(result) -> Response:
+    return Response(result.text(), result.status, media_type=result.content_type)
+
+
+@app.post("/elevenlabs/initiation")
+async def initiation(request: Request) -> Response:
+    return answer(await hooks.conversation_initiation(await request.body(), request.headers))
+
+
+@app.post("/elevenlabs/tools/{name}")
+async def tool(name: str, request: Request) -> Response:
+    return answer(await hooks.server_tool(name, await request.body(), request.headers))
+
+
+@app.post("/elevenlabs/post-call")
+async def post_call(request: Request) -> Response:
+    return answer(await hooks.post_call(await request.body(), request.headers))
+```
+```typescript TypeScript
+// The three ElevenLabs webhooks on Hono, for any runtime Hono runs on (Node, Bun, Deno, Workers).
+import { Hono } from "hono";
+import { Niadra } from "@niadra/sdk";
+import { elevenLabs } from "@niadra/sdk/elevenlabs";
+
+const niadra = new Niadra();
+const handlers = elevenLabs({
+  niadra,
+  secret: process.env.NIADRA_ELEVENLABS_SECRET ?? "",
+  webhookSecret: process.env.ELEVENLABS_WEBHOOK_SECRET ?? "",
+});
+
+export const app = new Hono();
+
+app.post("/elevenlabs/initiation", async (c) => {
+  const { status, body } = await handlers.initiation(await c.req.json(), c.req.raw.headers);
+  return c.json(body, status as 200);
+});
+
+app.post("/elevenlabs/tools", async (c) => {
+  const { status, body } = await handlers.tool(await c.req.json(), c.req.raw.headers);
+  return c.json(body, status as 200);
+});
+
+app.post("/elevenlabs/post-call", async (c) => {
+  // The raw body: the signature covers the exact bytes ElevenLabs sent.
+  const { status, body } = await handlers.postCall(await c.req.text(), c.req.raw.headers);
+  return c.json(body, status as 200);
+});
+
+// The server tool configurations to create in ElevenLabs (API or dashboard), printed once.
+if (process.argv.includes("--print-tools")) {
+  console.log(JSON.stringify(handlers.toolConfigs({ url: "https://api.acme.com/elevenlabs/tools", secretId: "YOUR_SECRET_ID" }), null, 2));
+}
+
+export default app;
+```
+</CodeGroup>
+
+Os tratadores são funções puras do corpo e dos cabeçalhos: servem em FastAPI, Flask, Django, Hono, um Lambda ou um Worker. O mesmo código está em `examples/elevenlabs_server.py` e `examples/elevenlabs-hono.ts`.
+
+## Memória do agente
+
+Com `agent_memory=True`, as notas do próprio agente chegam na variável `niadra_agent_memory`; ponha `{{niadra_agent_memory}}` logo antes de `{{niadra_context}}` no prompt do agente. Veja [Memória do agente](/concepts/agent-memory).
+
+## Limites
+
+- O webhook de início e as ferramentas de servidor devolvem dado do cliente, então exigem o cabeçalho `X-Niadra-Secret` que você configura na ElevenLabs (`shared_secret`); sem ele, 401.
+- A Niadra lenta ou fora não derruba a ligação: o início responde um contexto vazio, uma ferramenta responde que o histórico está indisponível, e o pós-chamada continua respondendo 200.
+- O atestado da operadora não vem no webhook da ElevenLabs; sem ele, a leitura é V0.
+- Testado com cargas gravadas no formato público dos três webhooks e assinaturas calculadas no próprio teste; nenhuma conta da ElevenLabs é necessária.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Agentes de voz" href="/guides/voice-agents">
+    o que a ligação prova e o que a política libera.
+  </Card>
+  <Card title="Vapi" href="/integrations/vapi">
+    o mesmo desenho, num só URL de servidor.
+  </Card>
+</CardGroup>

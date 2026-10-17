@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.niadra.com/schemas/counterfactual-run.v0.json",
+  "title": "Niadra Counterfactual Run v0",
+  "description": "Whether one element changes what a tool returns beyond the tool's own noise, and what holds the answer back. See spec/counterfactual.md.",
+  "$defs": {
+    "CounterfactualEngagement": {
+      "additionalProperties": false,
+      "description": "Where the items the person engaged with went without the element, over the completed cases.",
+      "properties": {
+        "items": {
+          "title": "Items",
+          "type": "integer"
+        },
+        "shown": {
+          "description": "Within the first `k` of the base's list.",
+          "title": "Shown",
+          "type": "integer"
+        },
+        "kept": {
+          "description": "Within the first `k` of both lists.",
+          "title": "Kept",
+          "type": "integer"
+        },
+        "lost": {
+          "description": "Within the base's first `k` and not the variant's.",
+          "title": "Lost",
+          "type": "integer"
+        },
+        "gained": {
+          "description": "Within the variant's first `k` and not the base's.",
+          "title": "Gained",
+          "type": "integer"
+        },
+        "mean_shift": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The variant's position minus the base's, averaged over the items both lists hold; positive when they fell.",
+          "title": "Mean Shift"
+        }
+      },
+      "required": [
+        "items",
+        "shown",
+        "kept",
+        "lost",
+        "gained"
+      ],
+      "title": "CounterfactualEngagement",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "tool": {
+      "title": "Tool",
+      "type": "string"
+    },
+    "element": {
+      "enum": [
+        "constraints",
+        "hard",
+        "size",
+        "exclude"
+      ],
+      "title": "Element",
+      "type": "string"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "cases": {
+      "title": "Cases",
+      "type": "integer"
+    },
+    "completed": {
+      "title": "Completed",
+      "type": "integer"
+    },
+    "skipped": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "description": "The cases not completed.",
+      "propertyNames": {
+        "enum": [
+          "completed",
+          "no_dry_run",
+          "tool_error",
+          "infrastructure_error"
+        ]
+      },
+      "title": "Skipped",
+      "type": "object"
+    },
+    "overlap": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Mean overlap@k of the base and the variant.",
+      "title": "Overlap"
+    },
+    "noise_floor": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Mean overlap@k of the base with itself.",
+      "title": "Noise Floor"
+    },
+    "effect": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "`noise_floor - overlap`: how much of the first positions the element moves beyond noise.",
+      "title": "Effect"
+    },
+    "below_noise": {
+      "description": "Completed cases whose overlap is below their own noise.",
+      "title": "Below Noise",
+      "type": "integer"
+    },
+    "above_noise": {
+      "title": "Above Noise",
+      "type": "integer"
+    },
+    "ties": {
+      "title": "Ties",
+      "type": "integer"
+    },
+    "p_value": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The two-sided sign test of `below_noise` against `above_noise`: how likely a split this uneven is when the element changes nothing.",
+      "title": "P Value"
+    },
+    "engaged": {
+      "$ref": "#/$defs/CounterfactualEngagement"
+    },
+    "limits": {
+      "items": {
+        "enum": [
+          "not_quality",
+          "model_reaction_not_measured",
+          "trivial_for_hard",
+          "few_cases",
+          "noisy_tool",
+          "cases_skipped",
+          "dry_run"
+        ],
+        "type": "string"
+      },
+      "title": "Limits",
+      "type": "array"
+    }
+  },
+  "required": [
+    "run_id",
+    "tool",
+    "element",
+    "created_at",
+    "cases",
+    "completed",
+    "overlap",
+    "noise_floor",
+    "effect",
+    "below_noise",
+    "above_noise",
+    "ties",
+    "p_value",
+    "engaged",
+    "limits"
+  ],
+  "type": "object"
+}

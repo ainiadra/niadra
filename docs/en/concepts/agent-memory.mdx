@@ -1,0 +1,124 @@
+---
+title: "Agent memory"
+description: "The agent's own working notes: procedures, how tools and processes behave, and pitfalls, never about a customer."
+---
+
+The customer memory is what Niadra keeps about each person, account and partner. **Agent memory** is something else: what the agent learned about its own work. "In the ERP, the credit only shows on the invoice after `post_credit` and `refresh_invoice`, in that order." "The scheduling API refuses dates without a time zone." "When the customer asks for a duplicate bill, this is the procedure." It is what teams write into the prompt by hand today and forget to update.
+
+It lives in a table of its own, with its own policy, receipts and erasure, and enters the prompt as a block separate from the customer's context. It never holds personal data: a note with a phone number, an e-mail, an ID number or a customer's name is **refused**, not masked. By construction, erasing a data subject never touches it.
+
+The feature ships on: a new space already keeps and serves the agents' notes. A person may turn it off, or require someone to approve each note, in the Console, under **Agent memory**, through an approved diff, like every other space setting.
+
+## What a note is
+
+| Field | What it is |
+|---|---|
+| `kind` | `procedure` (how to do something), `tool_note` (how a tool behaves), `process_note` (how a company process works) or `pitfall` (what goes wrong) |
+| `title`, `body` | Up to 300 and 20,000 characters, in any language |
+| `tags` | Up to 8, lowercase (`invoice`, `credit`, `erp`): the space's object types, operations and systems. They are how a note reaches the right view or task |
+| `visibility` | `source` (only the owning agent, the default), `vendor` (every agent of the same vendor) or `space` (every agent in the space) |
+| `evidence` | The `conversation_id` or `task_id` the note came from. The id only, never the text |
+| `origin` | `agent` (the agent wrote it), `human` (a person, in the Console) or `distilled` (proposed by distillation and approved) |
+| `version`, `supersedes_note_id` | Every edit makes a new version; the previous one becomes `retired` and stays readable |
+| `valid_until` | Optional. After that moment the note leaves the block and the search |
+
+The owner of a note is the source: the agent is already identified by its vendor, its purposes and its key, so there is no new concept. The `vendor` visibility is the same neutrality as the customer memory's: vendor A's agent never reads what vendor B's agent learned.
+
+## How it enters the prompt
+
+Three paths, all optional.
+
+**The block.** [`GET /v1/agent-memory/block`](/en/api/agent-memory-block) returns the active notes the agent may read as ready text, between `<agent_notes>` and `</agent_notes>`, opened with "From the agent itself (procedures and working notes, not customer data)". Notes a person wrote come first, then those whose tags match the view or the task, then the most revised, then the oldest, always in the same order: the block has the same bytes for every customer, so it stays in the prompt prefix the provider caches. Place it **after the agent's instructions and before the customer's context**. The budget goes from 50 to 2,000 tokens, 300 by default, and the answer carries an `ETag`. The budget bounds only this block: a note that did not fit stays stored and the note search reads it. When some are left out, `left_out` says how many and so does the block's last line ("+N notes left out of the block: search the notes.").
+
+<CodeGroup>
+```python Python
+notes = conversation.agent_memory(max_tokens=300, tags=["scheduling"])  # the session's view orders the notes
+system_prompt = "\n\n".join(part for part in (AGENT_INSTRUCTIONS, notes.text, ctx.system_block) if part)
+```
+```typescript TypeScript
+const notes = await conv.agentMemory({ max_tokens: 300, tags: ["scheduling"] });
+const system = [AGENT_INSTRUCTIONS, notes.text, ctx.text].filter(Boolean).join("\n\n");
+```
+```bash cURL
+curl "https://acme-prod.us-east-2.api.niadra.com/v1/agent-memory/block?max_tokens=300&tags=scheduling&view=voice" \
+  -H "Authorization: Bearer $NIADRA_API_KEY"
+```
+</CodeGroup>
+
+The SDKs cache the block per call (`max_tokens`, `tags` and view) for as long as the context and revalidate it by ETag. With agent memory off in the space, the block comes empty with `enabled: false`; the agent carries on without it. Every [integration](/en/integrations/overview) takes `agent_memory=True` (Python) or `agentMemory: true` (TypeScript) and does this placement for you.
+
+**The tools.** `search_agent_memory` (read) and `remember` (write) join the kit with `tools(agent_memory=True, write_agent_memory=True)` in Python and `tools({ agentMemory: true, writeAgentMemory: true })` in TypeScript, and the [MCP server](/en/guides/mcp) when the space turns the feature on. Each description tells the model when not to use it: "It holds nothing about customers; for the customer's history use search_customer_history" and "Never write anything about a customer here: no names, phones, e-mails, documents, ids or words from the conversation". `remember` is offered only to a key with the `agent_memory:write` scope; a refused note goes back to the model as the error `personal_data_in_agent_memory`, so it rewrites the note without the data.
+
+**The task section.** A task view with `include_agent_memory: true` appends up to 200 tokens of notes tagged with the task's object types to the end of the context. It serves teams that can change the agent's context but not its prompt.
+
+## Writing
+
+<CodeGroup>
+```python Python
+saved = conversation.remember(
+    "pitfall",
+    "Scheduling API",
+    "Dates without a time zone are refused; send the offset the customer's region uses.",
+    tags=["scheduling"],
+)  # the conversation id goes as evidence
+if saved.error == "personal_data_in_agent_memory":
+    ...  # rewrite without the customer's data
+```
+```typescript TypeScript
+const { data, error } = await conv.remember({
+  kind: "pitfall",
+  title: "Scheduling API",
+  body: "Dates without a time zone are refused; send the offset the customer's region uses.",
+  tags: ["scheduling"],
+});
+```
+```bash cURL
+curl -X POST "https://acme-prod.us-east-2.api.niadra.com/v1/agent-memory/notes" \
+  -H "Authorization: Bearer $NIADRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"kind": "pitfall", "title": "Scheduling API",
+       "body": "Dates without a time zone are refused; send the offset the customer'"'"'s region uses.",
+       "tags": ["scheduling"], "evidence": {"conversation_id": "call-4471"}}'
+```
+</CodeGroup>
+
+A write passes two layers before it lands: the personal data detectors of the models server, which run inside the region (the same redactor that runs before any call to Niadra's AI), and a local layer that recognizes e-mails, phone numbers and two ID number formats without depending on it. Organizations and places do not count as personal data: a procedure names systems, companies and branches all the time. If the redactor does not answer, the write waits; it never lands without passing through it. The refusal is [`422 personal_data_in_agent_memory`](/en/errors), with the kinds of data found and without the values.
+
+Limits: an agent writes up to 20 notes per hour (beyond that, 429 with `Retry-After`). There is no cap on stored notes: no note is refused, deleted or retired to make room, and the listing and the search read every one, the listing page by page with `next_cursor`. An agent edits and retires only its own notes; a person with the `integration` role writes on behalf of any agent, naming the `source_id` in the request.
+
+In a space with `writes: human_only`, an agent's `remember` does not save: it becomes a **proposal**, which a person approves or rejects in the Console. The answer carries `proposal_id` instead of the note.
+
+## Distilling
+
+What other memories call procedural memory (an LLM summary of a run, stored without review) is an explicit request here. [`POST /v1/agent-memory/distill`](/en/api/agent-memory-distill) takes a `conversation_id` or `task_id` and creates a proposal in `drafting`. In the background, the server reads the whole conversation or task, **already masked**: a long conversation is read in windows of whole turns, with a window's last turns read again in the next, and a long turn in overlapping parts; when more than one window proposes a note, one more call puts the proposals together. The model returns one note in the fixed schema (`kind`, `title`, `body`, `tags`), kept whole, and the server runs the result through the redactor and leaves the proposal `pending`. Nothing is saved until a person approves it, edited or as it is; the edit passes the redactor again.
+
+A distillation that yields no note ends `failed` with its reason: `nothing_to_propose` (the conversation held no reusable procedure), `personal_data` (the proposal carried personal data and was discarded), `unconfirmed_link` (the conversation spoke only through an [unconfirmed link](/en/concepts/identity#safeguards-against-wrong-merges); the model is never called, and the request holds once the link is confirmed) or `no_turns` (no turns of that conversation or task).
+
+## Governance
+
+- **Scopes.** A key reads with `agent_memory` (or `context`, which every agent key has) and writes with `agent_memory:write`. People read and write with the `integration` role; erasing and approving need `admin`.
+- **Receipts.** Every read of the block and every search leaves an `agent_memory` receipt on the same chain as the others, with the ids of the notes handed over. Every write, edit, retirement, distillation, approval and erasure leaves an `admin` receipt. "Why did the agent do that?" stays answerable.
+- **Erasure and export.** [`DELETE /v1/agent-memory/notes?source_id=`](/en/api/agent-memory-notes-erase) deletes every note and proposal of one agent, every version, with a receipt. [`GET /v1/agent-memory/export`](/en/api/agent-memory-export) returns everything for portability, and the notes join the space's continuous export as a table of their own. Erasing a data subject does not look at this table, because it cannot hold personal data.
+- **Alert.** Every note and every proposal created emits `agent_memory.note_created`, with ids, kind and origin, never the text, for a webhook that reviews notes.
+- **Console.** The **Agent memory** screen lists notes by agent and visibility, creates, edits (making a version), retires, shows the proposals to approve or reject, and turns the feature on (`enabled`, `writes`) through an approved diff.
+
+## What stays out
+
+No note holds what a customer said. No note is born from a conversation on its own: distillation proposes, a person approves. No model reorders the notes by "recent use": the order is by tags, version and age, and the same for every customer. No vector in this first cut: the search is by words and tags, because an agent holds tens to hundreds of notes.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Agent memory block" href="/en/api/agent-memory-block">
+    the route, its parameters and the ETag.
+  </Card>
+  <Card title="Integrations" href="/en/integrations/overview">
+    every adapter places the block and wires the two tools.
+  </Card>
+  <Card title="MCP with any LLM" href="/en/guides/mcp">
+    the two tools on the space's MCP server.
+  </Card>
+  <Card title="Receipts and audit" href="/en/concepts/receipts">
+    the `agent_memory` receipt and the `admin` ones of the writes.
+  </Card>
+</CardGroup>

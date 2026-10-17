@@ -1,0 +1,241 @@
+---
+title: "Triggers and webhooks"
+description: "Signed notices when something happens in the memory. Niadra notifies; your system acts."
+---
+
+Niadra tells your systems when something happens in the memory, through signed webhooks. There are two kinds. A **webhook subscription** delivers every occurrence of an event type, such as `action.recorded`. A **trigger** is a rule of yours over what the memory knows, with parameters, a window and deduplication per subject, such as "a company promise one day past due". In both cases Niadra notifies by webhook, and your agent or your system acts. A trigger never calls a system of record, never opens a ticket, never messages the end customer and never branches.
+
+## Outgoing event types
+
+| Type | When it is sent |
+|---|---|
+| `conversation.outcome` | The memory of a conversation or task is ready, with its outcome, or a correction changed that outcome |
+| `open_item.closed` / `open_item.reopened` | An open item was closed, or opened again because the action that closed it was quarantined |
+| `action.recorded` | An agent recorded what it did in a system of record |
+| `identity.merged` / `identity.unmerged` | Two profiles were joined, or split apart |
+| `identity.suggestion` | A possible link between handles is waiting for review |
+| `trait.added` / `trait.expired` | A pattern appeared on a profile, or expired or lost the evidence that held it |
+| `trigger.fired` / `trigger.retracted` | One of your rules fired, or a firing was withdrawn after an unmerge separated its evidence |
+| `fact.added` / `fact.retracted` / `fact.restored` | A fact became active, or stopped being, through a session's extraction or a correction: ids, predicate, category, sensitivity, status, times, the object and the evidence events, with `replaces` and `replaced_by` linking a value change and `by` (the extraction, with its session and source, or the feedback, with its event). Never the value. A fact seen again is not news; `fact.restored` when the `security` role undoes a retraction or a correction, with `by` (the restore event) |
+| `guard.violated` | The answer of an agent went against a [guard line](/en/concepts/context#guard-lines-and-the-intent-gate): the short id of the guard, the value type, the source and the turn, never the value said; when the turn arrives if the SDK named it, or when the measurement found it |
+| `import.completed` / `import.failed` | A file import finished, with its counts and error codes, never a row; only to the endpoints of the source that imported. A partial import is `completed` with `rejected` above zero |
+| `export.completed` / `export.failed` | A continuous export run finished |
+| `erasure.completed` | An erasure finished, with the erased ids and the export runs that already contained them |
+| `usage.budget_reached` | Extraction's AI spend reached the space's daily ceiling, and the memory of conversations waits for the next day (UTC). Sent once a day, at the first deferred extraction, with `purpose`, `day`, `cap_micros` and `resumes_at`, and no customer data. Deferred extractions come back spread over the two hours after the ceiling reopens, not all in the first second, and every call reserves its estimated cost before it goes out, so parallel calls stop at the ceiling together. The contract's ceiling and the day's spend are in [`GET /v1/usage/budget`](/en/api/usage-budget) |
+| `agent_memory.note_created` | A note of the [agent memory](/en/concepts/agent-memory) was created, by an agent or by the approval of a proposal |
+| `audit.root` | The Merkle root of a day's receipts was anchored, with the root and count of the index of the [turn records](/en/concepts/turn-records) kept that day (`turns.root`, `turns.count`) when the space records them. Digests and counts only |
+| `receipt.recorded` | The chain links of the receipts the writer just stored (slice, day, `seq`, `prev_hash` and `hash`), for your own audit chain. Never what was read |
+| `turn.flagged` | A turn record stayed in the kept tier because of a flag (`error`, `guard_acted`, `handoff`, `assertion_failed`, `synthetic`, `incomplete` or `negative_feedback`): ids and flags only. The `turns` feature |
+| `data_issue.opened` | A [data issue](/en/api/data-issues) opened (a null field, a value out of vocabulary, an invalid value, a stale source, a coverage drop, schema drift, divergence, a rule conflict, an undeclared type, a held field, the day's AI ceiling reached, a batch kept aside for a retry, a limit of what Niadra infers on its own), with the names, the count and the references, and no personal data |
+| `object.value_revised` | A [computed value](/en/concepts/object-types#computed-values-and-derived-objects) got a new version: the object, the value's name, the version, the one it supersedes and the rule, never the value. The `state` feature |
+| `object.expired_by_input` | A derived object expired because one of its inputs changed: the object, the inputs and the input object |
+| `object.timer_due` | A timer of a typed object fired: the object, the timer, the firing's id, the one it supersedes, when it was due and when it fired |
+| `object.watch_fired` | A shared object a customer watches met the watch's condition: the object, the watch and `revalidated`, whether the condition was checked on a value the source confirmed through the [resolver worker](/en/guides/resolver-worker#watch-revalidation); never a value, at most once an hour per watch |
+| `type.drift` | A declared type drifted: the check of `niadra types derive --check` brought a fingerprint other than the declaration's, and the type asks for an alert (`drift: alert`). Sent once per [data issue](/en/concepts/object-types#data-issues), when it opens, with the type, the counts of what changed and the field when `changes.fields` names exactly one; never a new name, a value or a definition. `state` feature |
+| `content.flagged` | The scan flagged a third party's content in a content field: the object, the field and the reference, never the text. A person with the `security` role releases it through [`POST /v1/content/{ref}/release`](/en/api/content-release) |
+| `review_request.created` / `review_request.resolved` | A subject asked for the review of an automated decision, or the controller decided ([the reviewable profile](/en/concepts/privacy#the-reviewable-profile)). The `signals` or `coordination` features |
+
+Endpoints, subscriptions and trigger rules are versioned configuration in the control API, changed through diffs a person approves. Every endpoint belongs to a source, and an event about the memory only reaches an endpoint whose source may read the item it is about, under the same policy as the context: purpose, audience and the verification level the source can reach. With the starter policy, the outcome of a health conversation never reaches the billing CRM, and `trait.added` for `overdue_invoices` only reaches sources with the `billing` purpose. A trigger rule is only accepted, and only fires, if its condition and payload are readable by the endpoint's source: a diff that would leave a rule silent is refused when it is sent and again when it is approved. `trait.present(overdue_invoices)` never reaches a marketing system. Conditions and warnings count only the items that arrived through confirmed handles: an episode that came through an [unconfirmed link](/en/concepts/identity#safeguards-against-wrong-merges) completes no recurrence and fires no recontact, and the webhook never carries its id. A confirmation, a merge or a split re-checks the profile's rules right away, and a split retracts the firings whose evidence left with the handle.
+
+An endpoint with `format` `ocsf` or `hec` does not receive these events: it receives the space's stream of receipts for your SIEM, signed and with the same retries. See [Receipts and audit](/en/concepts/receipts).
+
+In the Console, the Alerts screen builds the rule from the catalog, with no JSON: you pick the condition, the parameters and the endpoint, test it and send it for approval with a reason. A rule in use is adjusted there too, with the same ID and the next version, and turned on or off by a diff. The control plane checks the diff when it arrives and again at approval, against the documents of that moment, and refuses:
+
+- a rule whose endpoint cannot receive the warning: it is a SIEM stream, does not subscribe to `trigger.fired`, belongs to an analysis or export source, is a customer agent receiving an identity warning, or shares no purpose or audience with the pattern of the warning;
+- a `trait.present` rule that names a pattern that is off or does not exist;
+- a `context_use.repetition_rate` rule with parameters the sweep cannot read, or with a `source_id` that is not in the space;
+- an endpoint that subscribes to an event type Niadra does not send: the accepted list is exactly the table above;
+- a new endpoint or mapping for a source that was cut;
+- a document with more than 50 warning rules.
+
+Only what the diff introduces counts: a problem already stored never blocks another change. Turning an endpoint off is a choice, and its rules wait for it to come back. Cutting the source that owns endpoints, SIEM streams or a mapping always works: its keys stop at once, and those objects leave the cell's configuration with it (pending deliveries end with `endpoint_disabled`, the mapping's webhooks are refused, and the warning rules aimed at them stop). The documents keep them, as history.
+
+### The outcome of every conversation
+
+For your CRM to record how each conversation ended, subscribe to `conversation.outcome`, `open_item.closed` and `action.recorded`. None of them carries the text of the conversation.
+
+```json
+{
+  "id": "0192f8d1-2a40-7b3c-8d4e-5f6a7b8c9d0e",
+  "type": "conversation.outcome",
+  "created_at": "2026-09-23T14:21:07+00:00",
+  "tenant": "0192f0a0-1b2c-7d3e-8f40-5a6b7c8d9e01",
+  "subject": { "pseudonym": "p_kvkv3okp7vnw3mqs", "kind": "person" },
+  "data": {
+    "episode_id": "0192f8c9-7d10-7e2f-9a3b-4c5d6e7f8091",
+    "version": 1,
+    "session_id": "0192f8b4-1c20-7a3b-8c4d-5e6f7a8b9c0d",
+    "conversation_id": "wa-8812",
+    "source_id": "0192f5a0-0000-7000-8000-00000000c001",
+    "channel": "whatsapp",
+    "intent": "complaint",
+    "category": "billing",
+    "outcome": "pending",
+    "by": "extraction",
+    "started_at": "2026-09-23T14:00:12+00:00",
+    "ended_at": "2026-09-23T14:19:40+00:00",
+    "as_of": "2026-09-23T14:19:40+00:00",
+    "open_item_ids": ["0192f8c9-7d11-7f40-8b5c-6d7e8f90a1b2"]
+  },
+  "links": { "open": "/v1/history/items/0192f8c9-7d10-7e2f-9a3b-4c5d6e7f8091" }
+}
+```
+
+`conversation.outcome` goes out when the memory of a conversation or task is ready (`by: extraction`, with the open items it left open in `open_item_ids`) and when a correction changes the outcome (`by: feedback`, with a higher `version`). It carries the labels of your closed lists, such as intent, normalized category and outcome, never the summary or the resolution. `conversation_id` is the conversation id in your system, and it is null when it looks like a phone number, an e-mail or a WhatsApp id.
+
+`open_item.closed` says which open item closed (`open_item_id`, `owner`, `object`, `expected_operation`, `due_at` and, in `opened_in`, the session and the source that opened it) and what closed it, in `closed_by`: `kind` `action`, with `action_id` and `operation`, when an agent's action did; `system_event`, with `event_id`, when an event of the system of record did; `conversation`, with `session_id`, when a later conversation resolved it; or `feedback`. `links.open` opens the object's timeline or, without an object, the profile's memory. `open_item.reopened` undoes a closing when the session of the closing action had a turn flagged as injection and the action was quarantined (`reason: closing_action_quarantined`, with the `action_id`).
+
+## The trigger catalog
+
+| Condition | Fires when |
+|---|---|
+| `promise.overdue(days)` | A company promise is past due by the given days (0 by default), with no action that closes it. A due date with no time of day ("by the 3rd") is due until that day ends in the space's time zone |
+| `open_item.due(lead_hours)` | An open item falls due within the next `lead_hours` hours (24 by default) |
+| `trait.present(name, value)` | A profile has the pattern of rule `name`, with value `value` when given |
+| `sentiment.drop(sessions, drop)` | The sentiment of the latest session fell `drop` (0.5 by default) below the average of the `sessions` before it (3 by default) |
+| `identity.ambiguous` | A handle of the profile became ambiguous by connecting too many profiles, like a shared store tablet |
+| `fact.contradicted_by_system_event(within_days)` | An action declared in the last `within_days` days (7 by default) was not confirmed by the system of record within its window |
+| `recontact(hours, same_category)` | The customer came back on their own within `hours` hours (72 by default), on the same category, or on any with `same_category: false` |
+| `context_use.repetition_rate(above, window_days, min_questions, source_id)` | A source asked again, over the last `window_days` days, more than the `above` share of what it asked |
+| `source.silent(minutes)` | A source went `minutes` minutes (30 by default) without sending events |
+| `source.gap(min_missing, share)` | A source's SDK reports it sent more than arrived: over yesterday and today, at least `min_missing` events (10 by default) and more than `share` of what was sent (5%) never arrived nor were refused. Fires once per source and day, with the counts in the notice |
+
+New conditions come through the product catalog, never through free text. A rule fires at most once per subject per window (24 hours by default), and the same evidence never fires the same rule twice; the ceiling is 100 firings per minute per space, and a space holds at most 50 trigger rules, on or off. Conditions about a profile are evaluated right after its memory changes; deadlines and conditions about a source, every 5 minutes. A late firing, more than 2 hours after the condition became true (or what `late_after_minutes` says), is marked `late` or suppressed, as the rule says.
+
+### Conditions about a source
+
+`source.silent`, `source.gap` and `context_use.repetition_rate` are about a source, not a customer. The subject of the notice is the source (`"kind": "source"`, with its id in `pseudonym`), and the 5-minute sweep evaluates all three.
+
+- `source.silent` watches the sources that sent events in the last 30 days. Each silence is its own occurrence: a source that comes back and falls silent again warns again.
+- `context_use.repetition_rate` reads the daily measurement of [Context use](/en/concepts/context-use). It fires when, over the last `window_days` days (7 by default, up to 90), repeated questions exceed the `above` share (0.2 by default) of the source's questions, with at least `min_questions` questions (30 by default) for the number to count. Without `source_id`, each source is watched on its own. The control group of an experiment is left out, since it never received the context. A period above the threshold warns once, counted from the day it began; if the rate drops and rises again, a new notice goes out. The notice carries in `data.detail` the questions (`questions`), the repeated ones (`repeated`), the rate (`rate`), the threshold (`above`), the window (`window_days`) and the day the period began (`above_since`), and `links.open` points to `/v1/context-use?source_id=...`. Parameters the sweep cannot read, or a `source_id` that does not exist in the space, are refused when the diff is sent and when it is approved.
+
+<Tip>
+Before turning a rule on, run it dry with [`POST /v1/triggers/dry-run`](/en/api/triggers-dry-run): the draft names `rule_id`, `condition`, `params`, the target `endpoint_id`, `window_hours` (24 by default, up to 90 days) and `late_policy` (`deliver_marked` or `suppress`). The answer says for how many of the customers active in the last 30 days (`subjects_evaluated`) the condition holds now (`would_fire`), with a sample of up to 10, and `target_problem` when the endpoint's source may not read the payload. For `source.silent` and `context_use.repetition_rate`, the dry run evaluates the space's sources as the sweep would see them now. It checks the condition; the window and the deduplication only apply to real firings, and nothing fires. Adjust the parameters before anyone gets paged. It takes the `integration` role or an `admin` key.
+</Tip>
+
+Example: "notify the CRM one day after a missed technician visit". When Marina's rescheduled visit passes its due date by one day with no action that closes it, Niadra sends `trigger.fired` to the CRM endpoint, and your CRM agent reschedules the visit.
+
+## What a delivery looks like
+
+Deliveries follow the open **Standard Webhooks** format.
+
+```json
+{
+  "id": "0192f8d0-7e31-7a4b-9c5d-3e4f5a6b7c8d",
+  "type": "trigger.fired",
+  "created_at": "2026-09-23T15:05:00+00:00",
+  "tenant": "0192f0a0-1b2c-7d3e-8f40-5a6b7c8d9e01",
+  "subject": { "pseudonym": "p_kvkv3okp7vnw3mqs", "kind": "person" },
+  "data": {
+    "firing_id": "0192f7e0-3a41-7b52-8c63-4d5e6f708192",
+    "rule_id": "overdue-visit",
+    "rule_version": "4",
+    "condition": "promise.overdue",
+    "window_key": "24h:20719",
+    "late": false,
+    "membership_version": 7,
+    "as_of": "2026-09-23T15:04:58+00:00",
+    "evidence": [{ "kind": "open_item", "id": "0192f7a2-8c41-7e3a-9b5d-2c4e6f8a0b13" }]
+  },
+  "links": { "open": "/v1/profiles/0192f7a0-3b2e-7d41-8c5a-2e9f4b7a1c03" }
+}
+```
+
+The body carries ids, the rule and its version, state and pointers to evidence. It **never** carries conversation content. The subject is the customer's pseudonym and kind, never a phone, an e-mail or a document number. `links.open` is the API route that opens what the notice points at: the profile, the memory, an object's timeline, an episode or a source's measurement. It only works with a credential of your space that has the scope for it.
+
+Three headers come with every delivery:
+
+- `webhook-id`: unique per message; the same on every retry. Use it to deduplicate.
+- `webhook-timestamp`: Unix seconds. Reject anything more than 5 minutes away from your clock.
+- `webhook-signature`: `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`. During a secret rotation, two signatures separated by a space are valid at once.
+
+## Verify the signature
+
+The secret is written once, through the Console or [`PUT /v1/secrets/webhook/{id}`](/en/api/secrets), and starts with `whsec_`; the key is the base64 part after the prefix. Verify on the raw body, before parsing it.
+
+<CodeGroup>
+```python Python
+import base64
+import hashlib
+import hmac
+import time
+
+
+def verify(secret: str, headers: dict[str, str], body: bytes) -> bool:
+    msg_id = headers["webhook-id"]
+    timestamp = headers["webhook-timestamp"]
+    if abs(time.time() - int(timestamp)) > 300:
+        return False
+    key = base64.b64decode(secret.removeprefix("whsec_"))
+    signed = f"{msg_id}.{timestamp}.".encode() + body
+    expected = base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode()
+    for candidate in headers["webhook-signature"].split(" "):
+        version, _, signature = candidate.partition(",")
+        if version == "v1" and hmac.compare_digest(signature, expected):
+            return True
+    return False
+```
+```typescript TypeScript
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+export function verify(secret: string, headers: Record<string, string>, body: string): boolean {
+  const id = headers["webhook-id"];
+  const timestamp = headers["webhook-timestamp"];
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false;
+  const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
+  const expected = createHmac("sha256", key).update(`${id}.${timestamp}.${body}`).digest("base64");
+  return headers["webhook-signature"].split(" ").some((candidate) => {
+    const [version, signature] = candidate.split(",");
+    if (version !== "v1" || !signature || signature.length !== expected.length) return false;
+    return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  });
+}
+```
+</CodeGroup>
+
+## Delivery guarantees
+
+- **At least once.** A message may arrive more than once; deduplicate by `webhook-id`.
+- **No ordering.** Messages may arrive out of order; every event carries `as_of` and a version so you can order them.
+- **Retries** with exponential backoff, from 30 seconds up to 4 hours between them, for up to 24 hours. After that the delivery goes to the dead-letter queue, visible in the Console, and is deleted 7 days after it was created.
+- **An endpoint failing for 24 hours straight**, without a single success, stops receiving: new deliveries to it go straight to the dead-letter queue with the error `endpoint_failing_24h`. A manual resend that succeeds opens it again.
+- **Controlled egress.** Every outgoing call goes out over HTTPS only and never follows a redirect. The address is resolved and checked on each attempt, and the connection goes to the checked address. Private, loopback, link-local (the cloud metadata address included), CGNAT, reserved and multicast addresses are refused.
+
+## The notifications feed
+
+Those who prefer to pull instead of receiving read the same events through [`GET /v1/notifications`](/en/api/notifications): the webhook bodies, oldest first, by cursor, ids and pointers only. Each item has the fields of a delivery (`id`, `type`, `created_at`, `tenant`, `subject`, `data` and `links`); the `id` is the event's, and a webhook delivery of the same event has an id of its own, so a reader of both deduplicates by the event id. Without a cursor, the feed starts from the beginning; `next_cursor` is where the next poll starts, and a poll with nothing new answers the same cursor. Events stay 7 days. An event aimed at one endpoint, or about a memory item only some sources may read, reaches its webhooks only, so the feed carries what any source of the space may see, and never a conversation's text. Any source key reads the feed, whatever its scopes. The feed is the space's `notifications` feature, off by default and turned on in the `features` document by an approved diff of the `security` role; in a space without it, the route answers 404.
+
+<CodeGroup>
+```python Python
+page = niadra.api.notifications(cursor=cursor, limit=100)
+for event in page.items:
+    handle(event.type, event.data)
+cursor = page.next_cursor  # keep it between polls
+```
+```typescript TypeScript
+const page = await niadra.api.notifications({ cursor, limit: 100 });
+for (const event of page.items) handle(event.type, event.data);
+cursor = page.next_cursor; // keep it between polls
+```
+</CodeGroup>
+
+## Answering a delivery
+
+Answer with any 2xx quickly and do the work asynchronously. A delivery is `pending`, `delivered`, `failing` while it retries, or `dead`. These routes take a Console person with the `integration` role (firings also `analysis`) or a key with the `admin` scope. To inspect deliveries use [Webhook deliveries](/en/api/webhook-deliveries); to send a dead delivery again, with the same `webhook-id`, use [Redeliver](/en/api/webhook-redeliver). To check an endpoint or a SIEM stream before you rely on it, [Send a test delivery](/en/api/webhook-endpoint-test) sends once, signed like the rest, a delivery of type `webhook.test`: the usual envelope with `data: {"test": true}`, or an OCSF event marked as a test for the SIEM. It shows in the deliveries list. Firings, with the rule, the version and the evidence, are listed at [Trigger firings](/en/api/trigger-firings).
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Patterns" href="/en/concepts/patterns">
+    the signals `trait.present` can watch.
+  </Card>
+  <Card title="Webhooks from your systems" href="/en/guides/system-webhooks">
+    the other direction, events coming in.
+  </Card>
+  <Card title="Context use" href="/en/concepts/context-use">
+    the repetition rate behind `context_use.repetition_rate`.
+  </Card>
+  <Card title="Receipts and audit" href="/en/concepts/receipts">
+    receipts delivered to your SIEM through the same mechanism.
+  </Card>
+</CardGroup>

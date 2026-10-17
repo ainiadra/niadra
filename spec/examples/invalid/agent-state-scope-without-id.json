@@ -1,0 +1,8 @@
+{
+  "scope": {
+    "kind": "task"
+  },
+  "agent": "closing",
+  "mode": "merge_by_key",
+  "body": {}
+}

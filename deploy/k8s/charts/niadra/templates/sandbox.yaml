@@ -1,0 +1,105 @@
+{{- if and (eq .Values.part "app") .Values.sandbox.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: niadra-sandbox-scripts
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+data:
+  sandbox_tenant.py: |
+    {{- .Files.Get "files/sandbox_tenant.py" | nindent 4 }}
+  e2e_sandbox.py: |
+    {{- .Files.Get "files/e2e_sandbox.py" | nindent 4 }}
+---
+# After the control plane is up: the synthetic tenant, its admin and one key per source. Then it waits
+# until the cell serves the tenant's spaces, whose databases the cell creates from the control plane's
+# snapshot (a minute on a new cell), so
+# `helm test` starts on a cell that is ready; past the deadline the job fails the deploy.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: niadra-sandbox-tenant
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels: {niadra.com/db-client: "true"}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: tenant
+          image: {{ include "niadra.image" (list . "server") }}
+          command: [python, /scripts/sandbox_tenant.py]
+          envFrom:
+            - configMapRef: {name: niadra-cell}
+            - secretRef: {name: niadra-control}
+            - secretRef: {name: niadra-owner}
+          env:
+            - {name: SANDBOX_SECRET, value: {{ .Values.secretStore.sandboxTenant | quote }}}
+            - {name: CELL_ADDRESS, value: "https://{{ first .Values.hosts.api }}"}
+            # Inside the cluster, so the wait does not depend on the public certificates being issued.
+            - {name: CELL_READ_URL, value: "http://read.{{ .Release.Namespace }}.svc:8000"}
+            - {name: CELL_ADMIN_URL, value: "http://admin.{{ .Release.Namespace }}.svc:8000"}
+            - {name: NIADRA_CONTROL_SIGNING_KEY_FILE, value: /run/secrets/control/signing.pem}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts}
+            - {name: signing, mountPath: /run/secrets/control, readOnly: true}
+          {{- include "niadra.resources" .Values.loops.resources | nindent 10 }}
+          {{- include "niadra.securityContext" . | nindent 10 }}
+      volumes:
+        - {name: scripts, configMap: {name: niadra-sandbox-scripts}}
+        - name: signing
+          secret: {secretName: niadra-control, items: [{key: signing.pem, path: signing.pem}]}
+---
+# Written to the secret store by the tenant job above; a hook after it, since the store has nothing
+# to read before the job ran. The end-to-end check reads it.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: niadra-sandbox-bootstrap
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  refreshInterval: 1m
+  secretStoreRef: {kind: ClusterSecretStore, name: niadra}
+  target:
+    name: niadra-sandbox-bootstrap
+  data:
+    - secretKey: bootstrap.json
+      remoteRef: {key: {{ .Values.secretStore.sandboxTenant }}}
+---
+# `helm test niadra`: the end-to-end flow of 18.7 through the public HTTPS endpoints.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: niadra-e2e
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: e2e
+      image: {{ include "niadra.image" (list . "server") }}
+      command:
+        - python
+        - /scripts/e2e_sandbox.py
+        - --api=https://{{ first .Values.hosts.api }}
+        - --control=https://{{ .Values.hosts.control }}
+        - --bootstrap=/bootstrap/bootstrap.json
+      volumeMounts:
+        - {name: scripts, mountPath: /scripts}
+        - {name: bootstrap, mountPath: /bootstrap, readOnly: true}
+      {{- include "niadra.securityContext" . | nindent 6 }}
+  volumes:
+    - {name: scripts, configMap: {name: niadra-sandbox-scripts}}
+    - {name: bootstrap, secret: {secretName: niadra-sandbox-bootstrap}}
+{{- end }}

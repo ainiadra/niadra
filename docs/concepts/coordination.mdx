@@ -1,0 +1,202 @@
+---
+title: "Coordenação"
+description: "Quem está com o cliente agora, efeitos que acontecem uma vez só, orçamentos de contato, a janela do canal, o token de contato, a lista de supressão, transferências e o modo sombra."
+---
+
+O cliente da sua empresa é atendido por vários agentes de vários fornecedores, por pessoas em painéis que nenhum agente vê, e por temporizadores e middlewares que não chamam ninguém. Cada um deles pode contatar a mesma pessoa, agir sobre o mesmo objeto ou repetir o que outro já fez. A **coordenação** responde, antes de um agente agir, se ele pode agir agora, quem detém o cliente ou o objeto, o que já foi feito e por quê; e registra o que aconteceu depois do fato.
+
+A memória é um espelho que falha cedo com a mensagem certa: ela nunca manda uma mensagem, nunca roteia uma e nunca é a única barreira. A barreira que vale é o ponto de despacho da sua empresa (um gateway ou um middleware), que confere um [token de contato](#o-token-de-contato) sem falar com a Niadra.
+
+## Ligar e desligar
+
+A coordenação é a funcionalidade `coordination` do espaço, ligada por padrão; um espaço a desliga no documento `features`, pelo papel `security`. As regras ficam no documento `coordination`, do papel `integration`: as finalidades e para que lado cada uma falha, os canais e as janelas deles, os níveis de posse e as fontes que a observam, os motivos de supressão, os gateways, os tipos de compromisso, os orçamentos pagos e as transferências. Uma mudança numa finalidade que falha fechada, no orçamento de cobrança, nos motivos de supressão ou no que um gateway confere pede também o papel `security`. Uma chave de fonte pergunta e declara com o escopo `coordinate`.
+
+## Perguntar antes de agir
+
+[`POST /v1/coordination/check`](/api/coordination-check) recebe o que o agente está prestes a fazer: o cliente (`subject`), o objeto, o agente, a intenção (`farewell`, `proposal_followup`), o canal, a direção (`inbound` responde a uma mensagem, `outbound` começa um contato), a finalidade (`transactional`, `service`, `marketing`, `retention` e `collection` são as padrão, e o espaço declara outras), a tarefa, a chave do efeito e o gateway por onde o contato vai sair. A resposta é a **decisão**:
+
+| Decisão | O que quer dizer |
+|---|---|
+| `allow` | Pode agir agora. Com `effect.state: none`, a pergunta também reservou o efeito, e o agente precisa declarar como ele terminou |
+| `defer` | Agora não: `owner.valid_until`, `channel.quiet_until` ou `next_allowed_at` do orçamento dizem quando perguntar de novo. Um contato adiado é reagendado, nunca descartado |
+| `deny` | Não, para esta finalidade agora: o cliente está suprimido, o orçamento acabou, ou o efeito já aconteceu. A negativa fica registrada com o motivo |
+| `handoff_to` | O cliente está com outro detentor, que precisa responder: roteie a conversa para `holder` ou crie uma transferência |
+
+A finalidade da checagem é uma **finalidade de coordenação**: por que o contato é feito, da lista `purposes` do documento `coordination` (as cinco padrão e as do espaço, como `legal_notice` para lembretes de prazo e audiência). É uma lista diferente das **finalidades de dados** do documento `purposes` (`support`, `billing`, `legal`...), que dizem por que um dado é guardado e que a chave de uma fonte leva nas leituras. Uma finalidade de dados numa checagem é uma finalidade de coordenação desconhecida: a resposta é 422 `invalid_input`, e o detalhe dela nomeia as finalidades que o documento de coordenação do espaço declara. Nos SDKs, uma checagem que a API recusa (400, 401, 403 ou 422) responde `invalid_request`, nunca `unchecked`: um contato de saída fica adiado, um de entrada liberado, a recusa vai para o log com o detalhe, e `strict` a lança.
+
+Uma mensagem que o cliente mandou nunca é negada: uma pergunta `inbound` responde `allow` ou `handoff_to`. A resposta traz também os motivos em códigos (`effect_done`, `suppressed`, `budget_exhausted`, `budget_paced`, `owner_active`, `lock_held`, `contact_window`, `quiet_hours`, `template_required`, `rebuilding`, `unavailable`, `unchecked`; um código desconhecido é opaco, e o seu código age só por `decision`), quem detém o cliente ou o objeto (`owner`, com o nível, a fonte, desde e até quando), as travas de tarefa, o estado do efeito, o estado do canal, o orçamento por finalidade, as supressões (as finalidades suprimidas a qualquer hora, nunca o motivo nem o handle), com `contact_window` até quando vai a janela de contato do cliente (`contact_window_until`), os compromissos que valem e as promessas abertas, um `decision_id` que a declaração cita, `valid_for_s` e, só com um `allow` de saída de uma finalidade que precisa, o `contact_token`.
+
+A Niadra avalia nesta ordem e para no primeiro que decide: o efeito (feito, em voo ou ambíguo nega), uma supressão da finalidade, um detentor cuja reivindicação não permite a intenção (adia um contato de saída até a reivindicação acabar, transfere um de entrada), a trava de outro detentor sobre a tarefa do objeto, um orçamento esgotado, uma fatia ritmada cuja próxima unidade ainda não está livre, a janela de contato do próprio cliente (adia até ela acabar), o horário de silêncio. Só então o orçamento é gasto e o token emitido, num passo atômico com a leitura, então dois agentes nunca levam os dois a última unidade. [`POST /v1/coordination/check/batch`](/api/coordination-check-batch) responde até 500 perguntas numa chamada, cada uma como se fosse sozinha.
+
+<CodeGroup>
+```python Python
+decision = conversation.check("proposal_followup", purpose="marketing", channel="whatsapp", gateway_id="wa_gateway")
+if decision.decision == "allow":
+    gateway.send(message, token=decision.contact_token)
+    conversation.declare.contact_made(decision, purpose="marketing", channel="whatsapp", gateway_id="wa_gateway")
+elif decision.decision == "defer":
+    schedule(at=decision.owner.valid_until if decision.owner else decision.channel.quiet_until)
+```
+```typescript TypeScript
+const decision = await convo.check("proposal_followup", { purpose: "marketing", channel: "whatsapp", gatewayId: "wa_gateway" });
+if (decision.decision === "allow") {
+  await gateway.send(message, { token: decision.contact_token });
+  convo.declare.contactMade(decision, { purpose: "marketing", channel: "whatsapp", gatewayId: "wa_gateway" });
+} else if (decision.decision === "defer") {
+  schedule(decision.owner?.valid_until ?? decision.channel?.quiet_until);
+}
+```
+</CodeGroup>
+
+Nos SDKs, `check()` espera no máximo 200 ms. Quando a Niadra não responde a tempo, a **direção da finalidade** decide, sem reserva e sem token: uma mensagem do cliente e `transactional` vão; `service` vai e é declarada com `unchecked`; `marketing`, `retention`, `collection` e qualquer efeito com chave esperam (`defer`); e uma finalidade de que o cliente saiu é recusada pela cópia local da lista de supressão. O gateway recusa sem token as finalidades que falham fechadas, e é assim que elas falham fechadas mesmo com a Niadra fora do alcance. Do lado da Niadra, um armazenamento de estado que volta vazio responde `defer` com `rebuilding` por 60 segundos às finalidades que falham fechadas, enquanto o registro durável é reposto.
+
+Uma leitura de contexto com `include: ["coordination"]` traz o bloco de **aviso**: quem detém o cliente, as finalidades para as quais ele não pode ser contatado, os contatos que restam a cada finalidade com orçamento e os compromissos que valem. O bloco não decide, não reserva e não emite token; um ato ainda pergunta.
+
+## Declarar o que aconteceu
+
+Depois de agir, o agente declara por [`POST /v1/coordination/declare`](/api/coordination-declare), com `Idempotency-Key`: `case.opened` e `case.closed`, `lease`, `task_lock`, `contact.made` (com o `decision_id` e o `jti` do token), `effect` (como a tentativa reservada terminou), `commitment.made`, `commitment.withdrawn` e `commitment.decided`, `handoff`, `suppression.added` e `suppression.lifted`. Uma declaração nunca dá erro pela ordem em que chega: um `contact.made` de uma decisão que a Niadra já não guarda é registrado mesmo assim, dois `contact.made` com o mesmo `jti` são registrados e o segundo conta como token usado duas vezes, e um `contact.made` sem decisão conta no orçamento da finalidade, dentro ou fora do limite. Nos SDKs, `conversation.declare` envia em segundo plano até a Niadra aceitar; um 503 `coordination_unavailable` quer dizer que nada novo foi registrado e o envio se repete.
+
+Um **compromisso** (uma oferta, um desconto, uma proposta) vale pela compatibilidade do tipo dele com os que já valem para o cliente: num tipo `first_holds`, o primeiro vale e um posterior não; num `best_wins`, o de maior `score` vale e o outro é substituído; um `exclusive` vale sozinho, sobre todo tipo. O compromisso vira também a ação do agente sobre o objeto `commitment:coordination:<id>`, então o contexto de outro agente o mostra como feito por outro; nenhum sistema o confirma, então ele fica `declared` e nunca vira `divergent` ([Declarada, confirmada, divergente](/concepts/systems#declarada-confirmada-divergente)). Aceitá-lo ou recusá-lo numa conversa posterior muda o estado dele.
+
+## Posse
+
+Uma **reivindicação** diz que um detentor tem um cliente ou um objeto, de um tipo (`owner`, `case` ou `task_lock`), num nível, de uma fonte, desde e até um momento, permitindo algumas intenções. Ela chega de três jeitos: uma **declaração** pela API ([`POST /v1/coordination/claims`](/api/coordination-claims)); uma **observação mapeada** de um webhook (um painel de atendimento abriu uma sessão humana: o espaço mapeia, por tipo canônico de evento, quem detém o cliente, em que nível e por quanto tempo); ou uma **observação** que o seu worker leu e enviou (a flag de pausa de um middleware), pela mesma rota, nomeando a fonte de posse.
+
+O espaço declara os níveis do mais restritivo ao menos, como `closed`, `human_active`, `transfer_pending`, `soft_pause`, `agent_active`. **O mais restritivo vence**: o detentor de um alvo é a reivindicação não vencida de nível mais restritivo; entre iguais, a mais nova. Uma reivindicação mais branda nunca rebaixa uma mais estrita ainda válida. Cada fonte tem uma validade máxima que a Niadra aplica ao que ela afirma, mesmo a um estado que nunca vence onde nasceu; uma declaração dura até 24 horas, o que o espaço definir.
+
+Uma declaração pode ser recusada (409 `lease_held`, com o detentor e até quando) enquanto a reivindicação válida de outro detentor é ao menos tão restritiva, e nada é registrado; o mesmo detentor renova a própria. Uma observação nunca é recusada: é um fato que um sistema reportou, substitui o que a mesma fonte disse antes, e a resolução continua decidindo quem detém. Uma observação mais antiga que a última da fonte é ignorada, então eventos entregues fora de ordem nunca trazem de volta uma reivindicação que acabou. Toda reivindicação aceita ganha uma **época**, maior que qualquer anterior sobre o alvo, e uma liberação precisa nomeá-la: um detentor cuja reivindicação foi substituída não libera a do sucessor.
+
+Uma **trava de tarefa** nomeia o tipo da tarefa sobre um objeto (`hearing_summary` sobre um processo). Quem pede a mesma tarefa sobre o mesmo objeto vê quem a tem (`lock_held`), agente ou pessoa; a trava é do detentor, e a de outro sobre a mesma tarefa é recusada (409 `task_locked`) até ela acabar. Uma trava segura a tarefa, nunca o objeto nem o cliente.
+
+<CodeGroup>
+```python Python
+claimed = conversation.claim(kind="case", lease_s=600, intents=["proposal_followup"])
+locked = conversation.claim(object="lawsuit:court_system:0001234", task="hearing_summary", lease_s=900)
+if not locked.held:
+    print(locked.error)  # task_locked: someone else is on it
+```
+```typescript TypeScript
+const claimed = await convo.claim({ kind: "case", leaseS: 600, intents: ["proposal_followup"] });
+const locked = await convo.claim({ object: "lawsuit:court_system:0001234", task: "hearing_summary", leaseS: 900 });
+if (!locked.held) console.log(locked.error); // task_locked: someone else is on it
+```
+</CodeGroup>
+
+## Efeitos que acontecem uma vez só
+
+Um **efeito** é um ato externo causado por um fato de negócio: uma mensagem entregue, um documento protocolado, um aviso enviado, uma chamada paga. O agente nomeia o fato pela **chave**: uma despedida por conversa (`farewell:<id da conversa>`), um protocolo por intimação, um aviso por fato. A Niadra guarda a chave só como hash com chave e nomeia o efeito nos caminhos por esse hash (`effect_id`), porque a chave pode levar um id de conversa. Uma chave dura pela janela do tipo dela (`effect_key_days`), ou enquanto o fato existe, quando o espaço diz isso.
+
+| De | Para | Por quem |
+|---|---|---|
+| nada | `reserved`, tentativa 1 | uma pergunta com `effect_key`, ou [`POST /v1/coordination/effects`](/api/coordination-effects) |
+| `reserved` | `done`, `failed`, `unknown_outcome` | quem detém a tentativa, por [`/settle`](/api/coordination-effect-settle) ou pela declaração `effect` |
+| `reserved` | `done`, `failed` | uma observação do sistema de registro |
+| `reserved`, prazo vencido | `unknown_outcome` | ninguém: no próximo toque (o prazo é `effect_lease_s`, 60 segundos por padrão) |
+| `unknown_outcome` | `done`, `failed` | uma observação, uma pessoa, ou quem detinha a tentativa |
+| `failed` | `done` | uma observação que confirma tarde |
+| `failed` | `reserved`, próxima tentativa | uma pergunta ou uma reserva |
+
+**Um efeito ambíguo nunca é enviado de novo por conta própria.** Uma tentativa cujo desfecho o agente não conhece (um pedido que estourou o tempo depois de sair) é `unknown_outcome`, e uma reserva sobre uma chave assim responde `unknown_outcome` e não reserva nada. Só um encerramento em `failed`, por uma observação, uma pessoa ou quem detinha a tentativa, abre uma tentativa nova. Quando a Niadra não responde, o agente não manda de novo o que pode ter saído: registra `unknown_outcome`. O [registro do turno](/concepts/turn-records) reporta o que o agente viu de cada chave, depois do fato, e nunca abre uma tentativa nem move uma chave para trás.
+
+<CodeGroup>
+```python Python
+key = f"farewell:{conversation.conversation_id}"
+decision = conversation.check("farewell", purpose="service", effect_key=key)
+if decision.decision == "allow" and decision.effect and decision.effect.state == "none":
+    try:
+        send(farewell)
+        conversation.declare.effect(key, "done")
+    except TimeoutError:
+        conversation.declare.effect(key, "unknown_outcome")
+```
+```typescript TypeScript
+const key = `farewell:${convo.id}`;
+const decision = await convo.check("farewell", { purpose: "service", effectKey: key });
+if (decision.decision === "allow" && decision.effect?.state === "none") {
+  try {
+    await send(farewell);
+    convo.declare.effect(key, "done");
+  } catch {
+    convo.declare.effect(key, "unknown_outcome");
+  }
+}
+```
+</CodeGroup>
+
+## Orçamentos e admissão
+
+Uma finalidade pode ter um **orçamento de contato**: no máximo `limit` contatos por cliente numa janela deslizante (`per_hours`), somados sobre todo agente e todo fornecedor do espaço. Um orçamento pode ter **fatias** por etapa do funil, nomeadas pela intenção da pergunta: uma fatia é gasta até acabar, ou espalhada por dias (`spread`, uma unidade a cada `spread_days` dividido pelo limite; uma unidade pedida antes é adiada com `budget_paced`). As fatias nunca somam mais que o orçamento. Sem unidades, a decisão é `deny` com `budget_exhausted` e a hora em que a próxima unidade libera.
+
+Uma operação **paga** (uma busca, uma releitura, uma chamada cara) pode ter um orçamento nas unidades da sua empresa, nunca em dinheiro, por objeto, cliente ou espaço e janela, com um teto por chamada. As unidades são reservadas antes do ato: uma operação de custo desconhecido reserva o maior custo medido para ela, e uma tentativa acima do teto é recusada com `over_call_ceiling`. Depois do ato a reserva é encerrada: `done` com o custo real, `failed` (uma chamada paga que falha conta mesmo assim) ou `skipped` (as unidades voltam). Uma reserva que a Niadra não conseguiu gravar de forma durável é desfeita, e a operação não é admitida: a admissão falha fechada. É esse orçamento que o [worker de resolução](/guides/resolver-worker) consome.
+
+## O canal
+
+O estado do canal é calculado na pergunta: até quando uma mensagem livre pode sair (no WhatsApp, 24 horas depois da última mensagem do cliente, `free_form_hours`), se fora dessa janela só um modelo pago pode sair (`template_required`) e o horário de silêncio (`quiet_hours`, com fuso). A última mensagem do cliente é a mais nova que a Niadra recebeu no canal, de qualquer fonte que envie a conversa, tenha ou não uma pergunta visto. Quando a Niadra não consegue dizer, a janela conta como fechada, e um modelo é exigido onde o canal diz isso. Um contato no horário de silêncio é adiado até o fim dele, nunca descartado.
+
+## O token de contato
+
+Uma decisão é aviso até o ponto que manda a mensagem a impor. O **token de contato** deixa esse ponto, o seu gateway ou middleware, impor a decisão sem chamar ninguém: a Niadra assina, com a chave Ed25519 do espaço, que um contato de saída de uma finalidade, num canal, para um destino, por um gateway, pode sair nos próximos dois minutos. O gateway confere a assinatura e os campos sem conexão e deixa a mensagem sair uma vez.
+
+```text
+nct1.<payload>.<assinatura>
+```
+
+O payload é JSON compacto com `kid`, `space`, `jti` (o id do token, igual ao `decision_id`, que também nomeia o contato no registro de contatos), `purpose`, `channel`, `rcpt`, `gateway`, `iat` e `exp` (até 120 segundos depois de `iat`). Ele não leva dado pessoal: o destino vai só como `rcpt`, o HMAC-SHA256 da forma canônica do destino (`phone:+5511987654321`, `email:ana@example.com`) com a chave de 32 bytes que o gateway compartilha com a Niadra, guardada no cofre do espaço. O token vai num cabeçalho ou num campo de metadado do pedido de despacho, nunca numa URL.
+
+As chaves públicas do espaço saem em [`GET /.well-known/niadra-contact-keys.json?space=...`](/api/contact-keys), um conjunto de JWKs; uma chave é `active` ou `retiring`, e a Niadra gira publicando a próxima como ativa e a anterior em retirada por ao menos a vida de um token. O gateway confere treze passos em ordem (formato, versão, decodificação, chave conhecida, assinatura, espaço, gateway, vida, `iat` e `exp` com 5 segundos de folga, canal, destinatário em tempo constante, `jti` não visto) e recusa com o primeiro código que se aplica; depois de aceitar, lembra o `jti` até `exp + 5` segundos e o recusa de novo. Um token recusado nunca é tentado de novo: o agente pede uma decisão nova. Um token só é emitido com um `allow` de saída de uma finalidade que o espaço marca como precisando de um (por padrão `marketing`, `retention` e `collection`). Veja [Gateways e o token de contato](/guides/gateways).
+
+## A lista de supressão
+
+Quando um cliente pede para não ser contatado, todo fornecedor que poderia contatá-lo precisa saber, inclusive os que nunca chamam a memória antes de mandar. A **lista de supressão** é o piso que qualquer fornecedor honra: os destinos que não podem ser contatados, por finalidade e canal, com chaves que só quem já conhece o telefone ou o e-mail consegue casar. Cada fonte recebe um sal próprio de 32 bytes ([`GET /v1/suppressions/salt`](/api/suppressions-salt)), e a chave de uma entrada é o HMAC-SHA256 do destino canônico com esse sal: duas fontes do mesmo espaço têm chaves diferentes para a mesma pessoa e não conseguem juntar as cópias. A lista nunca leva um handle, um nome nem o motivo.
+
+[`GET /v1/suppressions`](/api/suppressions) devolve uma página de mudanças, do mais antigo para o mais novo, por cursor; sem cursor, tudo o que vale hoje. A fonte lê de novo a cada 60 segundos, aplica as páginas em ordem, guarda o estado mais novo por `id` e, com `reset`, descarta a cópia antes (o sal mudou, ou o cursor é mais antigo do que a lista guarda). Antes de um contato de saída, a fonte calcula a chave do destino e não contata quando a cópia tem uma entrada com essa chave, essa finalidade e esse canal (ou nenhum canal), já em vigor e ainda não vencida. **A cópia continua valendo quando a lista não pode ser lida, por mais velha que esteja**: um opt-out é obrigação legal e não espera pela Niadra. Uma mensagem do cliente nunca é suprimida, e a supressão de uma finalidade não para outra. Uma supressão sobrevive ao apagamento do cliente, como hash com chave.
+
+Uma fonte adiciona uma entrada declarando `suppression.added` para um cliente nomeado por telefone ou e-mail, com a finalidade, o canal, o motivo e até quando, e levanta só o que ela mesma adicionou; o que outra fonte ou uma pessoa adicionou fica. O motivo é um dos `suppression_reasons` do documento de coordenação: por padrão `opt_out`, `in_service`, `awaiting_third_party` (se levanta sozinho depois de 72 horas) e `grace_period` (depois de 7 dias). Qualquer outro responde 422 nomeando os que o documento declara.
+
+**O horário que o cliente pediu vira janela, nunca bloqueio do dia todo.** Quando o cliente diz "não me liguem antes das 9h" ou "só me mandem mensagem à tarde", a Niadra guarda isso sozinha, sem nada a configurar: uma supressão de finalidade `any` (vale para todas) no canal que ele citou, com uma `window` de horas locais (`from`, `to`, um fuso IANA em `tz` e, se ele disse, os dias da semana em `days`, de 1, segunda, a 7, domingo), no fuso do espaço. Dentro da janela o contato espera até ela acabar (`defer` com `contact_window`); fora dela, vai. Uma ligação às 7h espera até as 9h, uma às 14h sai, e o WhatsApp do mesmo cliente não muda. Uma janela que atravessa a meia-noite pertence ao dia em que começa, e o fim não entra: às 9h em ponto a janela das 0h às 9h já acabou. Quando o cliente volta atrás ("pode ligar a qualquer hora"), a janela sai; a próxima coisa que ele disser sobre o mesmo canal substitui a anterior, e nenhuma fonte de fornecedor levanta o que o cliente pediu. O bloco do cliente mostra a janela em palavras na seção de preferências de contato ("ligação: não antes das 09:00, horário de America/Sao_Paulo") e em `contact_windows`. Uma fonte também pode declarar uma janela própria, com `window` no `suppression.added`.
+
+Nos SDKs, `niadra.may_contact(handle, purpose, channel=, at=)` em Python e `niadra.mayContact(handle, purpose, { channel, at })` em TypeScript aplicam a cópia local, janelas incluídas (`at` é o momento do contato, agora por padrão), lida na primeira chamada (o sal e a primeira página, cada um no prazo de uma leitura de navegação) e depois em segundo plano uma vez por minuto. Uma lista maior que uma página, ou uma primeira leitura que passou do prazo, continua em segundo plano; enquanto não há cópia, a finalidade decide, e as que falham fechadas esperam.
+
+## Transferências
+
+Uma **transferência** ([`POST /v1/handoffs`](/api/handoffs-create)) move o cliente para outro detentor com um pacote: quem transfere e para quem, o motivo nas palavras do agente, a view compilada para quem recebe, no nível de verificação e na política dele (nunca com o que esse lado não poderia ler), quem detinha o cliente, os objetos abertos (até 50; `open_objects_more` conta os que ficaram de fora, e cada um continua legível pelas rotas de objeto), os compromissos e promessas que valem, os efeitos feitos, em voo ou ambíguos, as supressões e como reportar o desfecho. Enquanto o desfecho é devido, o cliente fica retido para quem recebe no nível de transferência do espaço (`transfer_pending` por padrão), então os contatos de saída dos outros agentes esperam; uma reivindicação mais estrita que já segura o cliente o mantém. O desfecho ([`/outcome`](/api/handoff-outcome)), um do vocabulário do espaço, encerra a retenção e alimenta a memória (a ação `handoff.outcome` de quem recebeu sobre o objeto da transferência, que o próximo agente vê como feita por outro e que, como o compromisso, nunca vira `divergent`), as supressões e os sinais a que o espaço mapeia o desfecho. Uma transferência sem desfecho até `expected_by` lê como vencida.
+
+## Níveis de adoção
+
+Cada nível é útil sozinho:
+
+| Nível | A sua empresa faz | A coordenação dá |
+|---|---|---|
+| Sombra | Nada de novo: as mensagens de saída já chegam à memória | Conflitos por 1.000 clientes ao mês, com amostra para revisão |
+| Supressão | Lê a lista a cada 60 segundos | O piso que todo fornecedor honra |
+| Pergunta e declaração | O agente pergunta antes e declara depois | Detentor, travas, orçamento, canal, efeitos, compromissos e promessas numa leitura |
+| Despacho | O gateway só deixa sair mensagem de saída com token válido | Imposição, conferida sem conexão |
+
+Onde o ponto de despacho é um software de terceiro que não confere token, a coordenação é sombra mais supressão.
+
+O **relatório de sombra** ([`POST /v1/coordination/shadow`](/api/coordination-shadow), listado em [`GET /v1/coordination/reports`](/api/coordination-reports), pelos papéis `analysis` e `security`) conta, nos dias pedidos, o que uma pergunta teria mudado nas mensagens de saída já recebidas, sem impor nada: `concurrent_agents` (uma mensagem enquanto outro agente tinha falado com o cliente nas últimas 24 horas), `outside_window`, `quiet_hours`, `over_budget` e `tokens_used_twice`, cada um também por 1.000 clientes ao mês, com uma amostra para revisão e ninguém nomeado. A execução lê o período em segundo plano.
+
+A **visão geral** ([`GET /v1/coordination/overview`](/api/coordination-overview), pelos mesmos papéis) resume o que a coordenação segura agora e decidiu nos últimos dias, em contagens: a posse que vale, com quantos detentores; os efeitos por estado, e quantos esperam um desfecho que ninguém sabe; os conflitos resolvidos (posses sobrepostas, compromissos substituídos, transferências vencidas, tokens reusados); o uso dos orçamentos e os contatos por finalidade. Nenhum cliente, handle ou mensagem entra nela. É o que a tela Coordenação do Console mostra, num espaço com a funcionalidade ligada.
+
+O exemplo de um agente que pergunta, declara e reivindica está em [`examples/coordination.py`](https://github.com/ainiadra/niadra-sdk-python/blob/main/examples/coordination.py) e [`examples/coordination.ts`](https://github.com/ainiadra/niadra-sdk-ts/blob/main/examples/coordination.ts).
+
+## Privacidade e retenção
+
+O registro de contatos guarda cada contato de saída permitido por `decision_id` por 90 dias; a chave de um efeito e o cliente de uma reivindicação ficam como hash com chave; a lista de supressão sobrevive ao apagamento do cliente, só como hash e forma canônica lacrada. Uma [retenção legal](/concepts/privacy#retenções-legais) protege as linhas de coordenação do expurgo. Toda pergunta e toda declaração deixam [comprovante](/concepts/receipts), sem o handle.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Gateways e o token de contato" href="/guides/gateways">
+    conferir o token no seu gateway, sem conexão.
+  </Card>
+  <Card title="Perguntar antes de agir" href="/api/coordination-check">
+    a referência de `POST /v1/coordination/check`.
+  </Card>
+  <Card title="Sinais" href="/concepts/signals">
+    o que o cliente quer e recusa, ao lado de quem o detém.
+  </Card>
+  <Card title="Agentes de varejo" href="/guides/retail-agents">
+    uma despedida por conversa e um orçamento de marketing.
+  </Card>
+</CardGroup>

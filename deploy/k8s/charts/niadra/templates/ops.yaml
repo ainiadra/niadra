@@ -1,0 +1,49 @@
+{{- if eq .Values.part "app" }}
+# Nightly backups per database (values `backup`). RDS restores only the whole instance, so the cell
+# database and every space database up to `backup.maxDbGiB` also get their own pg_dump, straight from
+# the database (not through PgBouncer) into the cell bucket as backups/<database>/<time>.dump plus
+# latest.json; the bucket expires backups/ after `backup.retentionDays` (rule set by `serve setup`).
+# With `--verify-weekday 6` (Python's weekday: Monday is 0) the Sunday run also restores each latest
+# dump into a scratch database, counts rows of a few tables and drops it. Restoring one space is a
+# runbook in the server's README (`ops restore-space`).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: niadra-backup
+  labels: {{- include "niadra.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  # A machine that was stopped (scripts/pause.sh) skips the night instead of dumping at start-up.
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  # A failed run stays until someone deletes it; the BackupJobFailed alert reads it.
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 10800
+      template:
+        metadata:
+          labels:
+            {{- include "niadra.selector" "niadra-backup" | nindent 12 }}
+            niadra.com/db-client: "true"
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: backup
+              image: {{ include "niadra.image" (list . "server") }}
+              command: [python, -m, niadra.entrypoints.ops, backup, --verify-weekday, "6"]
+              envFrom:
+                - configMapRef: {name: niadra-cell}
+                - secretRef: {name: niadra-cell}
+                - secretRef: {name: niadra-owner}
+              # pg_dump streams to the bucket; the weekly restore check downloads a dump first.
+              volumeMounts: [{name: scratch, mountPath: /tmp}]
+              {{- include "niadra.resources" .Values.backup.resources | nindent 14 }}
+              {{- include "niadra.securityContext" . | nindent 14 }}
+          volumes:
+            - name: scratch
+              emptyDir: {sizeLimit: {{ .Values.backup.scratch }}}
+{{- end }}

@@ -1,0 +1,109 @@
+---
+title: "Resposta a incidentes"
+description: "Papéis, severidades, o que detecta, os passos da resposta, a notificação ao cliente no prazo do contrato e a revisão depois. Um plano do tamanho da Niadra de hoje."
+---
+
+Este é o plano que a Niadra roda quando algo sai do esperado: um vazamento, uma perda de isolamento, uma indisponibilidade, uma cópia de segurança que falhou. Ele é escrito para a Niadra de 30/09/2026, em que uma pessoa opera a plataforma e recebe os alertas. Não há time de plantão em turnos, e o plano não finge que há.
+
+## Papéis
+
+| Papel | Quem | O que faz |
+|---|---|---|
+| Responsável pelo incidente | O fundador | Recebe o alerta ou o relato, classifica a severidade, conduz a resposta, decide contenção e recuperação, escreve a linha do tempo e a revisão |
+| Comunicação com o cliente | O fundador | Avisa o contato de segurança de cada cliente atingido, no prazo do contrato, e manda as atualizações |
+| Contato do cliente | A pessoa que o contrato nomeia (o encarregado de proteção de dados ou o contato de segurança), com os endereços e telefones de escalada | Recebe o aviso, decide o que a sua empresa comunica à autoridade e aos titulares, pede o que precisar da Niadra |
+| Provedores | AWS (suporte da conta) e o suporte da IA da Niadra | Acionados pela Niadra quando a causa está do lado deles |
+
+A Niadra é operadora: quem decide sobre a comunicação à autoridade de proteção de dados e aos titulares é a sua empresa, controladora. A Niadra dá os fatos, as contagens e a linha do tempo para essa decisão.
+
+## Severidades
+
+| Severidade | O que é | Exemplos | Primeira ação |
+|---|---|---|---|
+| **S1** | Confidencialidade ou integridade de dado de cliente atingidas, ou possivelmente atingidas | Leitura entre espaços; chave de fonte ou de dados exposta; cadeia de comprovantes que não confere com a cópia selada; dado pessoal encontrado em log; acesso não autorizado à conta da AWS ou à máquina | Conter em minutos: revogar chaves, cortar o acesso, preservar evidência. Avisar os clientes atingidos no prazo do contrato |
+| **S2** | API de dados ou Console fora do ar ou respondendo errado para mais de um cliente | Máquina ou banco fora; erros do servidor acima do limiar; outbox ou fila parados; comprovantes perdidos | Restabelecer o serviço; avisar os clientes atingidos se a indisponibilidade passar do que o contrato permite |
+| **S3** | Degradação sem perda de dado nem de confidencialidade | Latência do contexto ou da confirmação da ingestão acima do alvo; cópia de segurança que falhou; a IA da Niadra lenta ou fora, com a memória nova atrasando; orçamento de IA esgotado | Corrigir no próximo horário de trabalho; registrar |
+| **S4** | Suspeita sem impacto confirmado | Relato pelo canal de divulgação responsável; alerta que não se confirmou; tentativa barrada | Investigar; decidir se vira S1 a S3 |
+
+Um incidente sobe de severidade quando a investigação mostra mais do que o alerta dizia; nunca desce antes da revisão.
+
+## O que detecta
+
+- **Alertas automáticos.** As 21 regras em `deploy/k8s/charts/niadra/files/alerts.yaml`, com severidade `page` (chama agora: latência do contexto acima de 100 ms no p95, confirmação da ingestão acima de 80 ms, evento de objeto acima de 10 s, erros do servidor, outbox parado, entrada acumulada, fila com tarefas e sem consumidor, comprovantes perdidos, armazenamento de estado falhando, banco de espaço falhando) e `ticket` (memória pronta acima de 60 s, medição acima de 90 s, tarefas na fila de mortos, orçamento de IA esgotado, fila acumulada, cache falhando, deriva do diretório de espaços, banco de espaço órfão, comprovante de apagamento pendente, cópia de segurança que falhou ou envelheceu). O Alertmanager as envia ao tópico SNS `niadra-alerts`, com assinatura de e-mail confirmada, agrupadas por regra e severidade e repetidas a cada 4 horas enquanto durarem; um webhook opcional recebe as mesmas. As regras do kube-prometheus-stack, de severidade `critical` e `warning` (pod reiniciando em ciclo, implantação sem as réplicas pedidas, alvo de métricas fora, disco e memória do nó), seguem o mesmo caminho.
+- **A conferência da cadeia de comprovantes.** [`GET /v1/receipts/verify`](/api/receipts-verify) confere a cadeia de um espaço e a cópia selada fora do banco (`anchor_copy_matches`, `anchor_locked`); qualquer cliente com o papel `security` pode rodá-la, e uma divergência é S1.
+- **O canal de divulgação responsável.** [niadra.com/.well-known/security.txt](https://niadra.com/.well-known/security.txt): o formulário do Enterprise com o interesse "Segurança", lido pelo fundador.
+- **Avisos dos provedores.** A AWS avisa a conta por e-mail e pelo painel de saúde; a IA da Niadra, pela página de status do provedor dela e pelos erros nas chamadas, que a célula conta como indisponibilidade da IA.
+- **O relato de um cliente.** Pelo contato direto do contrato ou pelo formulário do Enterprise.
+
+O que não detecta sozinho, dito pelo nome: uma vulnerabilidade publicada depois do último merge numa dependência já em produção (a auditoria das dependências roda antes de cada merge, não por agenda), uma vulnerabilidade nos pacotes do sistema das imagens (não são varridos), e um uso indevido de credencial válida dentro dos escopos dela (aparece nos comprovantes, que o cliente e a Niadra podem ler, mas ninguém é alertado por ele).
+
+## Os passos
+
+1. **Receber e classificar.** O alerta ou o relato chega ao fundador. Em até uma hora em horário comercial, e assim que lido fora dele, ele abre o registro do incidente (hora, origem, o que se sabe) e dá a severidade.
+2. **Conter.** Para S1: revogar as chaves de fonte suspeitas pelo plano de controle (o corte vale em segundos); trocar as senhas e o segundo fator das pessoas envolvidas; girar os segredos da plataforma (`deploy/scripts/bootstrap-secrets.sh`) e, se a chave-mestra estiver em dúvida, mudar a política da chave no KMS e girar as chaves de dados dos espaços atingidos (`python -m niadra.entrypoints.keys_cli rotate --space`); se for preciso, parar a máquina (`deploy/scripts/pause.sh`), o que derruba a API e o Console e preserva disco, endereço e cópias. Para S2: restabelecer o serviço primeiro, com a versão anterior quando a nova for a causa (`helm rollback`, como faz o `on-ops.sh` sozinho depois de uma implantação que falha na verificação).
+3. **Preservar a evidência.** Os logs ficam 30 dias no CloudWatch Logs; os comprovantes e a cadeia ficam no banco e no bucket de auditoria (escrita única, cinco anos); o CloudTrail guarda as chamadas à conta. Antes de qualquer limpeza, o fundador exporta o que o incidente toca (logs do período, comprovantes dos espaços, a conferência da cadeia) para um prefixo do bucket da célula.
+4. **Investigar.** Qual foi o caminho, desde quando, que espaços, que titulares e que dados. A linhagem dos comprovantes responde "quem leu o quê" por espaço; o `context-use` e o histórico dizem o que cada agente recebeu.
+5. **Avisar os clientes atingidos** (abaixo).
+6. **Erradicar e recuperar.** Corrigir a causa por pull request, com teste que a reproduz, e implantar pelo caminho normal (`release` e a máquina); restaurar dados pelos runbooks quando for o caso (abaixo).
+7. **Encerrar e revisar** (abaixo).
+
+## Notificação ao cliente
+
+- **Prazo.** O do contrato. Sem prazo no contrato, a Niadra avisa em até 24 horas depois de confirmar um S1 ou um S2 que toque dados ou serviço da sua empresa, e antes disso quando o cliente precisa agir (uma chave dele exposta, por exemplo).
+- **Para quem.** O contato de segurança que o contrato nomeia, pelo canal que ele definiu (e-mail e, para S1, telefone).
+- **O que o primeiro aviso diz.** O que aconteceu, desde quando, que espaços e que classes de dado estão envolvidos, o que a Niadra já fez, o que o cliente precisa fazer, e quando vem a próxima atualização. O que ainda não se sabe é dito como "ainda não se sabe".
+- **Atualizações.** A cada 24 horas até o encerramento, ou antes quando algo muda.
+- **Relatório final.** Por escrito, em até 5 dias úteis depois do encerramento: linha do tempo, causa, dados e titulares atingidos (contagens e classes; os ids ficam disponíveis ao cliente pela API), o que foi corrigido e o que muda para evitar a repetição.
+
+O aviso à autoridade de proteção de dados e aos titulares é decisão da sua empresa, controladora; a Niadra entrega o que ela precisar para cumprir os prazos legais dela.
+
+## Recuperação
+
+| Cenário | Como volta | Onde está |
+|---|---|---|
+| Versão nova quebrou a produção | Volta à versão anterior; automática quando a verificação de ponta a ponta falha e a versão não mudou o esquema, senão por decisão do fundador | `deploy/scripts/on-ops.sh` |
+| Um espaço corrompido ou apagado por engano | Restaura só esse espaço a partir da cópia noturna, sem tocar os outros; os apagamentos que a cópia não conhece rodam de novo | `server/README.md`, "Runbook: restore one space" |
+| Banco inteiro perdido | Restaura a instância pela cópia automática do RDS (um dia de retenção hoje) ou cada banco pelas cópias noturnas (35 dias) | `deploy/README.md`, "Databases" |
+| Máquina ou zona perdida | Recria a stack pelo template e implanta a versão publicada; o endereço fixo e o disco sobrevivem à máquina | `deploy/scripts/stack.sh`, `deploy.sh` |
+| Um conjunto de workers parado | O Kubernetes reinicia o pod sozinho; se ele não volta, reiniciar a implantação do conjunto. Escrita e leitura seguem respondendo, e a entrada e as filas esvaziam quando o consumidor volta, sem passo manual | `deploy/README.md`, "When a worker pool or the database stops" |
+| Banco inalcançável | Conferir o estado da instância e o PgBouncer; quando o banco volta, as escritas que os SDKs repetiram com a mesma chave entram uma vez só, sem passo manual. Uma instância perdida segue a linha "Banco inteiro perdido" | `deploy/README.md`, "When a worker pool or the database stops" |
+| Chave de dados de um espaço em dúvida | Gira a chave (nova versão; as linhas antigas continuam abrindo com a delas) | `niadra.entrypoints.keys_cli rotate --space` |
+
+O tempo de recuperação na produção não foi medido; a restauração das cópias é testada todo domingo pelo job da noite. Os dois cenários do meio da tabela foram medidos numa célula local (abaixo).
+
+## Exercício técnico de 30/09/2026
+
+Em 30/09/2026, um exercício técnico deste plano rodou numa célula local, com dados sintéticos: não na produção, sem cliente, e sem o fundador, conduzido por um agente de código seguindo os passos acima. Dois cenários, com tráfego contínuo de escrita e leitura:
+
+- **Os workers mortos por 60 s.** Escrita e leitura seguiram respondendo; a entrada e as filas esvaziaram até 5 s depois da volta dos workers, e uma conversa fechada durante a falha virou memória 17 s depois. Nenhum evento confirmado perdido ou duplicado (598 de 598).
+- **O banco inalcançável por 60 s.** Nenhuma escrita confirmada durante a falha, e as leituras que precisavam do banco falharam; a primeira escrita foi confirmada 1 s depois da volta. Nenhum evento confirmado perdido ou duplicado (483 de 483), inclusive os repetidos com a mesma chave.
+
+Os tempos são de uma máquina de desenvolvimento, não da região. O exercício achou três lacunas: nenhuma regra via uma fila sem consumidor (corrigido com a regra `QueueWithoutConsumer`, que vale depois da próxima implantação); uma queda do banco de menos de 10 minutos não chama ninguém; e uma leitura com o banco inalcançável responde 500 em vez de 503. As duas últimas estão em aberto. A revisão completa, com as linhas do tempo, o texto do aviso que teria ido ao cliente e os dados, está num relatório interno, disponível sob acordo de confidencialidade.
+
+## Depois do incidente
+
+Em até 5 dias úteis depois do encerramento, o fundador escreve a revisão: a linha do tempo, a causa, o que funcionou e o que não funcionou na detecção e na resposta, e as mudanças, cada uma com um pull request ou uma tarefa datada. Quando a causa foi um defeito, um teste que o reproduz entra na suíte antes da correção. Quando a causa foi um processo, o processo muda nesta página. Os clientes atingidos recebem a revisão; os demais recebem um resumo quando a mudança os toca.
+
+## Limites deste plano
+
+- Uma pessoa. Fora do horário comercial, o tempo até a primeira ação é o tempo até o fundador ler o alerta; os alertas se repetem a cada 4 horas até serem resolvidos, e chegam por e-mail.
+- Sem teste de invasão. O único exercício do plano foi técnico, numa célula local (acima); nenhum exercício na produção nem com a pessoa de plantão.
+- Uma queda do banco de menos de 10 minutos não dispara alerta: os medidores de atraso dependem do banco e congelam durante a queda, e `ServerErrors` espera 10 minutos.
+- A auditoria de dependências roda antes de cada merge: um aviso publicado depois disso só aparece no merge seguinte, e as imagens não são varridas.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Modelo de ameaças" href="/security/threat-model">
+    o que cada controle cobre e o que fica de fora.
+  </Card>
+  <Card title="Questionário de segurança" href="/security/questionnaire">
+    as respostas às perguntas da revisão.
+  </Card>
+  <Card title="Comprovantes e auditoria" href="/concepts/receipts">
+    a trilha que a investigação lê.
+  </Card>
+  <Card title="Privacidade, apagamento e exportação" href="/concepts/privacy">
+    retenção, apagamento e o que fica protegido por desenho.
+  </Card>
+</CardGroup>

@@ -1,0 +1,112 @@
+---
+title: "Google ADK"
+description: "A memória do cliente nos callbacks de modelo de um agente do Google Agent Development Kit."
+---
+
+`NiadraADK` entrega `before_model` (injeta o contexto), `after_model` (registra a resposta) e `tools` (o kit do histórico como `BaseTool`s do ADK). Em TypeScript, `niadraAdk({ session })` devolve os dois callbacks e as ferramentas para o ADK para TypeScript.
+
+## Instalar
+
+<CodeGroup>
+```sh Python
+pip install 'niadra[google-adk]'   # google-adk 2.9 ou mais novo, abaixo da 3
+```
+```sh TypeScript
+npm install @niadra/sdk @google/adk   # @google/adk 2.1 ou mais novo, abaixo da 3, como peer dependency opcional
+```
+</CodeGroup>
+
+A integração em TypeScript está no `@niadra/sdk` no npm.
+
+## As cinco primitivas
+
+| Primitiva | Como o adaptador liga |
+|---|---|
+| Contexto | `before_model` acrescenta o contexto à instrução de sistema do pedido, depois da instrução do agente, e o `turn_block` como parte do usuário depois dos conteúdos |
+| Turnos | A mensagem do usuário da invocação é registrada uma vez (chaveada pelo id da invocação, por mais chamadas ao modelo que ela faça), e cada resposta final do modelo com o uso do Gemini |
+| Ferramentas | `tools`: `BaseTool`s do ADK cujas declarações levam os nomes, descrições e esquemas do kit, amarradas ao cliente |
+| Verificação | `conversation.verify()` antes de rodar |
+| Transbordo | Uma chamada `transfer_to_agent` na resposta do modelo registra `handoff("agent")`; `transferred_to_human()` registra a transferência para uma pessoa |
+
+## Exemplo mínimo
+
+```python
+"""A Google ADK agent with the customer's memory in its model callbacks."""
+
+import asyncio
+
+from google.adk.agents import LlmAgent
+from google.adk.runners import InMemoryRunner
+from google.genai import types
+
+from niadra import AsyncNiadra, phone
+from niadra.integrations.google_adk import NiadraADK
+
+niadra = AsyncNiadra(channel="chat")
+
+
+async def main() -> None:
+    memory = NiadraADK(niadra.conversation("thread-81", subject=phone("+5511912345678")))
+    agent = LlmAgent(
+        name="support",
+        model="gemini-2.5-flash",
+        instruction="You are Acme's agent.",
+        tools=memory.tools,
+        before_model_callback=memory.before_model,
+        after_model_callback=memory.after_model,
+    )
+    runner = InMemoryRunner(agent=agent, app_name="acme")
+    session = await runner.session_service.create_session(app_name="acme", user_id="marina")
+    message = types.Content(role="user", parts=[types.Part(text="Where is my replacement lid?")])
+    async for event in runner.run_async(user_id="marina", session_id=session.id, new_message=message):
+        if event.is_final_response() and event.content:
+            print(event.content.parts[0].text)
+    await niadra.close()
+
+
+asyncio.run(main())
+```
+
+O mesmo código está em `examples/google_adk_agent.py`.
+
+## Em TypeScript
+
+`niadraAdk({ session })` serve a uma definição de agente para todas as sessões do ADK: `session` é uma conversa fixa ou uma função do contexto (`userId`, `sessionId`, `state`), chamada uma vez por id de sessão do ADK. `beforeModelCallback` registra a mensagem do usuário de cada invocação uma vez e acrescenta o contexto depois da sua instrução em `systemInstruction` e o `turn_block` como parte de texto do último conteúdo do usuário; o ADK remonta o pedido a partir dos eventos da sessão a cada chamada, então nada disso entra na sessão. `afterModelCallback` registra a resposta final com o `usageMetadata` e uma chamada `transfer_to_agent` como transbordo entre agentes; respostas parciais (em stream) e chamadas de ferramenta não registram nada. `tools` declara os esquemas JSON do kit (`parametersJsonSchema`) e encontra o cliente no contexto da ferramenta, nunca nos argumentos do modelo. Dê o mesmo `...memory` aos subagentes.
+
+```typescript
+import { LlmAgent } from "@google/adk";
+import { Niadra, handles } from "@niadra/sdk";
+import { niadraAdk } from "@niadra/sdk/google-adk";
+
+const niadra = new Niadra();
+const memory = niadraAdk({
+  session: (context) => niadra.conversation({ subject: handles.appUserId(context.userId), channel: "web_chat", conversation_id: context.sessionId }),
+});
+// `...memory` sets `tools`, `beforeModelCallback` and `afterModelCallback`.
+const support = new LlmAgent({ name: "support", model: "gemini-2.5-flash", instruction: "You are Acme's support agent.", ...memory });
+```
+
+## Memória do agente
+
+`NiadraADK(conversation, agent_memory=True)` põe as notas do próprio agente antes do contexto do cliente e acrescenta as duas ferramentas. Veja [Memória do agente](/concepts/agent-memory).
+
+## Registros de turno
+
+Com a funcionalidade `turns` ligada no espaço (ela vem ligada), os callbacks de agente e de ferramenta do adaptador, com `turns=True` em Python e `turns: true` em TypeScript, gravam cada execução como um [registro de turno](/concepts/turn-records), com cada chamada de ferramenta pelo id do provedor e cada chamada de modelo com os tokens; um subagente ou um `AgentTool` abre um subturno. Num [replay](/guides/replay-in-ci), as ferramentas do ADK respondem do registro nas duas linguagens. Um turno nunca espera pela Niadra e nunca repete o texto da conversa.
+
+## Limites
+
+- Se o agente já tem callbacks, passe listas: o ADK roda todos em ordem.
+- Nada aqui derruba a invocação: sem contexto, o pedido segue com a instrução do agente.
+- Testado contra `google-adk` 2.9 com o modelo substituído por um fake e a Niadra no emulador; em TypeScript, contra `@google/adk` 2.1.0, com um `InMemoryRunner` real e subagentes sobre um modelo roteirizado.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Google GenAI" href="/integrations/google-genai">
+    o `wrap()` do cliente, para quem não usa o ADK.
+  </Card>
+  <Card title="Navegação do histórico" href="/concepts/history">
+    as três ferramentas que o agente recebe.
+  </Card>
+</CardGroup>

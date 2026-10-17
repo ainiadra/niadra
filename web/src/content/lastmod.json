@@ -1,0 +1,538 @@
+{
+  "/": {
+    "hash": "b71bae064aa96884",
+    "lastmod": "2026-10-02T15:05:27Z"
+  },
+  "/benchmark": {
+    "hash": "7fe0c438de092b4e",
+    "lastmod": "2026-10-02T17:43:29Z"
+  },
+  "/blog": {
+    "hash": "4229be6f60466737",
+    "lastmod": "2026-10-08T13:52:47Z"
+  },
+  "/blog/a-memoria-tinha-a-resposta-erro-da-memoria-ou-do-modelo": {
+    "hash": "b5a051860e60e0cd",
+    "lastmod": "2026-10-08T13:52:47Z"
+  },
+  "/blog/atendimento-whatsapp-primeiro-com-agentes-de-ia": {
+    "hash": "c2fccf17f5a1fac9",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/blog/como-agentes-de-fornecedores-diferentes-compartilham-o-historico": {
+    "hash": "99ef0d2e22076c2d",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/blog/como-evitar-que-o-agente-de-ia-prometa-e-esqueca": {
+    "hash": "43f4b5e5affc8136",
+    "lastmod": "2026-10-08T13:52:47Z"
+  },
+  "/blog/como-manter-o-contexto-da-ligacao-para-o-whatsapp": {
+    "hash": "862eaa0820b8e710",
+    "lastmod": "2026-10-02T03:16:36Z"
+  },
+  "/blog/como-reconhecer-o-mesmo-cliente-em-todos-os-canais": {
+    "hash": "7932f3ebca9512cb",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/blog/como-reduzir-o-custo-de-tokens-de-agentes-de-ia": {
+    "hash": "674e99e5cf1d05d0",
+    "lastmod": "2026-10-16T23:40:10Z"
+  },
+  "/blog/como-saber-se-o-agente-de-ia-usou-o-contexto": {
+    "hash": "39dbff87cecdf450",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/blog/construir-memoria-de-agentes-em-casa-ou-usar-plataforma": {
+    "hash": "d6e0d4c794690370",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/blog/conversas-que-ninguem-encerra-quando-a-memoria-deve-aprender": {
+    "hash": "3feed4da47a0f8ab",
+    "lastmod": "2026-10-08T13:52:47Z"
+  },
+  "/blog/dez-testes-antes-de-por-agentes-de-ia-de-varios-fornecedores-em-producao": {
+    "hash": "bd4667ec35b96ecf",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/blog/lgpd-e-seguranca-na-memoria-de-clientes-para-ia": {
+    "hash": "d7a12b1e3fb2a714",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/blog/mem0-zep-ou-letta-memoria-para-agentes-de-atendimento": {
+    "hash": "f760c4aa62571149",
+    "lastmod": "2026-10-01T15:26:23Z"
+  },
+  "/blog/memoria-de-agente-procedimentos-nao-dados-do-cliente": {
+    "hash": "319e661ffddec75d",
+    "lastmod": "2026-10-08T20:32:04Z"
+  },
+  "/blog/memoria-dentro-da-plataforma-de-agentes-ou-memoria-neutra": {
+    "hash": "d770285ae4dcb264",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/blog/memoria-para-agentes-de-ia-internos": {
+    "hash": "f4cb647f02e41294",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/blog/memoria-para-agentes-de-ia-sem-configuracao": {
+    "hash": "bce18b2d34552ca5",
+    "lastmod": "2026-10-10T21:41:42Z"
+  },
+  "/blog/memoria-para-agentes-de-voz-o-orcamento-de-latencia": {
+    "hash": "6cf37f480b9d7108",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/blog/nao-fale-de-valores-com-a-minha-esposa-restricoes-por-pessoa": {
+    "hash": "86f2542fa92ecc73",
+    "lastmod": "2026-10-08T13:52:47Z"
+  },
+  "/blog/o-agente-de-ia-afirmou-o-que-nunca-consultou-dois-casos-publicos": {
+    "hash": "d1c6c5a43fadd018",
+    "lastmod": "2026-10-02T03:22:03Z"
+  },
+  "/blog/o-banco-central-dos-emirados-tirou-o-whatsapp-dos-bancos": {
+    "hash": "205682090b0d5f83",
+    "lastmod": "2026-10-01T15:28:27Z"
+  },
+  "/blog/o-que-a-regulacao-de-2026-pede-de-um-agente-de-ia-que-fala-com-o-cliente": {
+    "hash": "652d7ab8186cad0f",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/blog/o-que-e-memoria-omnichannel-para-agentes-de-ia": {
+    "hash": "4b2963d24619b239",
+    "lastmod": "2026-10-02T03:16:36Z"
+  },
+  "/blog/os-90-dias-da-memoria-semana-a-semana": {
+    "hash": "8139129d1ae0c6d1",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/blog/por-que-a-identidade-entre-canais-quebra-a-memoria-do-agente": {
+    "hash": "f3c89eeb0200e6c3",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/blog/por-que-o-agente-fala-o-preco-errado": {
+    "hash": "b0792ac5848964a1",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/blog/quando-dar-uma-pendencia-como-resolvida": {
+    "hash": "7230a826a369d3d8",
+    "lastmod": "2026-10-08T13:52:47Z"
+  },
+  "/blog/quando-o-numero-de-telefone-muda-de-dono": {
+    "hash": "7df9651613c1441b",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/blog/quanto-custa-o-cliente-contar-a-mesma-historia-em-cada-canal": {
+    "hash": "86ab5ec4ab364efb",
+    "lastmod": "2026-10-01T15:28:27Z"
+  },
+  "/blog/quanto-deve-custar-a-memoria-por-conversa": {
+    "hash": "bcd7514a016d81df",
+    "lastmod": "2026-10-16T23:40:10Z"
+  },
+  "/blog/twilio-servicenow-aws-e-google-lancaram-memoria-para-agentes-de-ia": {
+    "hash": "0cabf8ab4069a0ff",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/comparativo": {
+    "hash": "f5cacad7cd31770d",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/en": {
+    "hash": "acca4e791e18706d",
+    "lastmod": "2026-10-02T15:05:27Z"
+  },
+  "/en/benchmark": {
+    "hash": "8e92a706959746a4",
+    "lastmod": "2026-10-02T17:43:29Z"
+  },
+  "/en/blog": {
+    "hash": "3a95d4858d416c8c",
+    "lastmod": "2026-10-08T13:52:47Z"
+  },
+  "/en/blog/agent-memory-procedures-not-customer-data": {
+    "hash": "fabdc0b79fc83efa",
+    "lastmod": "2026-10-08T20:32:04Z"
+  },
+  "/en/blog/build-or-buy-memory-for-ai-agents": {
+    "hash": "dfc130e51b1c9f48",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/en/blog/conversations-nobody-ends-when-agent-memory-should-learn": {
+    "hash": "5695957ffe6f07b2",
+    "lastmod": "2026-10-08T13:52:47Z"
+  },
+  "/en/blog/did-the-memory-have-the-answer-memory-error-or-model-error": {
+    "hash": "b7f00c934a01964f",
+    "lastmod": "2026-10-08T13:52:47Z"
+  },
+  "/en/blog/dont-discuss-amounts-with-my-wife-per-person-restrictions": {
+    "hash": "af3d2aa28994f234",
+    "lastmod": "2026-10-08T13:52:47Z"
+  },
+  "/en/blog/how-ai-agents-from-different-vendors-share-customer-history": {
+    "hash": "a4f56dbcaab8aa32",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/en/blog/how-to-cut-token-costs-for-ai-agents": {
+    "hash": "7f08f50f7a981a03",
+    "lastmod": "2026-10-02T03:16:36Z"
+  },
+  "/en/blog/how-to-keep-context-from-voice-call-to-whatsapp": {
+    "hash": "9dcc61ae48d0eee5",
+    "lastmod": "2026-10-02T03:16:36Z"
+  },
+  "/en/blog/how-to-know-whether-your-ai-agent-used-the-context": {
+    "hash": "676e4e191abc07b2",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/en/blog/how-to-recognize-the-same-customer-across-channels": {
+    "hash": "24b7d12838e019cb",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/en/blog/how-to-stop-your-ai-agent-promising-and-forgetting": {
+    "hash": "03d247b1c8e4b32b",
+    "lastmod": "2026-10-08T13:52:47Z"
+  },
+  "/en/blog/mem0-vs-zep-vs-letta-memory-for-customer-facing-agents": {
+    "hash": "33650a99c48dab86",
+    "lastmod": "2026-10-01T15:26:23Z"
+  },
+  "/en/blog/memory-for-ai-agents-with-no-configuration": {
+    "hash": "2ef720ef9433d8c1",
+    "lastmod": "2026-10-10T21:41:42Z"
+  },
+  "/en/blog/memory-for-internal-ai-agents": {
+    "hash": "157a52a6feea23fc",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/en/blog/memory-for-voice-agents-the-latency-budget": {
+    "hash": "9685d92353a74371",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/en/blog/memory-inside-the-agent-platform-or-neutral-memory": {
+    "hash": "895bb34d3c8f0aee",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/en/blog/security-and-gdpr-for-customer-memory-in-ai": {
+    "hash": "02fddc13fb26810c",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/blog/ten-tests-before-ai-agents-from-several-vendors-go-live": {
+    "hash": "407f1db855d602e7",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/en/blog/the-90-day-rollout-of-shared-memory-week-by-week": {
+    "hash": "16aaa2b76370a9be",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/en/blog/the-ai-agent-stated-what-it-never-checked-two-public-cases": {
+    "hash": "f53bc11f9d1e3a01",
+    "lastmod": "2026-10-02T03:22:03Z"
+  },
+  "/en/blog/the-uae-central-bank-took-whatsapp-away-from-its-banks": {
+    "hash": "1327e790c836c22d",
+    "lastmod": "2026-10-01T15:28:27Z"
+  },
+  "/en/blog/twilio-servicenow-aws-and-google-shipped-memory-for-ai-agents": {
+    "hash": "fd5f5e6a025dba60",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/en/blog/what-2026-regulation-asks-of-an-ai-agent-that-talks-to-customers": {
+    "hash": "1e3c26105d9a12f7",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/en/blog/what-is-omnichannel-memory-for-ai-agents": {
+    "hash": "d5ee1818a0b68701",
+    "lastmod": "2026-10-02T03:16:36Z"
+  },
+  "/en/blog/what-it-costs-when-the-customer-tells-the-same-story-on-every-channel": {
+    "hash": "39b6fe8ecd18bd4f",
+    "lastmod": "2026-10-01T15:28:27Z"
+  },
+  "/en/blog/what-memory-should-cost-per-conversation": {
+    "hash": "8cbe6234f3fd2af4",
+    "lastmod": "2026-10-16T23:40:10Z"
+  },
+  "/en/blog/whatsapp-first-customer-service-with-ai-agents": {
+    "hash": "f280b9b6a32afdc5",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/blog/when-a-phone-number-changes-hands": {
+    "hash": "d221a0087dc76eb7",
+    "lastmod": "2026-10-01T15:20:58Z"
+  },
+  "/en/blog/when-to-mark-a-pending-item-as-done": {
+    "hash": "f2f10901cd11f6a0",
+    "lastmod": "2026-10-08T13:52:47Z"
+  },
+  "/en/blog/why-cross-channel-identity-breaks-agent-memory": {
+    "hash": "ba0c0a9dba39cea0",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/blog/why-the-agent-quotes-the-wrong-price": {
+    "hash": "db73c6dcb063c6ce",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/comparativo": {
+    "hash": "c42913dfdb77fee3",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/en/enterprise": {
+    "hash": "38240e32701c05c5",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/integracoes": {
+    "hash": "621991424064cac2",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/integracoes/ai-sdk": {
+    "hash": "ecc282f4eaef4e37",
+    "lastmod": "2026-10-02T03:27:24Z"
+  },
+  "/en/integracoes/crewai": {
+    "hash": "f7307a04db411884",
+    "lastmod": "2026-10-02T03:27:24Z"
+  },
+  "/en/integracoes/elevenlabs": {
+    "hash": "d34971a10adafac6",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/integracoes/langchain": {
+    "hash": "a8d1d76430f3aef3",
+    "lastmod": "2026-10-02T03:27:24Z"
+  },
+  "/en/integracoes/langgraph": {
+    "hash": "146257ef449730a0",
+    "lastmod": "2026-10-02T03:27:24Z"
+  },
+  "/en/integracoes/livekit": {
+    "hash": "29c0329093035c47",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/integracoes/n8n": {
+    "hash": "ea3668a422ad2fe6",
+    "lastmod": "2026-10-02T03:27:24Z"
+  },
+  "/en/integracoes/openai-agents": {
+    "hash": "9ae2aca839e89a69",
+    "lastmod": "2026-10-02T03:27:24Z"
+  },
+  "/en/integracoes/pipecat": {
+    "hash": "c22776bab05c8b6f",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/integracoes/retell": {
+    "hash": "81fa459ce7552616",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/integracoes/twilio": {
+    "hash": "47cc7d747745c58b",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/integracoes/vapi": {
+    "hash": "a07bffd9bfe17b42",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/integracoes/whatsapp": {
+    "hash": "c23179fa49e10c6c",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/preco": {
+    "hash": "b89a72fde6cc0607",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/en/produtos": {
+    "hash": "1bf6c177d356370c",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/produtos/avisos": {
+    "hash": "82de1fda16bab0c5",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/produtos/conferencia": {
+    "hash": "f2f9346769ce97ea",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/produtos/console": {
+    "hash": "5a19c234f6287461",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/en/produtos/contexto": {
+    "hash": "d15a3c1bb9048483",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/produtos/coordenacao": {
+    "hash": "88ae298e62220f4f",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/produtos/estado": {
+    "hash": "1d077015bbc20573",
+    "lastmod": "2026-10-08T20:02:23Z"
+  },
+  "/en/produtos/historico": {
+    "hash": "9b5fec23b9eb5aac",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/produtos/identidade": {
+    "hash": "cf948ebcfcde5650",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/produtos/medicao": {
+    "hash": "1de03140362ae0d6",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/produtos/memoria": {
+    "hash": "f78cfb17aac7dd33",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/produtos/padroes": {
+    "hash": "a0e0c93e9796fcaf",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/en/produtos/registro": {
+    "hash": "e0ec4da12d9721c5",
+    "lastmod": "2026-10-08T20:32:04Z"
+  },
+  "/en/produtos/sistemas": {
+    "hash": "6bbfc2917fd60a98",
+    "lastmod": "2026-10-08T20:02:23Z"
+  },
+  "/en/recursos": {
+    "hash": "7b15c44cdb07b798",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/en/sobre": {
+    "hash": "df8a4e93ebd8c2b0",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/enterprise": {
+    "hash": "4878996927fe367a",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/integracoes": {
+    "hash": "02ed5d4a6b9f7592",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/integracoes/ai-sdk": {
+    "hash": "8e4beceb3c42078d",
+    "lastmod": "2026-10-02T03:27:24Z"
+  },
+  "/integracoes/crewai": {
+    "hash": "29f470b0849b990e",
+    "lastmod": "2026-10-02T03:27:24Z"
+  },
+  "/integracoes/elevenlabs": {
+    "hash": "126238025ac9f011",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/integracoes/langchain": {
+    "hash": "e27caf3c87e93313",
+    "lastmod": "2026-10-02T03:27:24Z"
+  },
+  "/integracoes/langgraph": {
+    "hash": "d5bc4203bb884a52",
+    "lastmod": "2026-10-02T03:27:24Z"
+  },
+  "/integracoes/livekit": {
+    "hash": "4857ff7d0d9967ef",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/integracoes/n8n": {
+    "hash": "8e06ebc29fd90b1a",
+    "lastmod": "2026-10-02T03:27:24Z"
+  },
+  "/integracoes/openai-agents": {
+    "hash": "676fb3dfc5289c44",
+    "lastmod": "2026-10-02T03:27:24Z"
+  },
+  "/integracoes/pipecat": {
+    "hash": "3e09ddcf4d6e3be8",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/integracoes/retell": {
+    "hash": "6bfdb16ec3b17758",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/integracoes/twilio": {
+    "hash": "a77fc2d1068fb7b8",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/integracoes/vapi": {
+    "hash": "57d7bccd0713fa52",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/integracoes/whatsapp": {
+    "hash": "f18d8238f2e8adda",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/preco": {
+    "hash": "84f53919d8aac978",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/produtos": {
+    "hash": "fad8b8435bf02560",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/produtos/avisos": {
+    "hash": "96768e4c3665a533",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/produtos/conferencia": {
+    "hash": "4dc64a45ef78e8bd",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/produtos/console": {
+    "hash": "b2ba575d35ff2e11",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/produtos/contexto": {
+    "hash": "e727a91f0fae18f1",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/produtos/coordenacao": {
+    "hash": "c3e8e35016b73871",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/produtos/estado": {
+    "hash": "82be3decb49e4b33",
+    "lastmod": "2026-10-08T20:02:23Z"
+  },
+  "/produtos/historico": {
+    "hash": "a741a5c2963c28d8",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/produtos/identidade": {
+    "hash": "ea348b0eb9e60c8e",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/produtos/medicao": {
+    "hash": "2f9f2ea4c8650047",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/produtos/memoria": {
+    "hash": "3d449e901f4d4206",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/produtos/padroes": {
+    "hash": "01ec8e6a347c56d1",
+    "lastmod": "2026-10-02T14:59:31Z"
+  },
+  "/produtos/registro": {
+    "hash": "5c68d542d2b7d265",
+    "lastmod": "2026-10-08T20:32:04Z"
+  },
+  "/produtos/sistemas": {
+    "hash": "e0af124d391e794e",
+    "lastmod": "2026-10-08T20:02:23Z"
+  },
+  "/recursos": {
+    "hash": "18b7dfb6630c651a",
+    "lastmod": "2026-10-10T22:39:52Z"
+  },
+  "/sobre": {
+    "hash": "7857d1d6784eeb52",
+    "lastmod": "2026-10-02T14:59:31Z"
+  }
+}
